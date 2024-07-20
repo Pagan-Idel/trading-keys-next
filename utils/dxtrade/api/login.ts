@@ -20,9 +20,9 @@ const demoCreds: LoginRequest = {
 };
 
 const liveCreds: LoginRequest = {
-  username: '',
-  domain: '',
-  password: ''
+  username: '[redacted]',
+  domain: 'https://trade.gooeytrade.com/',
+  password: '[redacted]'
 };
 
 export const handleLogin = async (accountType: string) => {

@@ -25,7 +25,7 @@ const liveCreds: LoginRequest = {
   password: '[redacted]'
 };
 
-export const handleLogin = async (accountType: string) => {
+export const handleDXLogin = async (accountType: string) => {
   const accountEnv = localStorage.getItem('accountEnv');
   const apiEndpoint = '/api/dxtrade/login';
   const loginRequest = {

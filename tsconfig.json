@@ -7,7 +7,7 @@
     ],
     "module": "ESNext",
     "moduleResolution": "Node",
-    "jsx": "preserve",
+    "jsx": "preserve", // Ensures compatibility with React 17+
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

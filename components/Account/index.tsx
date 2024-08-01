@@ -1,8 +1,9 @@
 import { useState, useEffect, ChangeEvent } from 'react';
 import styled from 'styled-components';
 import Keyboard from '../Keyboard';
-import { accountInfo } from '../../utils/oanda/api';
-import { handleLogin } from '../../utils/dxtrade/api';
+import { handleOandaLogin } from '../../utils/oanda/api';
+import { handleDXLogin } from '../../utils/dxtrade/api';
+import { handleMTLogin } from '../../utils/match-trader/api';
 
 // Dark mode color variables
 const darkBackgroundColor = '#333333';
@@ -75,7 +76,7 @@ const InputLabel = styled.label`
   color: ${darkTextColor};
 `;
 
-const Account: React.FC = () => {
+const Account = () => {
   const [platform, setPlatform] = useState('');
   const [token, setToken] = useState<string>('');
   const [accountType, setAccountType] = useState<string>('demo');
@@ -104,9 +105,9 @@ const Account: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Check and set connected based on accountInfo data
+    // Check and set connected based on handleOandaLogin data
     if (platform == 'oanda' && isAccountSet && isTokenSet) {
-      accountInfo().then((data) => {
+      handleOandaLogin().then((data) => {
         if (!data.errorMessage) {
           setConnected(true);
         } else {
@@ -115,7 +116,7 @@ const Account: React.FC = () => {
       });
     } else if (platform == 'dxtrade' && isAccountSet ){ 
       console.log("We made it here");
-      handleLogin(accountType);
+      handleDXLogin(accountType);
     }
   }, [isAccountSet]);
 
@@ -193,6 +194,7 @@ const Account: React.FC = () => {
             <ButtonsContainer>
               <BlueButton onClick={() => setPlatform('oanda')}>Oanda</BlueButton>
               <BlueButton onClick={() => setPlatform('dxtrade')}>DxTrade</BlueButton>
+              <BlueButton onClick={() => setPlatform('match-trader')}>Match Trader</BlueButton>
             </ButtonsContainer>
           </>
         ) : (

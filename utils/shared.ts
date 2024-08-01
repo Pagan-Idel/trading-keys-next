@@ -1,5 +1,5 @@
 import { OrderParameters } from '../../components/Keyboard';
-import { ACTION, INSTRUMENT, OpenTrade, Trade, accountInfo, currentPrice, openNow } from './oanda/api'; 
+import { ACTION, INSTRUMENT, OpenTrade, Trade, handleOandaLogin, currentPrice, openNow } from './oanda/api'; 
 
 export const pipIncrement: number = 0.0001;
 export const contractSize: number = 100000;
@@ -24,7 +24,7 @@ export const calculalateRisk = async (orderType: OrderParameters): Promise<RISK 
       takeProfit: "0",
       stopLoss: "0"
     };
-    const { account } = await accountInfo();
+    const { account } = await handleOandaLogin();
    // Check if the environment variable is set
    if (!account) {
     throw new Error("Token or AccountId is not set.");

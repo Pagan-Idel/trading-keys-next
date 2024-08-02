@@ -3,8 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { ACTION, TYPE, order, modifyTrade, closeTrade } from '../../utils/oanda/api';
 
-const buttonNames = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '0'];
-const riskPercentages = ['0.5', '1.0', '1.5', '2.0', '2.5', '3.0'];
+const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
 const functionNames = [
   '7 - SL UP',       // Case 7
   '8 - TP UP',       // Case 8

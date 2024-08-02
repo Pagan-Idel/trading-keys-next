@@ -25,8 +25,8 @@ const liveCreds: LoginRequest = {
   password: '[redacted]'
 };
 
-export const handleDXLogin = async (accountType: string) => {
-  const accountEnv = localStorage.getItem('accountEnv');
+export const handleDXLogin = async (accountType: string): Promise<void> => { 
+  
   const apiEndpoint = '/api/dxtrade/login';
   const loginRequest = {
     username: accountType === 'demo' ? demoCreds.username : liveCreds.username,
@@ -39,7 +39,7 @@ export const handleDXLogin = async (accountType: string) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accountenv': `${accountEnv}`
+        // 'Accountenv': `${accountEnv}`
       },
       body: JSON.stringify(loginRequest),
     });

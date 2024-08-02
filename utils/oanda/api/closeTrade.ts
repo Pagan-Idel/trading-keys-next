@@ -1,5 +1,5 @@
 import { ACTION, Trade } from ".";
-import { OrderParameters } from "../../../../components/Keyboard";
+import { OrderParameters } from "../../../components/Keyboard";
 import { recentTrade } from "../../shared";
 
 export interface TradeCloseResponse {

@@ -1,37 +1,84 @@
-export interface LoginRequest {
-    username: string;
-    domain: string;
+export interface RequestMTBody {
+    email: string;
+    password: string;
+    brokerId: string;
+  }
+  
+  export interface LoginMTResponse {
+    email: string;
+    token: string;
+    accounts: Account[];
+  }
+  
+  export interface Account {
+    tradingAccountId: string;
+    offer: Offer;
+    tradingApiToken: string;
+    branchUuid: string;
+    created: string;
+    uuid: string;
+  }
+  
+  export interface Offer {
+    uuid: string;
+    partnerId: string;
+    created: string;
+    name: string;
+    currency: string;
+    description: string;
+    initialDeposit: number;
+    demo: boolean;
+    hidden: boolean;
+    branch: Branch;
+    system: System;
+    moneyManager: null; // or appropriate type if it can be other than null
+    displayMMInLeaderboard: boolean;
+    leverage: number;
+    verificationRequired: boolean;
+    tradingAccountAutoCreation: boolean;
+    recordNumber: number;
+    mt5MamSystemType: null; // or appropriate type if it can be other than null
+    offerRedirect: string;
+  }
+  
+  export interface Branch {
+    uuid: string;
+  }
+  
+  export interface System {
+    demo: boolean;
+    name: string;
+    uuid: string;
+    active: boolean;
+    systemType: string;
+    tradingApiDomain: string;
+  }
+  
+  export interface ErrorMTResponse {
+    errorMessage: string;
+  }
+
+  export interface LoginMTRequest {
+    email: string;
     password: string;
   }
   
-  export interface LoginResponse {
-    token: string;
-    expires: string;
-  }
-  
-  export interface ErrorResponse {
-    errorMessage: string;
-  }
-  
-  const demoCreds: LoginRequest = {
-    username: '[redacted]',
-    domain: 'https://trade.gooeytrade.com/',
+  const demoCreds: LoginMTRequest = {
+    email: '[redacted]',
     password: '[redacted]'
   };
   
-  const liveCreds: LoginRequest = {
-    username: '[redacted]',
-    domain: 'https://trade.gooeytrade.com/',
-    password: '[redacted]'
+  const liveCreds: LoginMTRequest = {
+    email: '',
+    password: ''
   };
   
-  export const handleMTLogin = async (accountType: string) => {
-    const accountEnv = localStorage.getItem('accountEnv');
-    const apiEndpoint = '/api/dxtrade/login';
-    const loginRequest = {
-      username: accountType === 'demo' ? demoCreds.username : liveCreds.username,
-      domain:  accountType === 'demo' ? demoCreds.domain : liveCreds.domain,
-      password:  accountType === 'demo' ? demoCreds.password : liveCreds.password,
+  export const handleMTLogin = async (accountType: string): Promise<LoginMTResponse | ErrorMTResponse> => {
+    const apiEndpoint = '/api/match-trader/login';
+    const loginRequest: RequestMTBody = {
+      email: accountType === 'demo' ? demoCreds.email : liveCreds.email,
+      password: accountType === 'demo' ? demoCreds.password : liveCreds.password,
+      brokerId: '1',
     };
   
     try {
@@ -39,20 +86,39 @@ export interface LoginRequest {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accountenv': `${accountEnv}`
+          'Accept': 'application/json',
         },
         body: JSON.stringify(loginRequest),
       });
   
+      const rawResponseText = await response.text();
+      console.log('Raw response:', rawResponseText);
+  
       if (!response.ok) {
-        const errorResponse = await response.json();
+        let errorResponse: ErrorMTResponse;
+        try {
+          errorResponse = JSON.parse(rawResponseText);
+        } catch (e) {
+          console.error('Error parsing error response as JSON:', e);
+          throw new Error(`Error: ${rawResponseText}`);
+        }
         console.error('Login failed:', errorResponse.errorMessage);
-        return;
+        return errorResponse;
       }
   
-      const data = await response.json();
+      let data: LoginMTResponse;
+      try {
+        data = JSON.parse(rawResponseText);
+      } catch (e) {
+        console.error('Error parsing success response as JSON:', e);
+        throw new Error(`Error: ${rawResponseText}`);
+      }
+  
       console.log('Login successful', data);
+      return data;
     } catch (error) {
       console.error('An error occurred during login:', error);
+      return { errorMessage: 'An unknown error occurred during login' } as ErrorMTResponse;
     }
   };
+  

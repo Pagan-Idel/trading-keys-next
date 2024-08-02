@@ -3,7 +3,7 @@ import { NextApiRequest, NextApiResponse } from 'next';
 
 export interface LoginRequest {
   username: string;
-  domain: string;
+  broker: string;
   password: string;
 }
 
@@ -22,15 +22,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
-
-  const accountEnv: string = req.headers['accountenv'] as string;
+  const hostname = "https://mtr.gooeytrade.com";
   const credentials: LoginRequest = req.body;
-  const api: string = "/dxweb/rest/login";
+  const api: string = "/manager/co-login";
   try {
-    const response = await fetch(accountEnv + api, {
+    const response = await fetch(hostname + api, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Accept': 'application/json'
       },
       body: JSON.stringify(credentials)
     });
@@ -44,7 +44,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const responseData: LoginResponse = await response.json();
-    console.log(responseData);
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

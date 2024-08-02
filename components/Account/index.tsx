@@ -81,7 +81,7 @@ const Account = () => {
   const [token, setToken] = useState<string>('');
   const [accountType, setAccountType] = useState<string>('');
   const [isLoginSuccessful, setIsLoginSuccessful] = useState<boolean>(false);
-  const [loginMessage, setLoginMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   const handlePlatformChange = () => {
     localStorage.removeItem('token');
@@ -91,6 +91,7 @@ const Account = () => {
     setPlatform('');
     setAccountType('');
     setToken('');
+    setIsLoginSuccessful(false);
   };
   
   const handleTokenInput = (event: ChangeEvent<HTMLInputElement>) => {
@@ -103,26 +104,55 @@ const Account = () => {
     if (platform === 'oanda') {
       localStorage.setItem('token', token);
     }
-    if (platform == 'oanda' && accountType && token !== '') {
+    if (platform == 'oanda' && accountType !== '' && token !== '') {
       handleOandaLogin().then((data) => {
         if (!data.errorMessage) {
           setIsLoginSuccessful(true);
-          setLoginMessage("Logged In Succesful");
+          setMessage("Logged In Succesful");
           setTimeout(() => {
-            setLoginMessage(null);
+            setMessage(null);
           }, 3000);
         } else {
           setIsLoginSuccessful(false);
-          setLoginMessage("Error Logging In");
+          setMessage("Error Logging In");
           setTimeout(() => {
-            setLoginMessage(null);
+            setMessage(null);
           }, 3000);
         }
       });
-    } else if (platform == 'dxtrade' && accountType !== '' && accountType ){ 
-      handleDXLogin(accountType);
-    } else if (platform == 'match-trader' && accountType !== '' && accountType){ 
-      handleMTLogin(accountType);
+    } else if (platform == 'dxtrade' && accountType !== '' ){ 
+      // Support for DX API still needed.
+      // handleDXLogin(accountType).then((data) => {
+      //   if (!data.errorMessage) {
+      //     setIsLoginSuccessful(true);
+      //     setMessage("Logged In Succesful");
+      //     setTimeout(() => {
+      //       setMessage(null);
+      //     }, 3000);
+      //   } else {
+      //     setIsLoginSuccessful(false);
+      //     setMessage("Error Logging In");
+      //     setTimeout(() => {
+      //       setMessage(null);
+      //     }, 3000);
+      //   }
+      // });
+    } else if (platform == 'match-trader' && accountType !== ''){ 
+      handleMTLogin(accountType).then((data) => {
+        if ('token' in data) {
+          setIsLoginSuccessful(true);
+          setMessage("Logged In Successfully");
+          setTimeout(() => {
+            setMessage(null);
+          }, 3000);
+        } else {
+          setIsLoginSuccessful(false);
+          setMessage("Error Logging In: " + data.errorMessage);
+          setTimeout(() => {
+            setMessage(null);
+          }, 3000);
+        }
+      });
     }
   };
 
@@ -137,7 +167,7 @@ const Account = () => {
             <InputLabel htmlFor="platformSelect">Select Platform</InputLabel>
             <ButtonsContainer>
               <BlueButton onClick={() => setPlatform('oanda')}>Oanda</BlueButton>
-              <BlueButton onClick={() => setPlatform('dxtrade')}>DxTrade</BlueButton>
+              <BlueButton disabled={true} onClick={() => setPlatform('dxtrade')}>DxTrade</BlueButton>
               <BlueButton onClick={() => setPlatform('match-trader')}>Match Trader</BlueButton>
             </ButtonsContainer>
           </>
@@ -150,7 +180,7 @@ const Account = () => {
         {platform == 'oanda' && !isLoginSuccessful &&(
               <>
                 <br />
-                <InputLabel htmlFor="tokenInput">Input Token </InputLabel>
+                <InputLabel htmlFor="tokenInput">Token </InputLabel>
                 <Input
                   type="text"
                   id="tokenInput"
@@ -172,7 +202,7 @@ const Account = () => {
               </ButtonsContainer>
             </>
             )}
-            {accountType !== '' && (
+            {accountType !== '' && isLoginSuccessful == false && (
               <>
                 <ButtonsContainer>
                   <BlueButton onClick={() => setAccountType(accountType === 'live' ? 'demo' : 'live')}>
@@ -191,23 +221,23 @@ const Account = () => {
 
             {isLoginSuccessful ? (
               <>              
-                {loginMessage && (<div style={{ 
-                  backgroundColor: loginMessage?.includes('Error') ? '#333333' : 'green', 
+                {message && (<div style={{ 
+                  backgroundColor: message?.includes('Error') ? '#333333' : 'green', 
                   color: 'white', 
                   padding: '10px', 
                   borderRadius: '5px', 
                   margin: '10px 0' 
-                }}>{loginMessage}</div>)}
+                }}>{message}</div>)}
                 <Keyboard platform={platform} />
               </>
             ) : (<>              
-               {loginMessage && (<div style={{ 
-                  backgroundColor: loginMessage?.includes('Error') ? 'red' : '#333333', 
+               {message && (<div style={{ 
+                  backgroundColor: message?.includes('Error') ? 'red' : '#333333', 
                   color: 'white', 
                   padding: '10px', 
                   borderRadius: '5px', 
                   margin: '10px 0' 
-                }}>{loginMessage}</div>)}
+                }}>{message}</div>)}
           </> )}
       </Content>
     </Container>

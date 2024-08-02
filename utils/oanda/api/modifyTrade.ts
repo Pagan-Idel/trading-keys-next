@@ -1,4 +1,4 @@
-import { OrderParameters } from "../../../../components/Keyboard";
+import { OrderParameters } from "../../../components/Keyboard";
 import { pipIncrement, recentTrade } from "../../shared";
 import { OpenTrade, Trade, TradeById, openNow } from "./openNow";
 import { ACTION } from "./order";

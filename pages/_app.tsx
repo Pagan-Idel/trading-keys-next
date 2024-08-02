@@ -1,6 +1,5 @@
 // pages/_app.tsx
 import styled from 'styled-components';
-import { createGlobalStyle } from 'styled-components';
 import Account from '../components/Account';
 import type { AppProps } from 'next/app';
 

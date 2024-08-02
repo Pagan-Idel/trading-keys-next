@@ -1,5 +1,5 @@
 import { updateLanguageServiceSourceFile } from "typescript";
-import { OrderParameters } from "../../../../components/Keyboard";
+import { OrderParameters } from "../../../components/Keyboard";
 import { RISK, calculalateRisk } from "../../shared";
 import { OpenTrade, openNow } from "./openNow";
 

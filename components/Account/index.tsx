@@ -79,107 +79,51 @@ const InputLabel = styled.label`
 const Account = () => {
   const [platform, setPlatform] = useState('');
   const [token, setToken] = useState<string>('');
-  const [accountType, setAccountType] = useState<string>('demo');
-  const [isTokenSet, setIsTokenSet] = useState<boolean>(false);
-  const [isAccountSet, setIsAccountSet] = useState<boolean>(false);
-  const [tokenError, setTokenError] = useState<boolean>(false);
-  const [connected, setConnected] = useState<boolean>(false);
-
-  useEffect(() => {
-    // Check if token is present in localStorage
-    const storedToken = localStorage.getItem('token');
-    if (storedToken) {
-      setToken(storedToken);
-      setIsTokenSet(true);
-    }
-
-    // Check if accountEnv and accountId are present in localStorage
-    const storedAccountEnv = localStorage.getItem('accountEnv');
-    const storedAccountId = localStorage.getItem('accountId');
-    if (storedAccountEnv && storedAccountId && platform == 'oanda') {
-      setAccountType(storedAccountEnv === 'https://api-fxtrade.oanda.com' ? 'live' : 'demo');
-      setIsAccountSet(true);
-    } else if (platform == 'dxtrade') {
-     // TODO: what do we do with the local variables
-    }
-  }, []);
-
-  useEffect(() => {
-    // Check and set connected based on handleOandaLogin data
-    if (platform == 'oanda' && isAccountSet && isTokenSet) {
-      handleOandaLogin().then((data) => {
-        if (!data.errorMessage) {
-          setConnected(true);
-        } else {
-          setIsTokenSet(false);
-        }
-      });
-    } else if (platform == 'dxtrade' && isAccountSet ){ 
-      console.log("We made it here");
-      handleDXLogin(accountType);
-    }
-  }, [isAccountSet]);
+  const [accountType, setAccountType] = useState<string>('');
+  const [isLoginSuccessful, setIsLoginSuccessful] = useState<boolean>(false);
+  const [loginMessage, setLoginMessage] = useState<string | null>(null);
 
   const handlePlatformChange = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('platform');
+    localStorage.removeItem('accountType');
+    localStorage.removeItem('accountId');
     setPlatform('');
-    resetTokenInLocalStorage();
-    resetAccountInLocalStorage();
+    setAccountType('');
+    setToken('');
   };
   
-  const handleTokenChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleTokenInput = (event: ChangeEvent<HTMLInputElement>) => {
     setToken(event.target.value);
-    setTokenError(false);
   };
 
-  const setTokenToLocalStorage = () => {
-    if (token.trim() === '') {
-      setTokenError(true);
-      return;
-    }
-
-    localStorage.setItem('token', token.trim());
-    setIsTokenSet(true);
-  };
-
-  const resetTokenInLocalStorage = () => {
-    localStorage.removeItem('token');
-    setToken('');
-    setIsTokenSet(false);
-  };
-
-  const handleConnected = () => {
-    localStorage.removeItem('token');
-    setToken('');
-    setIsTokenSet(false);
-  };
-
-  const setAccountToLocalStorage = () => {
-    let env: string;
-    let accountId: string;
-
+  const handleLogin = () => {
+    localStorage.setItem('platform', platform);
+    localStorage.setItem('accountType', accountType);
     if (platform === 'oanda') {
-
-      env = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
-      localStorage.setItem('accountEnv', env);
-      accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
-      localStorage.setItem('accountId', accountId);
-      setIsAccountSet(true);
-    } else if (platform === 'dxtrade') {
-
-      env = accountType === 'live' ? 'https://dx.trade' : 'https://demo.dx.trade';
-      localStorage.setItem('accountEnv', env);
-      accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
-      localStorage.setItem('accountId', accountId);
-      setIsAccountSet(true);
+      localStorage.setItem('token', token);
     }
-
-  };
-
-  const resetAccountInLocalStorage = () => {
-    localStorage.removeItem('accountEnv');
-    localStorage.removeItem('accountId');
-    setAccountType('live');
-    setIsAccountSet(false);
+    if (platform == 'oanda' && accountType && token !== '') {
+      handleOandaLogin().then((data) => {
+        if (!data.errorMessage) {
+          setIsLoginSuccessful(true);
+          setLoginMessage("Logged In Succesful");
+          setTimeout(() => {
+            setLoginMessage(null);
+          }, 3000);
+        } else {
+          setIsLoginSuccessful(false);
+          setLoginMessage("Error Logging In");
+          setTimeout(() => {
+            setLoginMessage(null);
+          }, 3000);
+        }
+      });
+    } else if (platform == 'dxtrade' && accountType !== '' && accountType ){ 
+      handleDXLogin(accountType);
+    } else if (platform == 'match-trader' && accountType !== '' && accountType){ 
+      handleMTLogin(accountType);
+    }
   };
 
   return (
@@ -203,65 +147,68 @@ const Account = () => {
           </ButtonsContainer>
         )}
   
-        {platform && (
-          <>
-            {platform === 'oanda' && !isTokenSet && (
+        {platform == 'oanda' && !isLoginSuccessful &&(
               <>
-                <InputLabel htmlFor="tokenInput">Token = </InputLabel>
+                <br />
+                <InputLabel htmlFor="tokenInput">Input Token </InputLabel>
                 <Input
                   type="text"
                   id="tokenInput"
-                  placeholder="Enter token"
+                  placeholder="Type token"
                   value={token}
-                  onChange={handleTokenChange}
-                  style={{ border: tokenError ? '1px solid red' : '1px solid #e0e0e0' }}
+                  onChange={handleTokenInput}
+                  style={{ border: '1px solid #e0e0e0' }}
                 />
-                <ButtonsContainer>
-                  <BlueButton onClick={setTokenToLocalStorage}>Set Token</BlueButton>
-                </ButtonsContainer>
-              </>
-            )}
-            {platform === 'oanda' && isTokenSet && (
-              <>
-                <ButtonsContainer>
-                  <BlueButton onClick={resetTokenInLocalStorage}>Reset Token</BlueButton>
-                </ButtonsContainer>
               </>
             )}
   
-            {!isAccountSet && (
+            {platform !== '' && accountType == '' && !isLoginSuccessful  && (
               <>
-                <InputLabel htmlFor="accountType">Select Account Type</InputLabel>
-                <ButtonsContainer>
-                  <Select
-                    style={{ height: '40px' }}
-                    id="accountType"
-                    value={accountType}
-                    onChange={(e) => setAccountType(e.target.value)}
-                  >
-                    <option value="live">Live</option>
-                    <option value="demo">Demo</option>
-                  </Select>
-                  <BlueButton onClick={setAccountToLocalStorage}>Login</BlueButton>
-                </ButtonsContainer>
-              </>
+              <br />
+              <InputLabel htmlFor="login">Select Account</InputLabel>
+              <ButtonsContainer>
+                <BlueButton onClick={() => setAccountType('live')}>Live</BlueButton>
+                <BlueButton onClick={() => setAccountType('demo')}>Demo</BlueButton>
+              </ButtonsContainer>
+            </>
             )}
-            {isAccountSet && (
+            {accountType !== '' && (
               <>
                 <ButtonsContainer>
-                  <BlueButton onClick={resetAccountInLocalStorage}>
+                  <BlueButton onClick={() => setAccountType(accountType === 'live' ? 'demo' : 'live')}>
                     Switch To {accountType === 'live' ? 'Demo' : 'Live'} Account
                   </BlueButton>
                 </ButtonsContainer>
               </>
             )}
-            {isAccountSet && isTokenSet && connected ? (
+            {platform !== '' && accountType !== '' && !isLoginSuccessful && (
               <>
+                <ButtonsContainer>
+                  <BlueButton onClick={() => handleLogin()}>Login</BlueButton>
+                </ButtonsContainer>
+              </>
+            )}
+
+            {isLoginSuccessful ? (
+              <>              
+                {loginMessage && (<div style={{ 
+                  backgroundColor: loginMessage?.includes('Error') ? '#333333' : 'green', 
+                  color: 'white', 
+                  padding: '10px', 
+                  borderRadius: '5px', 
+                  margin: '10px 0' 
+                }}>{loginMessage}</div>)}
                 <Keyboard platform={platform} />
               </>
-            ) : null}
-          </>
-        )}
+            ) : (<>              
+               {loginMessage && (<div style={{ 
+                  backgroundColor: loginMessage?.includes('Error') ? 'red' : '#333333', 
+                  color: 'white', 
+                  padding: '10px', 
+                  borderRadius: '5px', 
+                  margin: '10px 0' 
+                }}>{loginMessage}</div>)}
+          </> )}
       </Content>
     </Container>
   );

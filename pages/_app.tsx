@@ -1,5 +1,6 @@
 // pages/_app.tsx
 import styled from 'styled-components';
+import { createGlobalStyle } from 'styled-components';
 import Account from '../components/Account';
 import type { AppProps } from 'next/app';
 
@@ -9,12 +10,15 @@ const Container = styled.div`
   align-items: center;
   background-color: black;
 `;
+
 const MyApp = ({ Component, pageProps }: AppProps) => {
   return (
-    <Container style={{height: '100vh'}}>
-      <h1>Trading Keys</h1>
-      <Account/>
-    </Container>
+    <>
+      <Container>
+        <h1>Trading Keys</h1>
+        <Account/>
+      </Container>
+    </>
   );
 }
 

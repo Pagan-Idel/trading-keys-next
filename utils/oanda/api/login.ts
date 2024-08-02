@@ -45,14 +45,16 @@ export interface AccountResponse {
 
 export const handleOandaLogin = async (): Promise<AccountResponse> => {
   const token = localStorage.getItem('token');
-  const accountId = localStorage.getItem('accountId');
-  const accountEnv = localStorage.getItem('accountEnv');
+  const accountType = localStorage.getItem('accountType');
+  const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
+  const accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
+
   // Check if the environment variable is set
-  if (!accountId || !token || !accountEnv) {
+  if (!accountId || !token || !accountType) {
     console.log("Token or AccountId is not set.");
   }
 
-  const api2: string = `${accountEnv}/v3/accounts`;
+  const api2: string = `${hostname}/v3/accounts`;
   const response2: Response = await fetch(api2, {
     headers: {
       'Content-Type': 'application/json',
@@ -62,7 +64,7 @@ export const handleOandaLogin = async (): Promise<AccountResponse> => {
   
   const responseData2: AccountResponse = await response2.json();
   console.log(responseData2);
-  const api: string = `${accountEnv}/v3/accounts/${accountId}`;
+  const api: string = `${hostname}/v3/accounts/${accountId}`;
   const response: Response = await fetch(api, {
     headers: {
       'Content-Type': 'application/json',

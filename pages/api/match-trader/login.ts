@@ -44,6 +44,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const responseData: LoginResponse = await response.json();
+    const cookies = response.headers.get('set-cookie');
+    res.setHeader('Set-Cookie', cookies);
+
+    console.log("Response Headers", response.headers);
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

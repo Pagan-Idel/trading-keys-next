@@ -4,6 +4,8 @@ import Keyboard from '../Keyboard';
 import { handleOandaLogin } from '../../utils/oanda/api';
 import { handleDXLogin } from '../../utils/dxtrade/api';
 import { handleMTLogin } from '../../utils/match-trader/api';
+import { cookies } from 'next/headers';
+import { marketWatchMT } from '../../utils/match-trader/api/market-watch';
 
 // Dark mode color variables
 const darkBackgroundColor = '#333333';
@@ -84,10 +86,8 @@ const Account = () => {
   const [message, setMessage] = useState<string | null>(null);
 
   const handlePlatformChange = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('platform');
-    localStorage.removeItem('accountType');
-    localStorage.removeItem('accountId');
+
+    localStorage.clear();
     setPlatform('');
     setAccountType('');
     setToken('');
@@ -145,6 +145,9 @@ const Account = () => {
           setTimeout(() => {
             setMessage(null);
           }, 3000);
+          marketWatchMT().then((data) => {
+            console.log(data);
+          })
         } else {
           setIsLoginSuccessful(false);
           setMessage("Error Logging In: " + data.errorMessage);

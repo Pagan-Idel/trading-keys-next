@@ -1,4 +1,4 @@
-export interface RequestMTBody {
+export interface LoginRequestBodyMT {
     email: string;
     password: string;
     brokerId: string;
@@ -75,7 +75,7 @@ export interface RequestMTBody {
   
   export const handleMTLogin = async (accountType: string): Promise<LoginMTResponse | ErrorMTResponse> => {
     const apiEndpoint = '/api/match-trader/login';
-    const loginRequest: RequestMTBody = {
+    const loginRequestBody: LoginRequestBodyMT = {
       email: accountType === 'demo' ? demoCreds.email : liveCreds.email,
       password: accountType === 'demo' ? demoCreds.password : liveCreds.password,
       brokerId: '1',
@@ -88,12 +88,11 @@ export interface RequestMTBody {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify(loginRequest),
+        body: JSON.stringify(loginRequestBody),
         credentials: 'include'
       });
   
       const rawResponseText = await response.text();
-      console.log('Raw response:', rawResponseText);
   
       if (!response.ok) {
         let errorResponse: ErrorMTResponse;
@@ -115,7 +114,7 @@ export interface RequestMTBody {
         throw new Error(`Error: ${rawResponseText}`);
       }
   
-      console.log('Login successful', data);
+      console.log('Login Successful');
 
     // Extract SYSTEM_UUID and store it in local storage
     const systemUuid = data.accounts[0]?.offer.system.uuid;

@@ -1,43 +1,36 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
-
-export interface LoginRequest {
-  username: string;
-  broker: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  token: string;
-  expires: string;
-}
+import { MarketWatchResponseMT } from '../../../utils/match-trader/api/market-watch';
 
 export interface ErrorResponse {
   errorMessage: string;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', ['POST']);
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', ['GET']);
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
-  if (!req.url?.includes('login')) {
+  if (!req.url?.includes('market-watch')) {
     res.status(404).end(`Path ${req.url} Not Found`);
     return;
   }
   const hostname = "https://mtr.gooeytrade.com";
-  const credentials: LoginRequest = req.body;
-  const api: string = "/manager/co-login";
+  const api: string = `/platformUrl/mtr-api/${req.headers.SYSTEM_UUID}/quotations`;
+  const parameters: string = req.headers.currency as string;
   try {
-    const response = await fetch(hostname + api, {
-      method: 'POST',
+    const response = await fetch(hostname + api + '?symbols=' + parameters, {
+      method: 'GET',
       headers: {
+        'Auth-trading-api': `${req.headers.TRADING_API_TOKEN}`,
+        'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify(credentials)
+        'co-auth': `${req.headers.coauth}`
+      }
     });
+
+    console.log(req.headers);
 
     if (!response.ok) {
       const errorResponse: ErrorResponse = await response.json();
@@ -47,24 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     }
 
-    const responseData: LoginResponse = await response.json();
-    const cookies = response.headers.get('set-cookie');
-    
-    if (cookies) {
-        // Split cookies by ','
-        const cookieArray = cookies.split(',');
-    
-        // Map over each cookie and remove the Domain attribute
-        const modifiedCookies = cookieArray.map(cookie => 
-            cookie.replace(/;\s*Domain=[^;]+/, '')
-        );
-    
-        // Combine modified cookies into a single header
-        const cookieHeader = modifiedCookies.join(',');
-    
-        // Set the modified cookies in the response header
-        res.setHeader('Set-Cookie', cookieHeader);
-    }
+    const responseData: MarketWatchResponseMT = await response.json();
 
     res.status(200).json(responseData);
   } catch (error: unknown) {

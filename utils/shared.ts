@@ -1,4 +1,4 @@
-import { OrderParameters } from '../../components/Keyboard';
+import { OrderParameters } from '../components/Keyboard';
 import { ACTION, INSTRUMENT, OpenTrade, Trade, handleOandaLogin, currentPrice, openNow } from './oanda/api'; 
 
 export const pipIncrement: number = 0.0001;
@@ -87,4 +87,15 @@ export const recentTrade = async (): Promise<Trade | undefined> => {
   } else {
   return mostRecentTrade;
   }
+}
+
+export const getCookieValue = (name: string) => {
+  const cookies = document.cookie.split(';');
+  for (const cookie of cookies) {
+      const [cookieName, cookieValue] = cookie.trim().split('=');
+      if (cookieName === name) {
+          return cookieValue;
+      }
+  }
+  return null;
 }

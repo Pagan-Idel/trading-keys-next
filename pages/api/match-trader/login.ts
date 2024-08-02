@@ -49,21 +49,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const responseData: LoginResponse = await response.json();
     const cookies = response.headers.get('set-cookie');
-    
+    console.log("Cookies - Next", cookies);
     if (cookies) {
-        // Split cookies by ','
-        const cookieArray = cookies.split(',');
+        // // Split cookies by ','
+        // const cookieArray = cookies.split(',');
     
-        // Map over each cookie and remove the Domain attribute
-        const modifiedCookies = cookieArray.map(cookie => 
-            cookie.replace(/;\s*Domain=[^;]+/, '')
-        );
+        // // Map over each cookie and remove the Domain attribute
+        // const modifiedCookies = cookieArray.map(cookie => 
+        //     cookie.replace(/;\s*Domain=[^;]+/, '')
+        // );
     
-        // Combine modified cookies into a single header
-        const cookieHeader = modifiedCookies.join(',');
+        // // Combine modified cookies into a single header
+        // const cookieHeader = modifiedCookies.join(',');
     
         // Set the modified cookies in the response header
-        res.setHeader('Set-Cookie', cookieHeader);
+        res.setHeader('Set-Cookie', cookies);
     }
 
     res.status(200).json(responseData);

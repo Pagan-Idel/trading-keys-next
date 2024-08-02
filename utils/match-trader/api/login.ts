@@ -116,17 +116,31 @@ export interface LoginRequestBodyMT {
   
       console.log('Login Successful');
 
-    // Extract SYSTEM_UUID and store it in local storage
-    const systemUuid = data.accounts[0]?.offer.system.uuid;
-    if (systemUuid) {
-      localStorage.setItem('SYSTEM_UUID', systemUuid);
-    }
+      // Extract and store cookies from response headers
+      const cookiesHeader = response.headers.get('set-cookie');
+      console.log("Cookies", cookiesHeader);
+      if (cookiesHeader) {
+          const cookies = cookiesHeader.split(',');
+          cookies.forEach(cookie => {
+              const [cookieName, cookieValue] = cookie.split('=');
+              if (cookieName && cookieValue) {
+                  // Remove any attributes like path, expires, etc.
+                  const cleanValue = cookieValue.split(';')[0].trim();
+                  localStorage.setItem(cookieName.trim(), cleanValue);
+              }
+          });
+      }
+      // Extract SYSTEM_UUID and store it in local storage
+      const systemUuid = data.accounts[0]?.offer.system.uuid;
+      if (systemUuid) {
+        localStorage.setItem('SYSTEM_UUID', systemUuid);
+      }
 
-    // Extract tradingApiToken and store it in local storage
-    const tradingApiToken = data.accounts[0]?.tradingApiToken;
-    if (tradingApiToken) {
-      localStorage.setItem('TRADING_API_TOKEN', tradingApiToken);
-    }
+      // Extract tradingApiToken and store it in local storage
+      const tradingApiToken = data.accounts[0]?.tradingApiToken;
+      if (tradingApiToken) {
+        localStorage.setItem('TRADING_API_TOKEN', tradingApiToken);
+      }
     
       return data;
     } catch (error) {

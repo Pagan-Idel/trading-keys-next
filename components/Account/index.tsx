@@ -145,9 +145,9 @@ const Account = () => {
           setTimeout(() => {
             setMessage(null);
           }, 3000);
-          marketWatchMT().then((data) => {
-            console.log(data);
-          })
+          // marketWatchMT().then((data) => {
+          //   console.log(data);
+          // })
         } else {
           setIsLoginSuccessful(false);
           setMessage("Error Logging In: " + data.errorMessage);

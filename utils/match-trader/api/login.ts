@@ -89,6 +89,7 @@ export interface RequestMTBody {
           'Accept': 'application/json',
         },
         body: JSON.stringify(loginRequest),
+        credentials: 'include'
       });
   
       const rawResponseText = await response.text();
@@ -115,6 +116,19 @@ export interface RequestMTBody {
       }
   
       console.log('Login successful', data);
+
+    // Extract SYSTEM_UUID and store it in local storage
+    const systemUuid = data.accounts[0]?.offer.system.uuid;
+    if (systemUuid) {
+      localStorage.setItem('SYSTEM_UUID', systemUuid);
+    }
+
+    // Extract tradingApiToken and store it in local storage
+    const tradingApiToken = data.accounts[0]?.tradingApiToken;
+    if (tradingApiToken) {
+      localStorage.setItem('TRADING_API_TOKEN', tradingApiToken);
+    }
+    
       return data;
     } catch (error) {
       console.error('An error occurred during login:', error);

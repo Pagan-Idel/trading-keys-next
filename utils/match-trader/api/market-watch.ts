@@ -32,14 +32,12 @@ import { getCookieValue } from "../../shared";
         headers: {
           'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
           'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
-          'coauth': `${getCookieValue('co-auth')}`,
-          'currency': `${currency}`
+          'Accept': 'application/json'
         },
         credentials: 'include'
       });
   
       const rawResponseText = await response.text();
-  
       if (!response.ok) {
         let errorResponse: ErrorMTResponse;
         try {
@@ -60,7 +58,7 @@ import { getCookieValue } from "../../shared";
         throw new Error(`Error: ${rawResponseText}`);
       }
   
-      console.log('Market Match Successful', data);
+      console.log('Market Match Successful');
     
       return data;
     } catch (error) {

@@ -1,5 +1,6 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
+import redisClient from '../../../redisClient';
 
 export interface LoginRequest {
   username: string;
@@ -14,6 +15,13 @@ export interface LoginResponse {
 
 export interface ErrorResponse {
   errorMessage: string;
+}
+
+export interface CookieOptions {
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  expires?: Date;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -47,26 +55,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     }
 
-    const responseData: LoginResponse = await response.json();
-    const cookies = response.headers.get('set-cookie');
-    console.log("Cookies - Next", cookies);
-    if (cookies) {
-        // // Split cookies by ','
-        // const cookieArray = cookies.split(',');
-    
-        // // Map over each cookie and remove the Domain attribute
-        // const modifiedCookies = cookieArray.map(cookie => 
-        //     cookie.replace(/;\s*Domain=[^;]+/, '')
-        // );
-    
-        // // Combine modified cookies into a single header
-        // const cookieHeader = modifiedCookies.join(',');
-    
-        // Set the modified cookies in the response header
-        res.setHeader('Set-Cookie', cookies);
+    const cookiesHeader = response.headers.get('set-cookie');
+    if (cookiesHeader) {
+      const cookiesArray = cookiesHeader.split(',').map(cookie => cookie.trim());
+      cookiesArray.forEach(cookie => {
+        const [cookieName, ...cookieParts] = cookie.split('=');
+        const cookieValue = cookieParts.join('=').split(';')[0];
+        if (cookieName === 'co-auth') {
+          redisClient.set('co-auth', cookieValue);
+        }
+      });
     }
-
-    res.status(200).json(responseData);
+ 
+    const data = await response.json();
+    res.status(200).json(data);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';
 

@@ -1,7 +1,7 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
 import { MarketWatchResponseMT } from '../../../utils/match-trader/api/market-watch';
-import redisClient from '../../../redisClient';
+import redisClient from './redisClient';
 
 export interface ErrorResponse {
   errorMessage: string;
@@ -23,13 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const parameters: string = "EURUSD";
   
   try {
-    console.log('headers:', {
-      'co-auth': `${coAuth}`,
-      'Auth-trading-api': `${req.headers.trading_api_token}`,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-    });
-    const response = await fetch(hostname + api + '?symbols=' + parameters, {
+    const response = await fetch(hostname + api + '?symbols=' + parameters + ",GBPUSD", {
       method: 'GET',
       headers: {
         'Cookie': `co-auth=${coAuth};`,
@@ -47,6 +41,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     
     const responseData: MarketWatchResponseMT = await response.json();
+    console.log(responseData.body);
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

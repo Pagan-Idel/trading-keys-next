@@ -1,8 +1,9 @@
 import { OrderParameters } from '../components/Keyboard';
+import { balanceMT } from './match-trader/api/balance';
+import { marketWatchMT, MarketWatchResponseMT } from './match-trader/api/market-watch';
 import { ACTION, INSTRUMENT, OpenTrade, Trade, handleOandaLogin, currentPrice, openNow } from './oanda/api'; 
 
 export const pipIncrement: number = 0.0001;
-export const contractSize: number = 100000;
 
 export interface RISK {
   units: string;
@@ -14,6 +15,48 @@ export interface SLatEntry {
  orderId: string;
  entryPrice: string;
 }
+
+export interface RiskResultMT {
+  volume: number;
+  slPrice: number;
+  tpPrice: number;
+}
+
+export const calculateRiskMT = async (risk: number, orderSide: string): Promise<RiskResultMT> => {
+  const stopLoss: number = parseFloat(localStorage.getItem('stopLoss')!);
+  const takeProfit: number = stopLoss * 2;
+  const balanceResponse  = await balanceMT();  
+  const {bid, ask} = await getBidAndAsk();
+
+  if ('balance' in balanceResponse && bid && ask) {
+    let balance: string = balanceResponse.balance;
+    const a = parseFloat(balance) * ( risk! / 100 );
+    const b = stopLoss * pipIncrement;
+    let volume = parseFloat((a / b).toFixed(0));
+    let tp = orderSide == ACTION.BUY ? (parseFloat(ask) + (pipIncrement * takeProfit)).toFixed(5) : (parseFloat(bid) - (pipIncrement * takeProfit)).toFixed(5);
+    let sl = orderSide == ACTION.BUY ? (parseFloat(ask) - (pipIncrement * stopLoss)).toFixed(5) : (parseFloat(bid) + (pipIncrement * stopLoss)).toFixed(5);
+    console.log("Balance", balance);
+    console.log("ask", ask);
+    console.log("bid", bid);  
+    console.log("Risk", risk!);
+    console.log("stopLoss", stopLoss);
+    console.log("pipIncrement", pipIncrement);
+    console.log("a", a);
+    console.log("b", b);
+    console.log("volume", volume);
+    console.log("TakeProfit Price", tp);
+    console.log("StopLoss Price", sl);
+    const tpPrice: number = parseFloat(tp);
+    const slPrice: number = parseFloat(sl);
+    
+  return { volume, slPrice, tpPrice };
+  } else {
+    let volume = 0;
+    let tpPrice = 0;
+    let slPrice = 0;
+    return { volume, slPrice, tpPrice};
+  }  
+};
 
 export const calculalateRisk = async (orderType: OrderParameters): Promise<RISK | undefined> => {
   const stopLoss: number = parseFloat(localStorage.getItem('stopLoss')!);
@@ -54,6 +97,26 @@ export const calculalateRisk = async (orderType: OrderParameters): Promise<RISK 
   }
 };
 
+export const getBidAndAsk = async (currency: string = "EURUSD") => {
+  const response = await marketWatchMT(currency);
+
+  if (response) {
+    const { body } = response as MarketWatchResponseMT;
+    if (body.length > 0) {
+      // Access the first element of the body array
+      const { bid, ask } = body[0];
+
+      return { bid, ask };
+    } else {
+      console.error('No market data available.');
+      return { bid: null, ask: null };
+    }
+  } else {
+    console.error('Failed to fetch market data:', response);
+    return { bid: null, ask: null };
+  }
+};
+
 export const recentTrade = async (): Promise<Trade | undefined> => {
   const openTrades: OpenTrade | undefined = await openNow();
   if (!openTrades) {
@@ -87,15 +150,4 @@ export const recentTrade = async (): Promise<Trade | undefined> => {
   } else {
   return mostRecentTrade;
   }
-}
-
-export const getCookieValue = (name: string) => {
-  const cookies = document.cookie.split(';');
-  for (const cookie of cookies) {
-      const [cookieName, cookieValue] = cookie.trim().split('=');
-      if (cookieName === name) {
-          return cookieValue;
-      }
-  }
-  return null;
 }

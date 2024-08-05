@@ -116,20 +116,23 @@ export interface LoginRequestBodyMT {
   
       console.log('Login Successful');
 
-      // Extract and store cookies from response headers
-      const cookiesHeader = response.headers.get('set-cookie');
-      console.log("Cookies", cookiesHeader);
-      if (cookiesHeader) {
-          const cookies = cookiesHeader.split(',');
-          cookies.forEach(cookie => {
-              const [cookieName, cookieValue] = cookie.split('=');
-              if (cookieName && cookieValue) {
-                  // Remove any attributes like path, expires, etc.
-                  const cleanValue = cookieValue.split(';')[0].trim();
-                  localStorage.setItem(cookieName.trim(), cleanValue);
-              }
-          });
-      }
+      // // Extract and store cookies from response headers
+      // const cookiesHeader = response.headers.get('set-cookie');
+      // if (cookiesHeader) {
+      //   const cookies = cookiesHeader.split(',');
+      //   for (const cookie of cookies) {
+      //     const [cookieName, cookieValue] = cookie.split('=');
+      //     if (cookieName && cookieValue) {
+      //       // Remove any attributes like path, expires, etc.
+      //       const cleanValue = cookieValue.split(';')[0].trim();
+      //       if (cookieName.trim() === 'co-auth') {
+      //         await setCoAuth(cleanValue);
+      //       } else {
+      //         localStorage.setItem(cookieName.trim(), cleanValue);
+      //       }
+      //     }
+      //   }
+      // }
       // Extract SYSTEM_UUID and store it in local storage
       const systemUuid = data.accounts[0]?.offer.system.uuid;
       if (systemUuid) {

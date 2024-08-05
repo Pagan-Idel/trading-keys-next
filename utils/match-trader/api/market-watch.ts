@@ -1,5 +1,3 @@
-import { getCookieValue } from "../../shared";
-
   export interface BodyItem {
       symbol: string;
       bid: string;

@@ -13,11 +13,12 @@ interface OrderDetails {
   price: string;
 }
 export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> => {
-  const accountId = localStorage.getItem('accountId');
   const token = localStorage.getItem('token');
-  const accountEnv = localStorage.getItem('accountEnv');
+  const accountType = localStorage.getItem('accountType');
+  const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
+  const accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
   // Check if the environment variable is set
-  if (!accountId || !token || !accountEnv) {
+  if (!accountId || !token) {
     console.log("Token or AccountId is not set.");
   }
   const mostRecentTrade: Trade | undefined = await recentTrade();
@@ -31,7 +32,7 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
         timeInForce: "GTC"
       }
     };
-    const apiUrl = `${accountEnv}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/orders`;
+    const apiUrl = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/orders`;
 
     const response = await fetch(apiUrl, {
       method: 'PUT',
@@ -50,7 +51,7 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
     }
     return true;
   } else if (orderType.action == ACTION.MoveSL || orderType.action == ACTION.MoveTP) {
-    const apiUrl1: string = `${accountEnv}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}`;
+    const apiUrl1: string = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}`;
 
     const response1: Response = await fetch(apiUrl1, {
       headers: {
@@ -85,7 +86,7 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
       }
     };
    }
-    const apiUrl2 = `${accountEnv}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/orders`;
+    const apiUrl2 = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/orders`;
 
     const response = await fetch(apiUrl2, {
       method: 'PUT',

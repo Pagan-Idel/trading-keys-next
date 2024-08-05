@@ -1,7 +1,5 @@
-import { updateLanguageServiceSourceFile } from "typescript";
 import { OrderParameters } from "../../../components/Keyboard";
 import { RISK, calculalateRisk } from "../../shared";
-import { OpenTrade, openNow } from "./openNow";
 
 export enum TYPE {
   MARKET = 'MARKET',
@@ -54,11 +52,13 @@ export interface OrderRequest {
 
 
 export const order = async (orderType: OrderParameters): Promise<boolean> => {
-  const accountId = localStorage.getItem('accountId');
   const token = localStorage.getItem('token');
-  const accountEnv = localStorage.getItem('accountEnv');
+  const accountType = localStorage.getItem('accountType');
+  const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
+  const accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
   // Check if the environment variable is set
-  if (!accountId || !token || !accountEnv) {
+  // Check if the environment variable is set
+  if (!accountId || !token || !hostname) {
     console.log("Token or AccountId is not set.");
     return false;
   }
@@ -78,7 +78,7 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
         timeInForce: "FOK"
       }
     };
-    const apiUrl = `${accountEnv}/v3/accounts/${accountId}/orders`;
+    const apiUrl = `${hostname}/v3/accounts/${accountId}/orders`;
 
     const response = await fetch(apiUrl, {
       method: 'POST',

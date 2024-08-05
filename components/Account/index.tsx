@@ -146,7 +146,7 @@ const Account = () => {
             setMessage(null);
           }, 3000);
           marketWatchMT().then((data) => {
-            console.log(data);
+
           })
         } else {
           setIsLoginSuccessful(false);

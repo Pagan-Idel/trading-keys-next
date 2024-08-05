@@ -1,10 +1,10 @@
 import { OrderParameters } from '../components/Keyboard';
-import { balanceMT } from './match-trader/api/balance';
+import { balanceMT, ErrorMTResponse } from './match-trader/api/balance';
 import { marketWatchMT, MarketWatchResponseMT } from './match-trader/api/market-watch';
 import { ACTION, INSTRUMENT, OpenTrade, Trade, handleOandaLogin, currentPrice, openNow } from './oanda/api'; 
 
 export const pipIncrement: number = 0.0001;
-
+export const contractSize: number = 100000;
 export interface RISK {
   units: string;
   takeProfit: string;
@@ -30,9 +30,10 @@ export const calculateRiskMT = async (risk: number, orderSide: string): Promise<
 
   if ('balance' in balanceResponse && bid && ask) {
     let balance: string = balanceResponse.balance;
-    const a = parseFloat(balance) * ( risk! / 100 );
+    const a = parseFloat(balance) * ( risk / 100 );
     const b = stopLoss * pipIncrement;
-    let volume = parseFloat((a / b).toFixed(0));
+    const vol = (a / b).toFixed(0);
+    let volume = parseFloat((parseFloat(vol) / contractSize).toFixed(1));
     let tp = orderSide == ACTION.BUY ? (parseFloat(ask) + (pipIncrement * takeProfit)).toFixed(5) : (parseFloat(bid) - (pipIncrement * takeProfit)).toFixed(5);
     let sl = orderSide == ACTION.BUY ? (parseFloat(ask) - (pipIncrement * stopLoss)).toFixed(5) : (parseFloat(bid) + (pipIncrement * stopLoss)).toFixed(5);
     console.log("Balance", balance);
@@ -100,19 +101,16 @@ export const calculalateRisk = async (orderType: OrderParameters): Promise<RISK 
 export const getBidAndAsk = async (currency: string = "EURUSD") => {
   const response = await marketWatchMT(currency);
 
-  if (response) {
-    const { body } = response as MarketWatchResponseMT;
-    if (body.length > 0) {
-      // Access the first element of the body array
-      const { bid, ask } = body[0];
-
+  if (Array.isArray(response)) {
+    if (response.length > 0) {
+      const { bid, ask } = response[0];
       return { bid, ask };
     } else {
       console.error('No market data available.');
       return { bid: null, ask: null };
     }
   } else {
-    console.error('Failed to fetch market data:', response);
+    console.error('Failed to fetch market data:', (response as ErrorMTResponse).errorMessage);
     return { bid: null, ask: null };
   }
 };

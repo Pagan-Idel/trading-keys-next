@@ -16,19 +16,21 @@ interface PriceStreamResponse {
 }
 
 export const currentPrice = async (symbol: string): Promise<{ bid: string; ask: string }> => {
-  const accountId = localStorage.getItem('accountId');
   const token = localStorage.getItem('token');
-  let accountEnv = localStorage.getItem('accountEnv');
+  const accountType = localStorage.getItem('accountType');
+  let hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
+  const accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
+
   // Check if the environment variable is set
-  if (!accountId || !token || !accountEnv) {
+  if (!accountId || !token || !hostname) {
     console.log("Token or AccountId is not set.");
   }
- if (accountEnv?.includes("practice")) {
-    accountEnv = "https://stream-fxpractice.oanda.com";
+ if (hostname?.includes("practice")) {
+    hostname = "https://stream-fxpractice.oanda.com";
  } else {
-    accountEnv = "https://stream-fxtrade.oanda.com";
+    hostname = "https://stream-fxtrade.oanda.com";
  }
-  const apiUrl = `${accountEnv}/v3/accounts/${accountId}/pricing/stream?instruments=${symbol}`;
+  const apiUrl = `${hostname}/v3/accounts/${accountId}/pricing/stream?instruments=${symbol}`;
   const response = await fetch(apiUrl, {
     headers: {
       'Content-Type': 'application/json',

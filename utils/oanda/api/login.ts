@@ -50,7 +50,7 @@ export const handleOandaLogin = async (): Promise<AccountResponse> => {
   const accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
 
   // Check if the environment variable is set
-  if (!accountId || !token || !accountType) {
+  if (!token || !accountType) {
     console.log("Token or AccountId is not set.");
   }
 

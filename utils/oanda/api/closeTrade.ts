@@ -67,10 +67,12 @@ export interface CloseRequestBody {
 
 export const closeTrade = async (orderType: OrderParameters): Promise<TradeCloseResponse | boolean> => {
   const token = localStorage.getItem('token');
-  const accountId = localStorage.getItem('accountId');
-  const accountEnv = localStorage.getItem('accountEnv');
+  const accountType = localStorage.getItem('accountType');
+  const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
+  const accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
+
   // Check if the environment variable is set
-  if (!accountId || !token || !accountEnv) {
+  if (!accountId || !token ) {
     console.log("Token or AccountId is not set.");
   }
 
@@ -84,7 +86,7 @@ export const closeTrade = async (orderType: OrderParameters): Promise<TradeClose
   const requestBody: CloseRequestBody = orderType.action === ACTION.PartialClose
   ? { units: partialUnits }
   : {};
-  const api: string = `${accountEnv}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/close`;
+  const api: string = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/close`;
   const response: Response = await fetch(api, {
     method: 'PUT',
     headers: {

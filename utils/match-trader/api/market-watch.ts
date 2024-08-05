@@ -1,23 +1,19 @@
-  export interface BodyItem {
-      symbol: string;
-      bid: string;
-      ask: string;
-      change: string;
-      high: string;
-      low: string;
-      timestampSec: number;
-  }
+export interface BodyItem {
+  symbol: string;
+  alias: string;
+  bid: string;
+  ask: string;
+  change: string;
+  high: string;
+  low: string;
+  timestampSec: number;
+  timestampMs: number;
+}
 
-  export interface MarketWatchResponseMT {
-    body: BodyItem[];
-  }
+export type MarketWatchResponseMT = BodyItem[];
+
   export interface ErrorMTResponse {
     errorMessage: string;
-  }
-
-  export interface LoginMTRequest {
-    email: string;
-    password: string;
   }
     
   export const marketWatchMT = async (currency: string = "EURUSD"): Promise<MarketWatchResponseMT | ErrorMTResponse> => {

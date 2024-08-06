@@ -56,16 +56,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const cookiesHeader = response.headers.get('set-cookie');
+    console.log("Cookie recieved: ", cookiesHeader);
     if (cookiesHeader) {
-      const cookiesArray = cookiesHeader.split(',').map(cookie => cookie.trim());
-      cookiesArray.forEach(cookie => {
-        const [cookieName, ...cookieParts] = cookie.split('=');
-        const cookieValue = cookieParts.join('=').split(';')[0];
-        if (cookieName === 'co-auth') {
+      // Regular expression to match only the co-auth cookie with its attributes and Path
+      const regex = /co-auth=([^;]+)/;
+      const match = cookiesHeader.match(regex);
+      
+      if (match && match.length > 0) {
+          // Capture group 1
+          const cookieValue: string = match[0].split("=").pop() as string; // Entire match includes group 1
           redisClient.set('co-auth', cookieValue);
-        }
-      });
-    }
+          console.log("cookieValue to set ", cookieValue);
+      } else {
+          console.error('co-auth cookie not found');
+      }
+  }
  
     const data = await response.json();
     res.status(200).json(data);

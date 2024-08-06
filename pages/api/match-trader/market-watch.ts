@@ -18,12 +18,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
   const coAuth = await redisClient.get('co-auth');
+  console.log("Market-Watch Cookie - ", coAuth);
   const hostname = "https://mtr.gooeytrade.com";
   const api: string = `/mtr-api/${req.headers.system_uuid}/quotations`;
   const parameters: string = "EURUSD";
   
   try {
-    const response = await fetch(hostname + api + '?symbols=' + parameters + ",GBPUSD", {
+    const response = await fetch(hostname + api + '?symbols=' + parameters, {
       method: 'GET',
       headers: {
         'Cookie': `co-auth=${coAuth};`,
@@ -41,7 +42,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     
     const responseData: MarketWatchResponseMT = await response.json();
-    console.log(responseData.body);
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

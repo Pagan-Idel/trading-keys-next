@@ -22,7 +22,8 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
-    "dev": "concurrently \"redis-server\" \"next dev\"",
+    "dev": "next dev",
+    "redis": "redis-server C:/Documents/trading-keys-next/redis.windows.conf",
     "build": "next build",
     "start": "next start"
   },

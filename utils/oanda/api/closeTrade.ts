@@ -81,10 +81,9 @@ export const closeTrade = async (orderType: OrderParameters): Promise<TradeClose
     return false;
   }
   const partialClose: number = orderType.action === ACTION.PartialClose25 ? 0.24999999999 : 0.4999999999;
-  console.log("partialClose", partialClose);
-  const initialUnitsString: string = mostRecentTrade.initialUnits!;
-  const initialUnitsWithoutNegative: string = initialUnitsString.replace('-', '');
-  const partialUnits: string = (parseFloat(initialUnitsWithoutNegative) * partialClose).toFixed(0);
+  const currentUnitsString: string = mostRecentTrade.currentUnits!;
+  const currentUnitsWithoutNegative: string = currentUnitsString.replace('-', '');
+  const partialUnits: string = (parseFloat(currentUnitsWithoutNegative) * partialClose).toFixed(0);
   const requestBody: CloseRequestBody = orderType.action === ACTION.PartialClose25 || orderType.action === ACTION.PartialClose50
   ? { units: partialUnits }
   : {};

@@ -234,7 +234,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
     switch (platform) {
       case 'oanda':
         switch (functionName) {
-          case '0':
+          case '0 - CLOSE':
             closeTrade({ action: ACTION.CLOSE });
             console.log(`Button 0 clicked`);
             break;
@@ -282,7 +282,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
     
       case 'dxtrade':
         switch (functionName) {
-          case 'CLOSE':
+          case '0 - CLOSE':
             // Handle the case when button 0 is clicked for dxtrade
             break;
           case '1 - BUY':

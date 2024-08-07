@@ -1,27 +1,10 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
 import redisClient from './redisClient';
-
-export interface LoginRequest {
-  username: string;
-  broker: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  token: string;
-  expires: string;
-}
+import { EditPositionResponseMT } from '../../../utils/match-trader/api/edit-position';
 
 export interface ErrorResponse {
   errorMessage: string;
-}
-
-export interface CookieOptions {
-  path?: string;
-  secure?: boolean;
-  httpOnly?: boolean;
-  expires?: Date;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -30,21 +13,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
-  if (!req.url?.includes('login')) {
+  if (!req.url?.includes('edit-position')) {
     res.status(404).end(`Path ${req.url} Not Found`);
     return;
   }
+  const coAuth = await redisClient.get('co-auth');
   const hostname = "https://mtr.gooeytrade.com";
-  const credentials: LoginRequest = req.body;
-  const api: string = "/manager/co-login";
+  const api: string = `/mtr-api/${req.headers.system_uuid}/position/edit`;
+  
   try {
     const response = await fetch(hostname + api, {
       method: 'POST',
       headers: {
+        'Cookie': `co-auth=${coAuth};`,
+        'Auth-trading-api': `${req.headers.trading_api_token}`,
+        'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
       },
-      body: JSON.stringify(credentials)
+      body: req.body
     });
 
     if (!response.ok) {
@@ -52,28 +38,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log(`HTTP error! Status: ${response.status}`, errorResponse);
       res.status(response.status).json({ errorMessage: `HTTP error! Status: ${response.status}`, details: errorResponse });
       return;
-
     }
-
-    const cookiesHeader = response.headers.get('set-cookie');
-    // console.log("Cookie recieved: ", cookiesHeader);
-    if (cookiesHeader) {
-      // Regular expression to match only the co-auth cookie with its attributes and Path
-      const regex = /rt=([^;]+)/;
-      const match = cookiesHeader.match(regex);
-      
-      if (match && match.length > 0) {
-          // Capture group 1
-          const cookieValue: string = match[0].split("=").pop() as string; // Entire match includes group 1
-          redisClient.set('co-auth', cookieValue);
-          // console.log("cookieValue to set ", cookieValue);
-      } else {
-          console.error('co-auth cookie not found');
-      }
-  }
- 
-    const data = await response.json();
-    res.status(200).json(data);
+    
+    const responseData: EditPositionResponseMT = await response.json();
+    res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';
 

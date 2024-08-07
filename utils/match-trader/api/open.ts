@@ -1,5 +1,7 @@
 import { ACTION } from "../../oanda/api";
-import { calculateRiskMT } from "../../shared";
+import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared";
+import { editPositionMT, EditPositionRequestMT } from "./edit-position";
+import { openPositionsMT, PositionsResponseMT } from "./open-positions";
 
   export interface OpenResponseMT {
     status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';
@@ -19,36 +21,24 @@ import { calculateRiskMT } from "../../shared";
   export interface ErrorMTResponse {
     errorMessage: string;
   }
-    
+  
   export const openMT = async (risk: number, orderSide: ACTION.BUY | ACTION.SELL): Promise<OpenResponseMT | ErrorMTResponse> => {
 
     const apiEndpoint = '/api/match-trader/open';
     let requestBody: OpenRequestMT = {
-        instrument: "EURUSD",  // shortcut name of the instrument
-        orderSide,  // side of trade: BUY or SELL
-        volume : 0,  // amount of trade
-        slPrice : 0,  // stop-loss price: 0 if not set
-        tpPrice : 0,  // take-profit price: 0 if not set
-        isMobile: false  // request source: true if mobile, false if desktop};
-      };
+      instrument: "EURUSD",  // shortcut name of the instrument
+      orderSide,  // side of trade: BUY or SELL
+      volume : await calculateVolumeMT(risk) as number,  // amount of trade
+      slPrice : 0,  // stop-loss price: 0 if not set
+      tpPrice : 0,  // take-profit price: 0 if not set
+      isMobile: false  // request source: true if mobile, false if desktop};
+    };
     try {
-        const result = await calculateRiskMT(risk, orderSide);
         // Check if the result is an error message
-        if (typeof result === 'string') {
-          console.error(result);
+        if (typeof requestBody.volume != 'number') {
+          console.error(requestBody.volume);
         }
-    
-        // Destructure the result
-        const { volume, slPrice, tpPrice } = result;
-        requestBody = {
-            instrument: "EURUSD",  // shortcut name of the instrument
-            orderSide: orderSide,  // side of trade: BUY or SELL
-            volume: volume,  // amount of trade
-            slPrice: slPrice,  // stop-loss price: 0 if not set
-            tpPrice: tpPrice,  // take-profit price: 0 if not set
-            isMobile: false  // request source: true if mobile, false if desktop};
-          };
-        console.log(`Volume: ${volume}, SL Price: ${slPrice}, TP Price: ${tpPrice}`);
+
       } catch (error) {
         console.error('An error occurred:', error);
       }
@@ -74,7 +64,7 @@ import { calculateRiskMT } from "../../shared";
           console.error('Error parsing error response as JSON:', e);
           throw new Error(`Error: ${rawResponseText}`);
         }
-        console.error('Market Watch failed:', errorResponse.errorMessage);
+        console.error('Open Trade Failed:', errorResponse.errorMessage);
         return errorResponse;
       }
   
@@ -86,12 +76,39 @@ import { calculateRiskMT } from "../../shared";
         throw new Error(`Error: ${rawResponseText}`);
       }
   
-      console.log('Market Match Successful');
+      console.log('Open Trade Successful');
+
+        // Call openPositions to get the openPrice and id
+      let positionResponse : PositionsResponseMT | ErrorMTResponse = await openPositionsMT();
+      if ('errorMessage' in positionResponse ) {
+        console.error('Error fetching positions:', positionResponse .errorMessage);
+        return positionResponse ;
+      }
+
+      const position = positionResponse as PositionsResponseMT;
+      const sltpPrices: SLTPMT = calculateSLTPMT(position.positions[0].openPrice, position.positions[0].side);
+
+      try {
+        // Call editPosition with the id and sltpPrices
+        let requestEditBody: EditPositionRequestMT = {
+          id: position.positions[0].id,
+          instrument: position.positions[0].symbol,  // shortcut name of the instrument
+          orderSide,  // side of trade: BUY or SELL
+          volume : parseFloat(position.positions[0].volume),  // amount of trade
+          slPrice : sltpPrices.slPrice,  // stop-loss price: 0 if not set
+          tpPrice : sltpPrices.tpPrice,  // take-profit price: 0 if not set
+          isMobile: false  // request source: true if mobile, false if desktop};
+        };
+        await editPositionMT(requestEditBody);
+       } catch (e) {
+         console.error('Error editing position', e);
+       }
+
+      return { ...data }; // Merging the openMT response with editPosition response
     
-      return data;
     } catch (error) {
-      console.error('An error occurred during market watch:', error);
-      return { errorMessage: 'An unknown error occurred during market watch' } as ErrorMTResponse;
+      console.error('An error occurred during opening postion:', error);
+      return { errorMessage: 'An unknown error occurred during opening postion' } as ErrorMTResponse;
     }
   };
   

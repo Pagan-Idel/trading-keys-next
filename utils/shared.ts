@@ -6,6 +6,7 @@ import { ACTION, INSTRUMENT, OpenTrade, Trade, handleOandaLogin, currentPrice, o
 
 export const pipIncrement: number = 0.0001;
 export const contractSize: number = 100000;
+export const commissionPerLot: number = 7;
 export interface RISK {
   units: string;
   takeProfit: string;
@@ -17,51 +18,62 @@ export interface SLatEntry {
  entryPrice: string;
 }
 
-export interface RiskResultMT {
-  volume: number;
+export interface SLTPMT {
   slPrice: number;
   tpPrice: number;
 }
 
-export const calculateVolumeMT = async (risk: number, orderSide: string): Promise<number> => {
-  const balanceResponse  = await openPositionsMT();
-}
-
-export const calculateRiskMT = async (risk: number, orderSide: string): Promise<RiskResultMT> => {
+export const calculateSLTPMT = (openPrice: string, orderSide: "BUY" | "SELL"): SLTPMT => {
   const stopLoss: number = parseFloat(localStorage.getItem('stopLoss')!);
   const takeProfit: number = stopLoss * 2;
-  const balanceResponse  = await balanceMT();  
-  const {bid, ask} = await getBidAndAsk();
+  let tpPrice = orderSide == ACTION.BUY ? parseFloat((parseFloat(openPrice) + (pipIncrement * takeProfit)).toFixed(5)) : parseFloat((parseFloat(openPrice) - (pipIncrement * takeProfit)).toFixed(5));
+  let slPrice = orderSide == ACTION.BUY ? parseFloat((parseFloat(openPrice) - (pipIncrement * stopLoss)).toFixed(5)) : parseFloat((parseFloat(openPrice) + (pipIncrement * stopLoss)).toFixed(5));
+  console.log("OpenPrice", openPrice);
+  console.log("TakeProfit Price", tpPrice);
+  console.log("StopLoss Price", slPrice);
+  return {slPrice, tpPrice};
+}
 
-  if ('balance' in balanceResponse && bid && ask) {
+// TODO: NEEDS REVISION
+export const calculateVolumeMT = async (risk: number): Promise<number | string> => {
+  const stopLoss: number = parseFloat(localStorage.getItem('stopLoss')!);
+  const balanceResponse = await balanceMT();
+
+  if ('balance' in balanceResponse) {
     let balance: string = balanceResponse.balance;
-    const a = parseFloat(balance) * ( risk / 100 );
+    const a = parseFloat(balance) * (risk / 100);
     const b = stopLoss * pipIncrement;
-    const vol = (a / b).toFixed(0);
-    let volume = parseFloat((parseFloat(vol) / contractSize).toFixed(1));
-    let tp = orderSide == ACTION.BUY ? (parseFloat(ask) + (pipIncrement * takeProfit)).toFixed(5) : (parseFloat(bid) - (pipIncrement * takeProfit)).toFixed(5);
-    let sl = orderSide == ACTION.BUY ? (parseFloat(ask) - (pipIncrement * stopLoss)).toFixed(5) : (parseFloat(bid) + (pipIncrement * stopLoss)).toFixed(5);
+
+    // Calculate volume without commission first
+    const volWithoutCommission = (a / b).toFixed(0);
+    let volumeWithoutCommission = parseFloat((parseFloat(volWithoutCommission) / contractSize).toFixed(1));
+
+    // Calculate the effective risk including commission
+    let volume = volumeWithoutCommission;
+
+    // Adjust volume to account for commission
+    const totalCommission = volume * commissionPerLot;
+    const effectiveRisk = a - totalCommission;
+    volume = parseFloat(((effectiveRisk / b) / contractSize).toFixed(1));
+
+    // Ensure the calculated volume is valid (non-negative)
+    if (volume < 0) volume = 0;
+
     console.log("Balance", balance);
-    console.log("ask", ask);
-    console.log("bid", bid);  
-    console.log("Risk", risk!);
+    console.log("Risk", risk);
     console.log("stopLoss", stopLoss);
-    console.log("pipIncrement", pipIncrement);
-    console.log("a", a);
+    console.log("a (initial risk)", a);
     console.log("b", b);
+    console.log("volumeWithoutCommission", volumeWithoutCommission);
+    console.log("totalCommission", totalCommission);
+    console.log("effectiveRisk", effectiveRisk);
     console.log("volume", volume);
-    console.log("TakeProfit Price", tp);
-    console.log("StopLoss Price", sl);
-    const tpPrice: number = parseFloat(tp);
-    const slPrice: number = parseFloat(sl);
-    
-  return { volume, slPrice, tpPrice };
+
+    return volume;
   } else {
-    let volume = 0;
-    let tpPrice = 0;
-    let slPrice = 0;
-    return { volume, slPrice, tpPrice};
-  }  
+    let volume = "No Volume!";
+    return volume;
+  }
 };
 
 export const calculalateRisk = async (orderType: OrderParameters): Promise<RISK | undefined> => {

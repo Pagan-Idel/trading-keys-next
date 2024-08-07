@@ -85,16 +85,17 @@ import { openPositionsMT, PositionsResponseMT } from "./open-positions";
         return positionResponse ;
       }
 
-      const position = positionResponse as PositionsResponseMT;
-      const sltpPrices: SLTPMT = calculateSLTPMT(position.positions[0].openPrice, position.positions[0].side);
+      const positionsResponse = positionResponse as PositionsResponseMT;
+      const latestPosition = positionsResponse.positions[positionsResponse.positions.length - 1];
+      const sltpPrices: SLTPMT = calculateSLTPMT(latestPosition.openPrice, latestPosition.side);
 
       try {
         // Call editPosition with the id and sltpPrices
         let requestEditBody: EditPositionRequestMT = {
-          id: position.positions[0].id,
-          instrument: position.positions[0].symbol,  // shortcut name of the instrument
+          id: latestPosition.id,
+          instrument: latestPosition.symbol,  // shortcut name of the instrument
           orderSide,  // side of trade: BUY or SELL
-          volume : parseFloat(position.positions[0].volume),  // amount of trade
+          volume : parseFloat(latestPosition.volume),  // amount of trade
           slPrice : sltpPrices.slPrice,  // stop-loss price: 0 if not set
           tpPrice : sltpPrices.tpPrice,  // take-profit price: 0 if not set
           isMobile: false  // request source: true if mobile, false if desktop};

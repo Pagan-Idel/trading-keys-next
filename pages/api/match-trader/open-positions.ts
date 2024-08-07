@@ -1,7 +1,7 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
-import { MarketWatchResponseMT } from '../../../utils/match-trader/api/market-watch';
 import redisClient from './redisClient';
+import { PositionsResponseMT } from '../../../utils/match-trader/api/open-positions';
 
 export interface ErrorResponse {
   errorMessage: string;
@@ -13,17 +13,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
-  if (!req.url?.includes('market-watch')) {
+  if (!req.url?.includes('open-positions')) {
     res.status(404).end(`Path ${req.url} Not Found`);
     return;
   }
   const coAuth = await redisClient.get('co-auth');
   const hostname = "https://mtr.gooeytrade.com";
-  const api: string = `/mtr-api/${req.headers.system_uuid}/quotations`;
-  const parameters: string = "EURUSD";
+  const api: string = `/mtr-api/${req.headers.system_uuid}/open-positions`;
   
   try {
-    const response = await fetch(hostname + api + '?symbols=' + parameters, {
+    const response = await fetch(hostname + api, {
       method: 'GET',
       headers: {
         'Cookie': `co-auth=${coAuth};`,
@@ -40,7 +39,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
     
-    const responseData: MarketWatchResponseMT = await response.json();
+    const responseData: PositionsResponseMT = await response.json();
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

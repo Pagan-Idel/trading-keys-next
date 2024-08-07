@@ -59,7 +59,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.log("Cookie recieved: ", cookiesHeader);
     if (cookiesHeader) {
       // Regular expression to match only the co-auth cookie with its attributes and Path
-      const regex = /co-auth=([^;]+)/;
+      const regex = /rt=([^;]+)/;
       const match = cookiesHeader.match(regex);
       
       if (match && match.length > 0) {

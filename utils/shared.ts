@@ -1,6 +1,7 @@
 import { OrderParameters } from '../components/Keyboard';
 import { balanceMT, ErrorMTResponse } from './match-trader/api/balance';
 import { marketWatchMT, MarketWatchResponseMT } from './match-trader/api/market-watch';
+import { openPositionsMT } from './match-trader/api/open-positions';
 import { ACTION, INSTRUMENT, OpenTrade, Trade, handleOandaLogin, currentPrice, openNow } from './oanda/api'; 
 
 export const pipIncrement: number = 0.0001;
@@ -20,6 +21,10 @@ export interface RiskResultMT {
   volume: number;
   slPrice: number;
   tpPrice: number;
+}
+
+export const calculateVolumeMT = async (risk: number, orderSide: string): Promise<number> => {
+  const balanceResponse  = await openPositionsMT();
 }
 
 export const calculateRiskMT = async (risk: number, orderSide: string): Promise<RiskResultMT> => {

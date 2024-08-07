@@ -1,15 +1,15 @@
 import { ACTION } from "../../oanda/api";
 import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared";
 import { editPositionMT, EditPositionRequestMT } from "./edit-position";
-import { openPositionsMT, PositionsResponseMT } from "./open-positions";
+import { openedPositionsMT, PositionsResponseMT } from "./opened-positions";
 
-  export interface OpenResponseMT {
+  export interface OpenPostionResponseMT {
     status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';
     nativeCode: string | null;
     errorMessage: string | null;
   }
 
-  export interface OpenRequestMT {
+  export interface OpenPositionRequestMT {
     instrument: string;  // shortcut name of the instrument
     orderSide: 'BUY' | 'SELL';  // side of trade: BUY or SELL
     volume: number;  // amount of trade
@@ -22,10 +22,10 @@ import { openPositionsMT, PositionsResponseMT } from "./open-positions";
     errorMessage: string;
   }
   
-  export const openMT = async (risk: number, orderSide: ACTION.BUY | ACTION.SELL): Promise<OpenResponseMT | ErrorMTResponse> => {
+  export const openPostionMT = async (risk: number, orderSide: ACTION.BUY | ACTION.SELL): Promise<OpenPostionResponseMT | ErrorMTResponse> => {
 
     const apiEndpoint = '/api/match-trader/open';
-    let requestBody: OpenRequestMT = {
+    let requestBody: OpenPositionRequestMT = {
       instrument: "EURUSD",  // shortcut name of the instrument
       orderSide,  // side of trade: BUY or SELL
       volume : await calculateVolumeMT(risk) as number,  // amount of trade
@@ -68,7 +68,7 @@ import { openPositionsMT, PositionsResponseMT } from "./open-positions";
         return errorResponse;
       }
   
-      let data: OpenResponseMT;
+      let data: OpenPostionResponseMT;
       try {
         data = JSON.parse(rawResponseText);
       } catch (e) {
@@ -79,7 +79,7 @@ import { openPositionsMT, PositionsResponseMT } from "./open-positions";
       console.log('Open Trade Successful');
 
         // Call openPositions to get the openPrice and id
-      let positionResponse : PositionsResponseMT | ErrorMTResponse = await openPositionsMT();
+      let positionResponse : PositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
       if ('errorMessage' in positionResponse ) {
         console.error('Error fetching positions:', positionResponse .errorMessage);
         return positionResponse ;
@@ -105,7 +105,7 @@ import { openPositionsMT, PositionsResponseMT } from "./open-positions";
          console.error('Error editing position', e);
        }
 
-      return { ...data }; // Merging the openMT response with editPosition response
+      return { ...data }; // Merging the openPostionMT response with editPosition response
     
     } catch (error) {
       console.error('An error occurred during opening postion:', error);

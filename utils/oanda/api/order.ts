@@ -19,7 +19,8 @@ export enum ACTION {
   SLatEntry = 'SLatEntry',
   MoveSL = 'MoveSL',
   MoveTP = 'MoveTP',
-  PartialClose = 'PartialClose',
+  PartialClose50 = 'PartialClose50',
+  PartialClose25 = 'PartialClose25',
   CLOSE = 'Close',
   UP = 'Up',
   DOWN = 'Down'

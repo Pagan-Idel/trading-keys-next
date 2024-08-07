@@ -1,6 +1,3 @@
-import { calculateVolumeMT, SLTPMT } from "../../shared";
-import { OpenRequestMT } from "./open";
-
   export interface EditPositionResponseMT {
     status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';
     nativeCode: string | null;

@@ -1,4 +1,4 @@
-import { ACTION, Trade } from ".";
+import { ACTION, order, Trade } from ".";
 import { OrderParameters } from "../../../components/Keyboard";
 import { recentTrade } from "../../shared";
 
@@ -80,10 +80,12 @@ export const closeTrade = async (orderType: OrderParameters): Promise<TradeClose
   if (!mostRecentTrade) {
     return false;
   }
+  const partialClose: number = orderType.action === ACTION.PartialClose25 ? 0.24999999999 : 0.4999999999;
+  console.log("partialClose", partialClose);
   const initialUnitsString: string = mostRecentTrade.initialUnits!;
   const initialUnitsWithoutNegative: string = initialUnitsString.replace('-', '');
-  const partialUnits: string = (parseFloat(initialUnitsWithoutNegative) * 0.249999999999).toFixed(0);
-  const requestBody: CloseRequestBody = orderType.action === ACTION.PartialClose
+  const partialUnits: string = (parseFloat(initialUnitsWithoutNegative) * partialClose).toFixed(0);
+  const requestBody: CloseRequestBody = orderType.action === ACTION.PartialClose25 || orderType.action === ACTION.PartialClose50
   ? { units: partialUnits }
   : {};
   const api: string = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/close`;

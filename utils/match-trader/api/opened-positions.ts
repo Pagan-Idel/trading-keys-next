@@ -26,7 +26,7 @@ export interface ErrorMTResponse {
   errorMessage: string;
 }
   
-export const openPositionsMT = async (): Promise<PositionsResponseMT | ErrorMTResponse> => {
+export const openedPositionsMT = async (): Promise<PositionsResponseMT | ErrorMTResponse> => {
 
   const apiEndpoint = '/api/match-trader/open-positions';
 

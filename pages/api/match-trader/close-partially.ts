@@ -1,35 +1,36 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
 import redisClient from './redisClient';
-import { PositionsResponseMT } from '../../../utils/match-trader/api/open-positions';
+import { EditPositionResponseMT } from '../../../utils/match-trader/api/edit-position';
 
 export interface ErrorResponse {
   errorMessage: string;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', ['GET']);
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
-  if (!req.url?.includes('open-positions')) {
+  if (!req.url?.includes('close-partially')) {
     res.status(404).end(`Path ${req.url} Not Found`);
     return;
   }
   const coAuth = await redisClient.get('co-auth');
   const hostname = "https://mtr.gooeytrade.com";
-  const api: string = `/mtr-api/${req.headers.system_uuid}/open-positions`;
+  const api: string = `/mtr-api/${req.headers.system_uuid}/position/close-partially`;
   
   try {
     const response = await fetch(hostname + api, {
-      method: 'GET',
+      method: 'POST',
       headers: {
         'Cookie': `co-auth=${coAuth};`,
         'Auth-trading-api': `${req.headers.trading_api_token}`,
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-      }
+      },
+      body: req.body
     });
 
     if (!response.ok) {
@@ -39,7 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
     
-    const responseData: PositionsResponseMT = await response.json();
+    const responseData: EditPositionResponseMT = await response.json();
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

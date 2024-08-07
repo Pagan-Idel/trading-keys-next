@@ -2,20 +2,22 @@
 import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { ACTION, TYPE, order, modifyTrade, closeTrade } from '../../utils/oanda/api';
-import { openMT } from '../../utils/match-trader/api/open';
+import { openPostionMT } from '../../utils/match-trader/api/open';
+import { closePositionMT } from '../../utils/match-trader/api/close-position';
+import { closePartiallyMT } from '../../utils/match-trader/api/close-partially';
 
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
 const functionNames = [
   '7 - SL UP',       // Case 7
   '8 - TP UP',       // Case 8
-  '9 - Close',       // Case 9
+  '9 - 50% CLOSE',       // Case 9
   '4 - SL DOWN',     // Case 4
   '5 - TP DOWN',     // Case 5
-  '6 - 25% Close',   // Case 6
-  '1 - Buy',         // Case 1
-  '2 - Sell',        // Case 2
-  '3 - SL at Entry', // Case 3
-  '0'             // Case 0
+  '6 - 25% CLOSE',   // Case 6
+  '1 - BUY',         // Case 1
+  '2 - SELL',        // Case 2
+  '3 - SL AT ENTRY', // Case 3
+  '0 - CLOSE'    // Case 0
 ];
 
 // Define the type for the props
@@ -213,63 +215,64 @@ const Keyboard = ({ platform }: KeyboardProps) => {
   const lastExecutionTimeRef = useRef<number>(0);
   const rateLimitedBuyOanda = createRateLimitedFunction(() => order({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.BUY }));
   const rateLimitedSellOanda = createRateLimitedFunction(() => order({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.SELL }));
-  const rateLimitedBuyMT = createRateLimitedFunction(() => openMT(Number(riskPercentage), ACTION.BUY));
-  const rateLimitedSellMT = createRateLimitedFunction(() => openMT(Number(riskPercentage), ACTION.SELL));
+  const rateLimitedBuyMT = createRateLimitedFunction(() => openPostionMT(Number(riskPercentage), ACTION.BUY));
+  const rateLimitedSellMT = createRateLimitedFunction(() => openPostionMT(Number(riskPercentage), ACTION.SELL));
   const handleButtonClick = (functionName: string) => {
     setButtonPressed(functionName);
     // const functionNames = [
     //   '7 - SL UP',       // Case 7
     //   '8 - TP UP',       // Case 8
-    //   '9 - Close',       // Case 9
+    //   '9 - CLOSE',       // Case 9
     //   '4 - SL DOWN',     // Case 4
     //   '5 - TP DOWN',     // Case 5
-    //   '6 - 25% Close',   // Case 6
+    //   '6 - 25% CLOSE',   // Case 6
     //   '1 - BUY',         // Case 1
     //   '2- Sell',        // Case 2
-    //   '3 - SL at Entry', // Case 3
+    //   '3 - SL AT ENTRY', // Case 3
     //   '0'             // Case 0
     // ];
     switch (platform) {
       case 'oanda':
         switch (functionName) {
           case '0':
-            // Handle the case when button 0 is clicked for Oanda
+            closeTrade({ action: ACTION.CLOSE });
+            console.log(`Button 0 clicked`);
             break;
-          case '1 - Buy':
+          case '1 - BUY':
             rateLimitedBuyOanda();
-            console.log(`Button 1 clicked with ${riskPercentage}`);
+            console.log(`Button 1 clicked`);
             break;
-          case '2 - Sell':
+          case '2 - SELL':
             rateLimitedSellOanda();
-            console.log(`Button 2 clicked with ${riskPercentage}`);
+            console.log(`Button 2 clicked`);
             break;
-          case '3 - SL at Entry':
+          case '3 - SL AT ENTRY':
             modifyTrade({ action: ACTION.SLatEntry });
-            console.log(`Button 3 clicked with ${riskPercentage}`);
+            console.log(`Button 3 clicked`);
             break;
           case '4 - SL DOWN':
             modifyTrade({ action: ACTION.MoveSL, action2: ACTION.DOWN });
-            console.log(`Button 4 clicked with ${riskPercentage}`);
+            console.log(`Button 4 clicked`);
             break;
           case '5 - TP DOWN':
             modifyTrade({ action: ACTION.MoveTP, action2: ACTION.DOWN });
-            console.log(`Button 5 clicked with ${riskPercentage}`);
+            console.log(`Button 5 clicked`);
             break;
-          case '6 - 25% Close':
-            closeTrade({ action: ACTION.PartialClose });
-            console.log(`Button 6 clicked with ${riskPercentage}`);
+          case '6 - 25% CLOSE':
+            closeTrade({ action: ACTION.PartialClose25 });
+            console.log(`Button 6 clicked`);
             break;
           case '7 - SL UP':
             modifyTrade({ action: ACTION.MoveSL, action2: ACTION.UP });
-            console.log(`Button 7 clicked with ${riskPercentage}`);
+            console.log(`Button 7 clicked`);
             break;
           case '8 - TP UP':
             modifyTrade({ action: ACTION.MoveTP, action2: ACTION.UP });
-            console.log(`Button 8 clicked with ${riskPercentage}`);
+            console.log(`Button 8 clicked`);
             break;
-          case '9 - Close':
-            closeTrade({ action: ACTION.CLOSE });
-            console.log(`Button 9 clicked with ${riskPercentage}`);
+          case '9 - 50% CLOSE':
+            closeTrade({ action: ACTION.PartialClose50 });
+            console.log(`Button 9 clicked`);
             break;
           default:
             // Handle default case
@@ -279,44 +282,44 @@ const Keyboard = ({ platform }: KeyboardProps) => {
     
       case 'dxtrade':
         switch (functionName) {
-          case '0':
+          case 'CLOSE':
             // Handle the case when button 0 is clicked for dxtrade
             break;
-          case '1 - Buy':
+          case '1 - BUY':
             // rateLimitedBuyOanda();
-            console.log(`Button 1 clicked with ${riskPercentage}`);
+            console.log(`Button 1 clicked`);
             break;
-          case '2 - Sell':
+          case '2 - SELL':
             // rateLimitedSellOanda();
-            console.log(`Button 2 clicked with ${riskPercentage}`);
+            console.log(`Button 2 clicked`);
             break;
-          case '3 - SL at Entry':
+          case '3 - SL AT ENTRY':
             // modifyTrade({ action: ACTION.SLatEntry });
-            console.log(`Button 3 clicked with ${riskPercentage}`);
+            console.log(`Button 3 clicked`);
             break;
           case '4 - SL DOWN':
             // modifyTrade({ action: ACTION.MoveSL, action2: ACTION.DOWN });
-            console.log(`Button 4 clicked with ${riskPercentage}`);
+            console.log(`Button 4 clicked`);
             break;
           case '5 - TP DOWN':
             // modifyTrade({ action: ACTION.MoveTP, action2: ACTION.DOWN });
-            console.log(`Button 5 clicked with ${riskPercentage}`);
+            console.log(`Button 5 clicked`);
             break;
-          case '6 - 25% Close':
-            // closeTrade({ action: ACTION.PartialClose });
-            console.log(`Button 6 clicked with ${riskPercentage}`);
+          case '6 - 25% CLOSE':
+            
+            console.log(`Button 6 clicked`);
             break;
           case '7 - SL UP':
             // modifyTrade({ action: ACTION.MoveSL, action2: ACTION.UP });
-            console.log(`Button 7 clicked with ${riskPercentage}`);
+            console.log(`Button 7 clicked`);
             break;
           case '8 - TP UP':
             // modifyTrade({ action: ACTION.MoveTP, action2: ACTION.UP });
-            console.log(`Button 8 clicked with ${riskPercentage}`);
+            console.log(`Button 8 clicked`);
             break;
-          case '9 - Close':
-            // closeTrade({ action: ACTION.CLOSE });
-            console.log(`Button 9 clicked with ${riskPercentage}`);
+          case '9 - 50% CLOSE':
+            
+            console.log(`Button 9 clicked`);
             break;
           default:
             // Handle default case
@@ -326,44 +329,46 @@ const Keyboard = ({ platform }: KeyboardProps) => {
     
       case 'match-trader':
         switch (functionName) {
-          case '0':
+          case '0 - Close':
             // Handle the case when button 0 is clicked for match-trader
+            closePositionMT();
+            console.log(`Button 0 clicked`);
             break;
-          case '1 - Buy':
+          case '1 - BUY':
             rateLimitedBuyMT();
-            console.log(`Button 1 clicked with ${riskPercentage}`);
+            console.log(`Button 1 clicked`);
             break;
-          case '2 - Sell':
+          case '2 - SELL':
             rateLimitedSellMT();
-            console.log(`Button 2 clicked with ${riskPercentage}`);
+            console.log(`Button 2 clicked`);
             break;
-          case '3 - SL at Entry':
+          case '3 - SL AT ENTRY':
             
-            console.log(`Button 3 clicked with ${riskPercentage}`);
+            console.log(`Button 3 clicked`);
             break;
           case '4 - SL DOWN':
             
-            console.log(`Button 4 clicked with ${riskPercentage}`);
+            console.log(`Button 4 clicked`);
             break;
           case '5 - TP DOWN':
            
-            console.log(`Button 5 clicked with ${riskPercentage}`);
+            console.log(`Button 5 clicked`);
             break;
-          case '6 - 25% Close':
-            
-            console.log(`Button 6 clicked with ${riskPercentage}`);
+          case '6 - 25% CLOSE':
+            closePartiallyMT(0.249999999999);
+            console.log(`Button 6 clicked`);
             break;
           case '7 - SL UP':
             
-            console.log(`Button 7 clicked with ${riskPercentage}`);
+            console.log(`Button 7 clicked`);
             break;
           case '8 - TP UP':
             
-            console.log(`Button 8 clicked with ${riskPercentage}`);
+            console.log(`Button 8 clicked`);
             break;
-          case '9 - Close':
-            
-            console.log(`Button 9 clicked with ${riskPercentage}`);
+          case '9 - 50% Close':
+            closePartiallyMT(0.499999999999);
+            console.log(`Button 9 clicked`);
             break;
           default:
             // Handle default case

@@ -1,7 +1,7 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
-import { OpenPostionResponseMT } from '../../../utils/match-trader/api/open';
 import redisClient from './redisClient';
+import { EditPositionResponseMT } from '../../../utils/match-trader/api/edit-position';
 
 export interface ErrorResponse {
   errorMessage: string;
@@ -13,15 +13,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
-  if (!req.url?.includes('/open')) {
+  if (!req.url?.includes('close-position')) {
     res.status(404).end(`Path ${req.url} Not Found`);
     return;
   }
   const coAuth = await redisClient.get('co-auth');
   const hostname = "https://mtr.gooeytrade.com";
-  const api: string = `/mtr-api/${req.headers.system_uuid}/position/open`;
-
-  console.log(req.body);
+  const api: string = `/mtr-api/${req.headers.system_uuid}/positions/close`;
+  
   try {
     const response = await fetch(hostname + api, {
       method: 'POST',
@@ -41,7 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
     
-    const responseData: OpenPostionResponseMT = await response.json();
+    const responseData: EditPositionResponseMT = await response.json();
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

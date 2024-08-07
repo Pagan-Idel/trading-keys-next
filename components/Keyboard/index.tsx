@@ -86,7 +86,7 @@ const PipStopLossDisplay = styled.div`
   margin-right: 10px; /* Adjust the margin as needed */
 `;
 
-const PipStopLoss = styled.input.attrs({ type: 'range', min: 3, max: 20, step: 1 })`
+const PipStopLoss = styled.input.attrs({ type: 'range', min: 1, max: 20, step: 1 })`
   width: 100%;
   -webkit-appearance: none;
   height: 10px;

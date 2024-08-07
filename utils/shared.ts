@@ -34,47 +34,46 @@ export const calculateSLTPMT = (openPrice: string, orderSide: "BUY" | "SELL"): S
   return {slPrice, tpPrice};
 }
 
-// TODO: NEEDS REVISION
 export const calculateVolumeMT = async (risk: number): Promise<number | string> => {
   const stopLoss: number = parseFloat(localStorage.getItem('stopLoss')!);
   const balanceResponse = await balanceMT();
 
   if ('balance' in balanceResponse) {
     let balance: string = balanceResponse.balance;
-    const a = parseFloat(balance) * (risk / 100);
-    const b = stopLoss * pipIncrement;
+    const pipValue = stopLoss * pipIncrement;
 
-    // Calculate volume without commission first
-    const volWithoutCommission = (a / b).toFixed(0);
-    let volumeWithoutCommission = parseFloat((parseFloat(volWithoutCommission) / contractSize).toFixed(1));
+    // Calculate the initial risk amount
+    const riskAmount = parseFloat(balance) * (risk / 100);
 
-    // Calculate the effective risk including commission
-    let volume = volumeWithoutCommission;
+    // Adjusted to account for an average commision amount (6 lots * $7).
+    const adjustedRiskAmount = riskAmount - 42;
 
-    // Adjust volume to account for commission
-    const totalCommission = volume * commissionPerLot;
-    const effectiveRisk = a - totalCommission;
-    volume = parseFloat(((effectiveRisk / b) / contractSize).toFixed(1));
+    // Calculate the total commission based on the volume
+    const volume = parseFloat((adjustedRiskAmount / pipValue / contractSize).toFixed(1));
+    // const totalCommission = volume * commissionPerLot;
 
-    // Ensure the calculated volume is valid (non-negative)
-    if (volume < 0) volume = 0;
+    // // Adjust the risk amount by subtracting the total commission
+    // const adjustedRiskAmount = initialRiskAmount - totalCommission;
+
+    // // Calculate the lot size to return
+    // const lotSize = parseFloat((adjustedRiskAmount / pipValue / contractSize).toFixed(1));
 
     console.log("Balance", balance);
     console.log("Risk", risk);
-    console.log("stopLoss", stopLoss);
-    console.log("a (initial risk)", a);
-    console.log("b", b);
-    console.log("volumeWithoutCommission", volumeWithoutCommission);
-    console.log("totalCommission", totalCommission);
-    console.log("effectiveRisk", effectiveRisk);
-    console.log("volume", volume);
+    console.log("StopLoss", stopLoss);
+    console.log("Pip Value", pipValue);
+    console.log("Risk Amount", riskAmount);
+    // console.log("Total Commission", totalCommission);
+    // console.log("Adjusted Risk Amount", adjustedRiskAmount);
+    console.log("Volume", volume);
 
     return volume;
   } else {
-    let volume = "No Volume!";
-    return volume;
+    return "No Volume!";
   }
 };
+
+
 
 export const calculalateRisk = async (orderType: OrderParameters): Promise<RISK | undefined> => {
   const stopLoss: number = parseFloat(localStorage.getItem('stopLoss')!);

@@ -105,8 +105,6 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
     }
     return true;
 
-  } else if (orderType.action == ACTION.PartialClose) {
-
   }
   return false;
 };

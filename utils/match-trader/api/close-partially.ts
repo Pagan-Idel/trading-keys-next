@@ -1,5 +1,4 @@
-import { getRedisMT } from "./get-redis";
-import { openedPositionsMT, PositionsResponseMT } from "./opened-positions";
+import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
 export interface ClosePositionResponseMT {
   status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';
@@ -19,37 +18,30 @@ export interface ErrorMTResponse {
   errorMessage: string;
 }
     
-  export const closePartiallyMT = async (partialAmount: number): Promise<ClosePartialPositionMT | ErrorMTResponse> => {
-    const recentTradeOpenVolume = localStorage.getItem('openVolume');
-    if (recentTradeOpenVolume == 'null') {
-      console.error(`Failed To Get Open Volume`, recentTradeOpenVolume);
-      return { errorMessage: `Failed To Get Open Volume` } as ErrorMTResponse;
-    } 
-    let requestBody: ClosePartialPositionMT = {  
-      positionId: "",
-      instrument: "",
-      orderSide: "",
-      isMobile: false,
-      volume: 0 
-    };
-    const apiEndpoint = '/api/match-trader/close-partially';
+export const closePartiallyMT = async (partialAmount: number): Promise<ClosePartialPositionMT | ErrorMTResponse> => {
+  const recentTradeOpenVolume = localStorage.getItem('openVolume');
+  if (recentTradeOpenVolume == 'null') {
+    console.error(`Failed To Get Open Volume`, recentTradeOpenVolume);
+    return { errorMessage: `Failed To Get Open Volume` } as ErrorMTResponse;
+  } 
+  let requestBody: ClosePartialPositionMT = {  
+    positionId: "",
+    instrument: "",
+    orderSide: "",
+    isMobile: false,
+    volume: 0 
+  };
+  const apiEndpoint = '/api/match-trader/close-partially';
     
-    try {
-      const recentPosition: PositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
-      if ('errorMessage' in recentPosition) {
-        console.error("Error Getting Recent Postion - ", recentPosition.errorMessage);
-      } else {
-        requestBody = {
-            positionId: recentPosition.positions[recentPosition.positions.length - 1].id,         
-            instrument: recentPosition.positions[recentPosition.positions.length - 1].symbol,     
-            orderSide: recentPosition.positions[recentPosition.positions.length - 1].side,
-            isMobile: false,
-            volume: parseFloat((parseFloat(recentTradeOpenVolume!) * partialAmount).toFixed(2))
-        };
-      }
-    } catch (e) {
-      console.error("Error Getting Recent Postion - ", e);
-    } 
+  const recentPosition: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
+  if ('positions' in recentPosition) {
+    requestBody = {
+      positionId: recentPosition.positions[recentPosition.positions.length - 1].id,         
+      instrument: recentPosition.positions[recentPosition.positions.length - 1].symbol,     
+      orderSide: recentPosition.positions[recentPosition.positions.length - 1].side,
+      isMobile: false,
+      volume: parseFloat((parseFloat(recentTradeOpenVolume!) * partialAmount).toFixed(2))
+    };
     try {
       const response = await fetch(apiEndpoint, {
         method: 'POST',
@@ -90,5 +82,9 @@ export interface ErrorMTResponse {
       console.error(`An error occurred during Partial closing position:`, error);
       return { errorMessage: `An unknown error occurred during Partial closing postion` } as ErrorMTResponse;
     }
-  };
+  } else {
+    console.error("Error Getting Recent Postion - ", recentPosition.errorMessage);
+    return { errorMessage: recentPosition.errorMessage } as ErrorMTResponse;
+  }
+};
   

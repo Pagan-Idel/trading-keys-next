@@ -18,7 +18,7 @@ export interface Position {
   askPrice: number;
 }
   
-export interface PositionsResponseMT {
+export interface OpenedPositionsResponseMT {
   positions: Position[];
 }
 
@@ -26,7 +26,7 @@ export interface ErrorMTResponse {
   errorMessage: string;
 }
   
-export const openedPositionsMT = async (): Promise<PositionsResponseMT | ErrorMTResponse> => {
+export const openedPositionsMT = async (): Promise<OpenedPositionsResponseMT | ErrorMTResponse> => {
 
   const apiEndpoint = '/api/match-trader/opened-positions';
 
@@ -50,11 +50,11 @@ export const openedPositionsMT = async (): Promise<PositionsResponseMT | ErrorMT
         console.error('Error parsing error response as JSON:', e);
         throw new Error(`Error: ${rawResponseText}`);
       }
-      console.error('Market Watch failed:', errorResponse.errorMessage);
+      console.error('Opened Positions Failed:', errorResponse.errorMessage);
       return errorResponse;
     }
 
-    let data: PositionsResponseMT;
+    let data: OpenedPositionsResponseMT;
     try {
       data = JSON.parse(rawResponseText);
     } catch (e) {
@@ -62,11 +62,16 @@ export const openedPositionsMT = async (): Promise<PositionsResponseMT | ErrorMT
       throw new Error(`Error: ${rawResponseText}`);
     }
 
-    console.log('Open Positon Successful');
+    if (data.positions.length === 0) {
+      let errorResponse: ErrorMTResponse = {errorMessage: "No Opened Positions"};
+      console.error('No Opened Positions');
+      return errorResponse;
+    }
+    console.log('Opened Positons Successful');
   
     return data;
   } catch (error) {
-    console.error('An error occurred opening position:', error);
-    return { errorMessage: 'An unknown error occurred opening position' } as ErrorMTResponse;
+    console.error('An error occurred opening positions:', error);
+    return { errorMessage: 'An unknown error occurred opening positions' } as ErrorMTResponse;
   }
 };

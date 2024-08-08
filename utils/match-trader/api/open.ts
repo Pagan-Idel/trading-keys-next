@@ -1,7 +1,7 @@
 import { ACTION } from "../../oanda/api";
 import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared";
 import { editPositionMT, EditPositionRequestMT } from "./edit-position";
-import { openedPositionsMT, PositionsResponseMT } from "./opened-positions";
+import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
   export interface OpenPostionResponseMT {
     status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';
@@ -75,13 +75,13 @@ import { openedPositionsMT, PositionsResponseMT } from "./opened-positions";
       console.log('Open Trade Successful');
 
         // Call openPositions to get the openPrice and id
-      let positionResponse : PositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
+      let positionResponse : OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
       if ('errorMessage' in positionResponse ) {
-        console.error('Error fetching positions:', positionResponse .errorMessage);
+        console.error('Error getting positions:', positionResponse.errorMessage);
         return positionResponse ;
       }
 
-      const positionsResponse = positionResponse as PositionsResponseMT;
+      const positionsResponse = positionResponse as OpenedPositionsResponseMT;
       const latestPosition = positionsResponse.positions[positionsResponse.positions.length - 1];
       const sltpPrices: SLTPMT = calculateSLTPMT(latestPosition.openPrice, latestPosition.side);
 

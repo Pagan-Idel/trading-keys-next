@@ -18,10 +18,9 @@
     errorMessage: string;
   }
     
-  export const editPositionMT = async (requestBody: EditPositionRequestMT): Promise<EditPositionRequestMT | ErrorMTResponse> => {
+  export const editPositionMT = async (requestBody?: EditPositionRequestMT ): Promise<EditPositionRequestMT | ErrorMTResponse> => {
 
     const apiEndpoint = '/api/match-trader/edit-position';
-
     try {
       const response = await fetch(apiEndpoint, {
         method: 'POST',

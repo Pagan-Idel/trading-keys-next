@@ -5,6 +5,8 @@ import { ACTION, TYPE, order, modifyTrade, closeTrade } from '../../utils/oanda/
 import { openPostionMT } from '../../utils/match-trader/api/open';
 import { closePositionMT } from '../../utils/match-trader/api/close-position';
 import { closePartiallyMT } from '../../utils/match-trader/api/close-partially';
+import { moveTPSLMT } from '../../utils/match-trader/api/move-TPSL';
+import { stopAtEntryMT } from '../../utils/match-trader/stop-at-entry';
 
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
 const functionNames = [
@@ -343,15 +345,15 @@ const Keyboard = ({ platform }: KeyboardProps) => {
             console.log(`Button 2 clicked`);
             break;
           case '3 - SL AT ENTRY':
-            
+            stopAtEntryMT();
             console.log(`Button 3 clicked`);
             break;
           case '4 - SL DOWN':
-            
+            moveTPSLMT(ACTION.MoveSL, ACTION.DOWN);
             console.log(`Button 4 clicked`);
             break;
           case '5 - TP DOWN':
-           
+            moveTPSLMT(ACTION.MoveTP, ACTION.DOWN);
             console.log(`Button 5 clicked`);
             break;
           case '6 - 25% CLOSE':
@@ -359,11 +361,11 @@ const Keyboard = ({ platform }: KeyboardProps) => {
             console.log(`Button 6 clicked`);
             break;
           case '7 - SL UP':
-            
+            moveTPSLMT(ACTION.MoveSL, ACTION.UP);
             console.log(`Button 7 clicked`);
             break;
           case '8 - TP UP':
-            
+            moveTPSLMT(ACTION.MoveTP, ACTION.UP);
             console.log(`Button 8 clicked`);
             break;
           case '9 - 50% CLOSE':

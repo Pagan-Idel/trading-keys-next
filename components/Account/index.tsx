@@ -2,7 +2,7 @@ import { useState, useEffect, ChangeEvent } from 'react';
 import styled from 'styled-components';
 import Keyboard from '../Keyboard';
 import { handleOandaLogin } from '../../utils/oanda/api';
-import { handleDXLogin } from '../../utils/dxtrade/api';
+// import { handleDXLogin } from '../../utils/dxtrade/api';
 import { handleMTLogin } from '../../utils/match-trader/api';
 import { cookies } from 'next/headers';
 import { marketWatchMT } from '../../utils/match-trader/api/market-watch';
@@ -163,14 +163,14 @@ const Account = () => {
     <Container>
       <Content>
         <h2 style={{ color: 'white' }}>
-          {platform ? `Platform - ${platform.toUpperCase()} - ${accountType.toUpperCase()}` : `Select Platform`}
+          {platform ? `${platform.toUpperCase()} - ${accountType.toUpperCase()}` : `Select Platform`}
         </h2>
         {!platform ? (
           <>
             <InputLabel htmlFor="platformSelect">Select Platform</InputLabel>
             <ButtonsContainer>
               <BlueButton onClick={() => setPlatform('oanda')}>Oanda</BlueButton>
-              <BlueButton disabled={true} onClick={() => setPlatform('dxtrade')}>DxTrade</BlueButton>
+              {/* <BlueButton disabled={true} onClick={() => setPlatform('dxtrade')}>DxTrade</BlueButton> */}
               <BlueButton onClick={() => setPlatform('match-trader')}>Match Trader</BlueButton>
             </ButtonsContainer>
           </>

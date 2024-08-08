@@ -28,7 +28,7 @@ export interface ErrorMTResponse {
   
 export const openedPositionsMT = async (): Promise<PositionsResponseMT | ErrorMTResponse> => {
 
-  const apiEndpoint = '/api/match-trader/open-positions';
+  const apiEndpoint = '/api/match-trader/opened-positions';
 
   try {
     const response = await fetch(apiEndpoint, {
@@ -66,7 +66,7 @@ export const openedPositionsMT = async (): Promise<PositionsResponseMT | ErrorMT
   
     return data;
   } catch (error) {
-    console.error('An error occurred during market watch:', error);
-    return { errorMessage: 'An unknown error occurred during market watch' } as ErrorMTResponse;
+    console.error('An error occurred opening position:', error);
+    return { errorMessage: 'An unknown error occurred opening position' } as ErrorMTResponse;
   }
 };

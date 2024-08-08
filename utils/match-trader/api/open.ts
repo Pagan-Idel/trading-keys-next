@@ -33,16 +33,10 @@ import { openedPositionsMT, PositionsResponseMT } from "./opened-positions";
       tpPrice : 0,  // take-profit price: 0 if not set
       isMobile: false  // request source: true if mobile, false if desktop};
     };
-    try {
-        // Check if the result is an error message
-        if (typeof requestBody.volume != 'number') {
+    if (typeof requestBody.volume != 'number') {
           console.error(requestBody.volume);
-        }
-
-      } catch (error) {
-        console.error('An error occurred:', error);
-      }
-
+    }
+    
     try {
       const response = await fetch(apiEndpoint, {
         method: 'POST',

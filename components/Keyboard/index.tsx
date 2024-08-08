@@ -366,7 +366,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
             
             console.log(`Button 8 clicked`);
             break;
-          case '9 - 50% Close':
+          case '9 - 50% CLOSE':
             closePartiallyMT(0.499999999999);
             console.log(`Button 9 clicked`);
             break;

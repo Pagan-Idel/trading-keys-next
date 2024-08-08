@@ -1,6 +1,6 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
-import redisClient from './redisClient';
+import redisClient from '../../../redisClient';
 import { PositionsResponseMT } from '../../../utils/match-trader/api/opened-positions';
 
 export interface ErrorResponse {
@@ -13,7 +13,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
-  if (!req.url?.includes('open-positions')) {
+  if (!req.url?.includes('opened-positions')) {
     res.status(404).end(`Path ${req.url} Not Found`);
     return;
   }

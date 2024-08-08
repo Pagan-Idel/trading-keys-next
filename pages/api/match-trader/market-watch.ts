@@ -1,7 +1,7 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
 import { MarketWatchResponseMT } from '../../../utils/match-trader/api/market-watch';
-import redisClient from './redisClient';
+import redisClient from '../../../redisClient';
 
 export interface ErrorResponse {
   errorMessage: string;

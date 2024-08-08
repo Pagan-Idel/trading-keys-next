@@ -1,3 +1,4 @@
+import { getRedisMT } from "./get-redis";
 import { openedPositionsMT, PositionsResponseMT } from "./opened-positions";
 
 export interface ClosePositionResponseMT {
@@ -19,6 +20,11 @@ export interface ErrorMTResponse {
 }
     
   export const closePartiallyMT = async (partialAmount: number): Promise<ClosePartialPositionMT | ErrorMTResponse> => {
+    const recentTradeOpenVolume = await getRedisMT('recentTrade-openVolume');
+    if (typeof recentTradeOpenVolume !== 'string') {
+      console.error(`Failed To Get Open Volume`);
+      return { errorMessage: `Failed To Get Open Volume` } as ErrorMTResponse;
+    } 
     let requestBody: ClosePartialPositionMT = {  
       positionId: "",
       instrument: "",
@@ -38,7 +44,7 @@ export interface ErrorMTResponse {
             instrument: recentPosition.positions[recentPosition.positions.length - 1].symbol,     
             orderSide: recentPosition.positions[recentPosition.positions.length - 1].side,
             isMobile: false,
-            volume: parseFloat((parseFloat(recentPosition.positions[recentPosition.positions.length - 1].volume) * partialAmount).toFixed(2))
+            volume: parseFloat((parseFloat(recentTradeOpenVolume.value) * partialAmount).toFixed(2))
         };
       }
     } catch (e) {

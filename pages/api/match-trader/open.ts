@@ -42,7 +42,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     
     const responseData: OpenPostionResponseMT = await response.json();
-    redisClient.set('recentTrade-openVolume', req.body.volume);
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

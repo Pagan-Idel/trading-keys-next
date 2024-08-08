@@ -4,7 +4,6 @@ import Keyboard from '../Keyboard';
 import { handleOandaLogin } from '../../utils/oanda/api';
 // import { handleDXLogin } from '../../utils/dxtrade/api';
 import { handleMTLogin } from '../../utils/match-trader/api';
-import { cookies } from 'next/headers';
 import { marketWatchMT } from '../../utils/match-trader/api/market-watch';
 
 // Dark mode color variables

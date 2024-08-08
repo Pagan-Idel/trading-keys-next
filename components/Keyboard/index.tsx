@@ -329,7 +329,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
     
       case 'match-trader':
         switch (functionName) {
-          case '0 - Close':
+          case '0 - CLOSE':
             // Handle the case when button 0 is clicked for match-trader
             closePositionMT();
             console.log(`Button 0 clicked`);

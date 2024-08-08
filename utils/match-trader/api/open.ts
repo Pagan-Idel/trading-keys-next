@@ -35,6 +35,8 @@ import { openedPositionsMT, PositionsResponseMT } from "./opened-positions";
     };
     if (typeof requestBody.volume != 'number') {
           console.error(requestBody.volume);
+    } else {
+      localStorage.setItem('openVolume', requestBody.volume.toLocaleString());
     }
     
     try {

@@ -5,7 +5,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === 'GET') {
     try {
       // Example of getting a value from Redis
-      const value = await redisClient.get(`${req.headers.rediskey}`);
+      const value = await redisClient.get(`${req.headers.Rediskey}`);
       res.status(200).json({ value });
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch data from Redis' });

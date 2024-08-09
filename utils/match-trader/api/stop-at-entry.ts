@@ -1,4 +1,4 @@
-import { openedPositionsMT, OpenedPositionsResponseMT } from "./api/opened-positions";
+import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
 export interface EditPositionResponseMT {
   status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';
@@ -28,12 +28,12 @@ export const stopAtEntryMT = async (): Promise<EditPositionRequestMT | ErrorMTRe
   const recentPosition: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
   if ('positions' in recentPosition) {
     requestBody = {
-        id: recentPosition.positions[recentPosition.positions.length - 1].id,
-        instrument: recentPosition.positions[recentPosition.positions.length - 1].symbol,
-        orderSide: recentPosition.positions[recentPosition.positions.length - 1].side, 
-        volume: parseFloat(recentPosition.positions[recentPosition.positions.length - 1].volume), 
-        slPrice: parseFloat(recentPosition.positions[recentPosition.positions.length - 1].openPrice),  
-        tpPrice: parseFloat(recentPosition.positions[recentPosition.positions.length - 1].takeProfit),
+        id: recentPosition.positions[0].id,
+        instrument: recentPosition.positions[0].symbol,
+        orderSide: recentPosition.positions[0].side, 
+        volume: parseFloat(recentPosition.positions[0].volume), 
+        slPrice: parseFloat(recentPosition.positions[0].openPrice),  
+        tpPrice: parseFloat(recentPosition.positions[0].takeProfit),
         isMobile: false, 
     };
     try {
@@ -74,7 +74,7 @@ export const stopAtEntryMT = async (): Promise<EditPositionRequestMT | ErrorMTRe
       return { errorMessage: 'An unknown error occurred during moving stop loss at entry' } as ErrorMTResponse;
     }
   } else {
-    console.error('Error getting positions:');
+    console.error('Error getting positions - ', recentPosition.errorMessage);
     return recentPosition as ErrorMTResponse;
   }
 };

@@ -6,7 +6,7 @@ import { openPostionMT } from '../../utils/match-trader/api/open';
 import { closePositionMT } from '../../utils/match-trader/api/close-position';
 import { closePartiallyMT } from '../../utils/match-trader/api/close-partially';
 import { moveTPSLMT } from '../../utils/match-trader/api/move-TPSL';
-import { stopAtEntryMT } from '../../utils/match-trader/stop-at-entry';
+import { stopAtEntryMT } from '../../utils/match-trader/api/stop-at-entry';
 
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
 const functionNames = [

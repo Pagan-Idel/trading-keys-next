@@ -31,22 +31,22 @@ export const moveTPSLMT = async (action: ACTION, action2: ACTION): Promise<EditP
   if ('positions' in recentPosition) {
     if (action == ACTION.MoveSL) {
       requestBody = {
-          id: recentPosition.positions[recentPosition.positions.length - 1].id,
-          instrument: recentPosition.positions[recentPosition.positions.length - 1].symbol,
-          orderSide: recentPosition.positions[recentPosition.positions.length - 1].side, 
-          volume: parseFloat(recentPosition.positions[recentPosition.positions.length - 1].volume), 
-          slPrice: action2 == ACTION.DOWN ? parseFloat(recentPosition.positions[recentPosition.positions.length - 1].stopLoss) - pipIncrement : parseFloat(recentPosition.positions[recentPosition.positions.length - 1].stopLoss) + pipIncrement,  
-          tpPrice: parseFloat(recentPosition.positions[recentPosition.positions.length - 1].takeProfit),
+          id: recentPosition.positions[0].id,
+          instrument: recentPosition.positions[0].symbol,
+          orderSide: recentPosition.positions[0].side, 
+          volume: parseFloat(recentPosition.positions[0].volume), 
+          slPrice: action2 == ACTION.DOWN ? parseFloat(recentPosition.positions[0].stopLoss) - pipIncrement : parseFloat(recentPosition.positions[0].stopLoss) + pipIncrement,  
+          tpPrice: parseFloat(recentPosition.positions[0].takeProfit),
           isMobile: false
       };
     } else if (action == ACTION.MoveTP) {
       requestBody = {
-        id: recentPosition.positions[recentPosition.positions.length - 1].id,
-        instrument: recentPosition.positions[recentPosition.positions.length - 1].symbol,
-        orderSide: recentPosition.positions[recentPosition.positions.length - 1].side, 
-        volume: parseFloat(recentPosition.positions[recentPosition.positions.length - 1].volume), 
-        slPrice: parseFloat(recentPosition.positions[recentPosition.positions.length - 1].stopLoss),  
-        tpPrice: action2 == ACTION.DOWN ? parseFloat(recentPosition.positions[recentPosition.positions.length - 1].takeProfit) - pipIncrement : parseFloat(recentPosition.positions[recentPosition.positions.length - 1].takeProfit) + pipIncrement,
+        id: recentPosition.positions[0].id,
+        instrument: recentPosition.positions[0].symbol,
+        orderSide: recentPosition.positions[0].side, 
+        volume: parseFloat(recentPosition.positions[0].volume), 
+        slPrice: parseFloat(recentPosition.positions[0].stopLoss),  
+        tpPrice: action2 == ACTION.DOWN ? parseFloat(recentPosition.positions[0].takeProfit) - pipIncrement : parseFloat(recentPosition.positions[0].takeProfit) + pipIncrement,
         isMobile: false
       };
     };

@@ -36,9 +36,9 @@ export const closePartiallyMT = async (partialAmount: number): Promise<ClosePart
   const recentPosition: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
   if ('positions' in recentPosition) {
     requestBody = {
-      positionId: recentPosition.positions[recentPosition.positions.length - 1].id,         
-      instrument: recentPosition.positions[recentPosition.positions.length - 1].symbol,     
-      orderSide: recentPosition.positions[recentPosition.positions.length - 1].side,
+      positionId: recentPosition.positions[0].id,         
+      instrument: recentPosition.positions[0].symbol,     
+      orderSide: recentPosition.positions[0].side,
       isMobile: false,
       volume: parseFloat((parseFloat(recentTradeOpenVolume!) * partialAmount).toFixed(2))
     };

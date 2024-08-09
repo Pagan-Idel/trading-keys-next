@@ -1,3 +1,4 @@
+import { TradeManager } from "../../trade-manager";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
 export interface ClosePositionResponseMT {
@@ -29,10 +30,10 @@ export const closePositionMT = async (): Promise<ClosePositionsMT | ErrorMTRespo
   const recentPosition: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
   if ('positions' in recentPosition) {
     requestBody = [{
-      positionId: recentPosition.positions[recentPosition.positions.length - 1].id,         
-      instrument: recentPosition.positions[recentPosition.positions.length - 1].symbol,     
-      orderSide: recentPosition.positions[recentPosition.positions.length - 1].side,
-      volume: recentPosition.positions[recentPosition.positions.length - 1].volume
+      positionId: recentPosition.positions[0].id,         
+      instrument: recentPosition.positions[0].symbol,     
+      orderSide: recentPosition.positions[0].side,
+      volume: recentPosition.positions[0].volume
     }];
     const apiEndpoint = '/api/match-trader/close-position';
     try {
@@ -63,6 +64,14 @@ export const closePositionMT = async (): Promise<ClosePositionsMT | ErrorMTRespo
     let data: ClosePositionsMT;
     try {
       data = JSON.parse(rawResponseText);
+    } catch (e) {
+      console.error('Error parsing success response as JSON:', e);
+      throw new Error(`Error: ${rawResponseText}`);
+    }
+
+    try {
+      const tradeManager = TradeManager.getInstance();
+      tradeManager.stop(requestBody[0].positionId);
     } catch (e) {
       console.error('Error parsing success response as JSON:', e);
       throw new Error(`Error: ${rawResponseText}`);

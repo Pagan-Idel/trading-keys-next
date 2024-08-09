@@ -1,8 +1,9 @@
 import { ACTION } from "../../oanda/api";
 import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared";
+import { TradeManager } from "../../trade-manager";
 import { editPositionMT, EditPositionRequestMT } from "./edit-position";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
-
+ 
   export interface OpenPostionResponseMT {
     status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';
     nativeCode: string | null;
@@ -74,7 +75,7 @@ import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions
   
       console.log('Open Trade Successful');
 
-        // Call openPositions to get the openPrice and id
+      // Call openPositions to get the openPrice and id
       let positionResponse : OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
       if ('errorMessage' in positionResponse ) {
         console.error('Error getting positions:', positionResponse.errorMessage);
@@ -82,7 +83,7 @@ import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions
       }
 
       const positionsResponse = positionResponse as OpenedPositionsResponseMT;
-      const latestPosition = positionsResponse.positions[positionsResponse.positions.length - 1];
+      const latestPosition = positionsResponse.positions[0];
       const sltpPrices: SLTPMT = calculateSLTPMT(latestPosition.openPrice, latestPosition.side);
 
       try {
@@ -97,6 +98,10 @@ import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions
           isMobile: false  // request source: true if mobile, false if desktop};
         };
         await editPositionMT(requestEditBody);
+        // Get the singleton instance
+        const tradeManager = TradeManager.getInstance();
+        // Start managing the trade
+        tradeManager.start(latestPosition.id, sltpPrices.slPrice, sltpPrices.tpPrice, latestPosition.side, parseFloat(latestPosition.openPrice));
        } catch (e) {
          console.error('Error editing position', e);
        }

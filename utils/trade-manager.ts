@@ -29,13 +29,8 @@ export class TradeManager {
       console.warn(`Trade with ID ${tradeId} is already being managed. Skipping start.`);
       return;
     }
-
-    console.log(`Starting to manage trade with ID: ${tradeId}`);
-    console.log(`Trade Details: SL Price = ${slPrice}, TP Price = ${tpPrice}, Order Side = ${orderSide}, Open Price = ${openPrice}`);
-
     // Save the trade details
     this.trades.set(tradeId, { slPrice, tpPrice, orderSide, openPrice });
-    console.log(`Trade details saved for ID: ${tradeId}`);
 
     // Start monitoring the price for this trade every 10 seconds
     const intervalId = setInterval(() => this.checkPrice(tradeId), 10000);
@@ -58,7 +53,6 @@ export class TradeManager {
 
   // Private method to check the price for a specific trade
   private async checkPrice(tradeId: string) {
-    console.log(`Checking price for trade ID: ${tradeId}`);
     const trade = this.trades.get(tradeId);
     if (!trade) {
       console.warn(`No trade data found for ID: ${tradeId}. Skipping price check.`);
@@ -68,7 +62,6 @@ export class TradeManager {
     const { slPrice, tpPrice, orderSide, openPrice } = trade;
 
     try {
-      console.log("Fetching market data...");
       const marketData: MarketWatchResponseMT | ErrorMTResponse = await marketWatchMT();
 
       if ('errorMessage' in marketData) {
@@ -79,16 +72,12 @@ export class TradeManager {
       const latestData = marketData[marketData.length - 1];
       const currentPrice: string = orderSide === 'BUY' ? latestData.bid : latestData.ask;
       const currentPriceNum = parseFloat(currentPrice);
-      console.log(`Current market price for ${orderSide} position: ${currentPriceNum}`);
 
       if (orderSide === 'BUY' && currentPriceNum >= ((tpPrice + openPrice) / 2)) {
-        console.log(`Price condition met for BUY position. Executing trade actions for trade ID: ${tradeId}`);
         await this.executeTradeActions(tradeId, currentPriceNum);
       } else if (orderSide === 'SELL' && currentPriceNum <= ((tpPrice + openPrice) / 2)) {
-        console.log(`Price condition met for SELL position. Executing trade actions for trade ID: ${tradeId}`);
         await this.executeTradeActions(tradeId, currentPriceNum);
       } else {
-        console.log(`Price condition not met for trade ID: ${tradeId}. Continuing monitoring.`);
       }
     } catch (error) {
       console.error("Error checking price:", error);
@@ -99,18 +88,13 @@ export class TradeManager {
   private async executeTradeActions(tradeId: string, currentPrice: number) {
     try {
       console.log(`Executing trade actions for trade ID: ${tradeId} at price: ${currentPrice}`);
-
       // Close 50% of the position
-      console.log("Closing 50% of the position...");
       await closePartiallyMT(0.499999999);
       console.log("50% of the position closed successfully.");
 
       // Set SL at entry
-      console.log("Setting SL at entry...");
       await stopAtEntryMT();
       console.log("SL at entry set successfully.");
-
-      console.log(`Actions executed successfully for trade ID: ${tradeId} at price: ${currentPrice}`);
 
       // Stop monitoring after actions are executed
       this.stop(tradeId);

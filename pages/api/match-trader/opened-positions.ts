@@ -1,7 +1,7 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
 import redisClient from '../../../redisClient';
-import { PositionsResponseMT } from '../../../utils/match-trader/api/opened-positions';
+import { OpenedPositionsResponseMT } from '../../../utils/match-trader/api/opened-positions';
 
 export interface ErrorResponse {
   errorMessage: string;
@@ -39,7 +39,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return;
     }
     
-    const responseData: PositionsResponseMT = await response.json();
+    const responseData: OpenedPositionsResponseMT = await response.json();
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

@@ -69,8 +69,8 @@ export interface LoginRequestBodyMT {
   };
   
   const liveCreds: LoginMTRequest = {
-    email: '',
-    password: ''
+    email: '[redacted]',
+    password: '[redacted]'
   };
   
   export const handleMTLogin = async (accountType: string): Promise<LoginMTResponse | ErrorMTResponse> => {

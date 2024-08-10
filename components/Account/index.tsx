@@ -162,7 +162,7 @@ const Account = () => {
     <Container>
       <Content>
         <h2 style={{ color: 'white' }}>
-          {platform ? `${platform.toUpperCase()} - ${accountType.toUpperCase()}` : `Select Platform`}
+          {platform ? `${platform.toUpperCase()} ${accountType.toUpperCase()}` : `Select Platform`}
         </h2>
         {!platform ? (
           <>

@@ -44,10 +44,10 @@ export interface AccountResponse {
 }
 
 export const handleOandaLogin = async (): Promise<AccountResponse> => {
-  const token = localStorage.getItem('token');
   const accountType = localStorage.getItem('accountType');
   const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
   const accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
+  const token = accountType === 'live' ? '[redacted]' : '[redacted]';
 
   // Check if the environment variable is set
   if (!token || !accountType) {

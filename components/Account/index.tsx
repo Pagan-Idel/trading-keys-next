@@ -79,7 +79,6 @@ const InputLabel = styled.label`
 
 const Account = () => {
   const [platform, setPlatform] = useState('');
-  const [token, setToken] = useState<string>('');
   const [accountType, setAccountType] = useState<string>('');
   const [isLoginSuccessful, setIsLoginSuccessful] = useState<boolean>(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -89,21 +88,14 @@ const Account = () => {
     localStorage.clear();
     setPlatform('');
     setAccountType('');
-    setToken('');
     setIsLoginSuccessful(false);
-  };
-  
-  const handleTokenInput = (event: ChangeEvent<HTMLInputElement>) => {
-    setToken(event.target.value);
   };
 
   const handleLogin = () => {
     localStorage.setItem('platform', platform);
     localStorage.setItem('accountType', accountType);
-    if (platform === 'oanda') {
-      localStorage.setItem('token', token);
-    }
-    if (platform == 'oanda' && accountType !== '' && token !== '') {
+  
+    if (platform == 'oanda' && accountType !== '') {
       handleOandaLogin().then((data) => {
         if (!data.errorMessage) {
           setIsLoginSuccessful(true);
@@ -172,26 +164,11 @@ const Account = () => {
               {/* <BlueButton disabled={true} onClick={() => setPlatform('dxtrade')}>DxTrade</BlueButton> */}
               <BlueButton onClick={() => setPlatform('match-trader')}>Match Trader</BlueButton>
             </ButtonsContainer>
-          </>
-        ) : (
-          <ButtonsContainer>
-            <BlueButton onClick={handlePlatformChange}>Change Platform</BlueButton>
-          </ButtonsContainer>
-        )}
-  
-        {platform == 'oanda' && !isLoginSuccessful &&(
-              <>
-                <br />
-                <InputLabel htmlFor="tokenInput">Token </InputLabel>
-                <Input
-                  type="text"
-                  id="tokenInput"
-                  placeholder="Type token"
-                  value={token}
-                  onChange={handleTokenInput}
-                  style={{ border: '1px solid #e0e0e0' }}
-                />
-              </>
+          </>) 
+          : (
+              <ButtonsContainer>
+                <BlueButton onClick={handlePlatformChange}>Change Platform</BlueButton>
+              </ButtonsContainer>
             )}
   
             {platform !== '' && accountType == '' && !isLoginSuccessful  && (
@@ -231,8 +208,8 @@ const Account = () => {
                   margin: '10px 0' 
                 }}>{message}</div>)}
                 <Keyboard platform={platform} />
-              </>
-            ) : (<>              
+              </>) 
+              : (<>              
                {message && (<div style={{ 
                   backgroundColor: message?.includes('Error') ? 'red' : '#333333', 
                   color: 'white', 

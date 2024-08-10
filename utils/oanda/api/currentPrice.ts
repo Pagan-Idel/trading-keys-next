@@ -16,10 +16,10 @@ interface PriceStreamResponse {
 }
 
 export const currentPrice = async (symbol: string): Promise<{ bid: string; ask: string }> => {
-  const token = localStorage.getItem('token');
   const accountType = localStorage.getItem('accountType');
   let hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
   const accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
+  const token = accountType === 'live' ? '[redacted]' : '[redacted]';
 
   // Check if the environment variable is set
   if (!accountId || !token || !hostname) {

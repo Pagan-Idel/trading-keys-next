@@ -167,7 +167,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
 
     // Check if key is a valid string representation of a number
     if (/^[0-9]$/.test(key)) {
-      const functionName = functionNames.find(name => name.includes(key));
+      const functionName = functionNames.find(name => name.includes(`${key} - `));
       if (functionName) {
         handleButtonClick(functionName);
       }

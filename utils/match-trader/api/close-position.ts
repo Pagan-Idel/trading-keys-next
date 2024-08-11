@@ -1,4 +1,4 @@
-import { TradeManager } from "../../trade-manager";
+import { TradeManager } from "../../trade-manager2";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
 export interface ClosePositionResponseMT {

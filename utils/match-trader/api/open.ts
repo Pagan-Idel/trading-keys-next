@@ -1,6 +1,6 @@
 import { ACTION } from "../../oanda/api";
 import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared";
-import { TradeManager } from "../../trade-manager";
+import { TradeManager } from "../../trade-manager2";
 import { editPositionMT, EditPositionRequestMT } from "./edit-position";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
  

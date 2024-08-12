@@ -25,7 +25,8 @@ export interface OpenedPositionsResponseMT {
 export interface ErrorMTResponse {
   errorMessage: string;
 }
-  
+
+// TODO: Ability to get open pisition by ID 
 export const openedPositionsMT = async (): Promise<OpenedPositionsResponseMT | ErrorMTResponse> => {
 
   const apiEndpoint = '/api/match-trader/opened-positions';

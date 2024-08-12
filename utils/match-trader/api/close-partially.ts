@@ -32,7 +32,6 @@ export const closePartiallyMT = async (partialAmount: number): Promise<ClosePart
     volume: 0 
   };
   const apiEndpoint = '/api/match-trader/close-partially';
-    
   const recentPosition: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
   if ('positions' in recentPosition) {
     requestBody = {

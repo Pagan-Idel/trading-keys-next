@@ -72,7 +72,6 @@ export const openedPositionsMT = async (): Promise<OpenedPositionsResponseMT | E
       console.error('No Opened Positions');
       return errorResponse;
     }
-    logToFileAsync('Opened Positons Successful');
   
     return data;
   } catch (error) {

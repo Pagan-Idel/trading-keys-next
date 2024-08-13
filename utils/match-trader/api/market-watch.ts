@@ -1,6 +1,3 @@
-import { logToFileAsync } from "../../logger";
-
-
 export interface BodyItem {
   symbol: string;
   alias: string;
@@ -55,8 +52,6 @@ export type MarketWatchResponseMT = BodyItem[];
         console.error('Error parsing success response as JSON:', e);
         throw new Error(`Error: ${rawResponseText}`);
       }
-  
-      logToFileAsync('Market Match Successful');
     
       return data;
     } catch (error) {

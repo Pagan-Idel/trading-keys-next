@@ -82,8 +82,8 @@ export class TradeManager {
 
         logToFileAsync(`Current price for trade ID ${tradeId}: ${currentPriceNum}`);
         if (
-          (orderSide === 'BUY' && currentPriceNum >= ((tpPrice + openPrice) / 2) && currentPriceNum <= openPrice + 0.9 * (tpPrice - openPrice)) ||
-          (orderSide === 'SELL' && currentPriceNum <= ((tpPrice + openPrice) / 2) && currentPriceNum >= Math.abs(openPrice - 0.9 * (openPrice - tpPrice)))
+          (orderSide === 'BUY' && currentPriceNum >= ((tpPrice! + openPrice!) / 2) && currentPriceNum <= openPrice! + 0.9 * (tpPrice! - openPrice!)) ||
+          (orderSide === 'SELL' && currentPriceNum <= ((tpPrice! + openPrice!) / 2) && currentPriceNum >= openPrice! - 0.9 * (openPrice! - tpPrice!))
         ) {
           logToFileAsync(`Taking 50% profit for trade ID ${tradeId} at price: ${currentPriceNum}`);
           this.take50PercentProfit(tradeId, currentPriceNum);
@@ -112,7 +112,7 @@ export class TradeManager {
       const trade = this.trades.get(tradeId);
       if (trade) {
         const { slPrice, openPrice, orderSide } = trade;
-        const newSLPrice = (trade.openPrice - (orderSide === 'BUY' ? -0.0001 : 0.0001));
+        const newSLPrice = (trade.openPrice! + (orderSide === 'BUY' ? 0.0001 : -0.0001));
         trade.slPrice = parseFloat(newSLPrice.toFixed(5));
         logToFileAsync(`New SL set at 1 pip above/below open price: ${trade.slPrice}`);
 
@@ -156,7 +156,7 @@ export class TradeManager {
         const currentPriceNum = parseFloat(currentPrice);
 
         logToFileAsync(`Current price for trade ID ${tradeId}: ${currentPriceNum}`);
-        if (orderSide === 'SELL' && currentPriceNum <= Math.abs((openPrice - (0.9 * (openPrice - tpPrice))))) {
+        if (orderSide === 'SELL' && currentPriceNum <= openPrice! - (0.90 * (openPrice! - tpPrice!))) {
           logToFileAsync(`Taking additional profit and tightening SL for trade ID ${tradeId} at price: ${currentPriceNum}`);
           this.takeAdditionalProfitAndTightenSL(tradeId, currentPriceNum);
           clearInterval(intervalId);

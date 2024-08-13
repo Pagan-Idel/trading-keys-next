@@ -3,12 +3,13 @@ import { closePartiallyMT } from "./match-trader/api/close-partially";
 import { marketWatchMT, MarketWatchResponseMT, ErrorMTResponse } from "./match-trader/api/market-watch";
 import { moveTPSLMT } from "./match-trader/api/move-TPSL";
 import { openedPositionsMT, OpenedPositionsResponseMT, Position } from "./match-trader/api/opened-positions";
-import { ACTION } from "./oanda/api";
+import { ACTION, currentPrice } from "./oanda/api";
+import { wait } from "./shared";
 
 export class TradeManager {
   private static instance: TradeManager;
   private tradeIntervals: Map<string, NodeJS.Timeout> = new Map();
-  private trades: Map<string, { slPrice: number; tpPrice: number; orderSide: 'BUY' | 'SELL'; openPrice: number; inTrailing: boolean }> = new Map();
+  private trades: Map<string, { slPrice?: number; tpPrice?: number; orderSide?: 'BUY' | 'SELL'; openPrice?: number; inTrailing?: boolean, lastPrice?: number }> = new Map();
 
   private constructor() {
     logToFileAsync("TradeManager instance created.");
@@ -30,7 +31,7 @@ export class TradeManager {
       return;
     }
 
-    this.trades.set(tradeId, { slPrice, tpPrice, orderSide, openPrice, inTrailing: false });
+    this.trades.set(tradeId, { slPrice, tpPrice, orderSide, openPrice, inTrailing: false, lastPrice: 0 });
 
     // Start the first interval for taking 50% profit
     this.startTake50PercentProfit(tradeId);
@@ -81,8 +82,8 @@ export class TradeManager {
 
         logToFileAsync(`Current price for trade ID ${tradeId}: ${currentPriceNum}`);
         if (
-          (orderSide === 'BUY' && currentPriceNum >= ((tpPrice + openPrice) / 2) && currentPriceNum <= openPrice + 0.9 * (tpPrice - openPrice)) ||
-          (orderSide === 'SELL' && currentPriceNum <= ((tpPrice + openPrice) / 2) && currentPriceNum >= openPrice - 0.9 * (openPrice - tpPrice))
+          (orderSide === 'BUY' && currentPriceNum >= ((tpPrice! + openPrice!) / 2) && currentPriceNum <= openPrice! + 0.9 * (tpPrice! - openPrice!)) ||
+          (orderSide === 'SELL' && currentPriceNum <= ((tpPrice! + openPrice!) / 2) && currentPriceNum >= openPrice! - 0.9 * (openPrice! - tpPrice!))
         ) {
           logToFileAsync(`Taking 50% profit for trade ID ${tradeId} at price: ${currentPriceNum}`);
           this.take50PercentProfit(tradeId, currentPriceNum);
@@ -111,13 +112,14 @@ export class TradeManager {
       const trade = this.trades.get(tradeId);
       if (trade) {
         const { slPrice, openPrice, orderSide } = trade;
-        const newSLPrice = (trade.openPrice - (orderSide === 'BUY' ? 0.0001 : -0.0001));
+        const newSLPrice = (trade.openPrice! + (orderSide === 'BUY' ? 0.0001 : -0.0001));
         trade.slPrice = parseFloat(newSLPrice.toFixed(5));
-        logToFileAsync(`New SL set at 50% between initial SL and open price: ${newSLPrice}`);
+        logToFileAsync(`New SL set at 1 pip above/below open price: ${trade.slPrice}`);
 
-        const slMoveCount = Math.abs(newSLPrice - slPrice) * 10000;
+        const slMoveCount = Math.abs(newSLPrice - slPrice!) * 10000;
         for (let i = 0; i < slMoveCount; i++) {
           await moveTPSLMT(ACTION.MoveSL, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN);
+          await wait(3000);
         }
       }
     } catch (error) {
@@ -154,14 +156,14 @@ export class TradeManager {
         const currentPriceNum = parseFloat(currentPrice);
 
         logToFileAsync(`Current price for trade ID ${tradeId}: ${currentPriceNum}`);
-        if (orderSide === 'SELL' && currentPriceNum <= openPrice - (0.9 * (openPrice - tpPrice))) {
+        if (orderSide === 'SELL' && currentPriceNum <= openPrice! - (0.90 * (openPrice! - tpPrice!))) {
           logToFileAsync(`Taking additional profit and tightening SL for trade ID ${tradeId} at price: ${currentPriceNum}`);
           this.takeAdditionalProfitAndTightenSL(tradeId, currentPriceNum);
           clearInterval(intervalId);
           // Proceed to the final step
           this.startContinueTrailing(tradeId, currentPriceNum);
           this.tradeIntervals.delete(tradeId);
-        } else if (orderSide === 'BUY' && currentPriceNum >= openPrice + (0.9 * (tpPrice - openPrice))) {
+        } else if (orderSide === 'BUY' && currentPriceNum >= openPrice! + (0.90 * (tpPrice! - openPrice!))) {
           logToFileAsync(`Taking additional profit and tightening SL for trade ID ${tradeId} at price: ${currentPriceNum}`);
           this.takeAdditionalProfitAndTightenSL(tradeId, currentPriceNum);
           clearInterval(intervalId);
@@ -187,13 +189,19 @@ export class TradeManager {
       if (trade) {
         const { orderSide } = trade;
         const currentSLPrice = trade.slPrice;
-
+        const currentTPPrice = trade.tpPrice;
         // Dynamically move SL to 3 pips behind current price
         const newSLPrice = currentPrice - (orderSide === 'BUY' ? 0.0003 : -0.0003);
-        const slMoveCount = Math.abs(newSLPrice - currentSLPrice) * 10000;
-
+        const newTPPrice = currentPrice - (orderSide === 'BUY' ? 0.0002 : -0.0002);
+        const slMoveCount = Math.abs(newSLPrice - currentSLPrice!) * 10000;
+        const tpMoveCount = Math.abs(newTPPrice - currentTPPrice!) * 10000;
+        for (let i = 0; i < tpMoveCount; i++) {
+          await moveTPSLMT(ACTION.MoveTP, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN);
+          await wait(2000);
+        }
         for (let i = 0; i < slMoveCount; i++) {
           await moveTPSLMT(ACTION.MoveSL, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN);
+          await wait(2000);
         }
 
         logToFileAsync(`New SL set at 3 pips behind the current price: ${newSLPrice}`);
@@ -204,6 +212,9 @@ export class TradeManager {
   }
 
   private startContinueTrailing(tradeId: string, currentPrice: number) {
+    this.trades.set(tradeId, {
+      lastPrice: currentPrice
+    });
     const intervalId = setInterval(async () => {
       try {
         logToFileAsync(`Monitoring Price to Continue Trailing.`);
@@ -220,7 +231,7 @@ export class TradeManager {
           return;
         }
 
-        const { orderSide } = trade;
+        const { orderSide, lastPrice } = trade;
 
         logToFileAsync(`Trailing update for trade ID ${tradeId}. Checking market data.`);
         const marketData: MarketWatchResponseMT | ErrorMTResponse = await marketWatchMT();
@@ -232,18 +243,45 @@ export class TradeManager {
         const latestData = marketData[marketData.length - 1];
         const latestPrice: string = orderSide === 'BUY' ? latestData.bid : latestData.ask;
         const latestPriceNum = parseFloat(latestPrice);
-
+        
         logToFileAsync(`Latest price for trade ID ${tradeId}: ${latestPriceNum}`);
 
-        if (orderSide === 'BUY' && latestPriceNum > currentPrice) {
-          logToFileAsync(`Moving SL and TP up for trade ID ${tradeId}`);
-          await moveTPSLMT(ACTION.MoveSL, ACTION.UP);
-          await moveTPSLMT(ACTION.MoveTP, ACTION.UP);
-        } else if (orderSide === 'SELL' && latestPriceNum < currentPrice) {
-          logToFileAsync(`Moving SL and TP down for trade ID ${tradeId}`);
-          await moveTPSLMT(ACTION.MoveSL, ACTION.DOWN);
-          await moveTPSLMT(ACTION.MoveTP, ACTION.DOWN);
+        if (orderSide === 'BUY' && latestPriceNum > lastPrice!) {
+          // Dynamically move SL to 3 pips behind and TP to 2 pips in front current price
+          const newSLPrice = latestPriceNum - 0.0003;
+          const newTPPrice = latestPriceNum + 0.0002;
+          const slMoveCount = Math.abs(newSLPrice - latestPriceNum!) * 10000;
+          const tpMoveCount = Math.abs(newTPPrice - latestPriceNum!) * 10000;
+          for (let i = 0; i < slMoveCount; i++) {
+            logToFileAsync(`Moving SL 3 pips away from current price for trade ID ${tradeId}`);
+            await moveTPSLMT(ACTION.MoveSL, ACTION.UP);
+            await wait(2000);
+          }
+          for (let i = 0; i < tpMoveCount; i++) {
+            logToFileAsync(`Moving TP 2 pips away from current price for trade ID ${tradeId}`);
+            await moveTPSLMT(ACTION.MoveTP, ACTION.UP);
+            await wait(2000);
+          }
+        } else if (orderSide === 'SELL' && latestPriceNum < lastPrice!) {
+          // Dynamically move SL to 3 pips behind and TP to 2 pips in front current price
+          const newSLPrice = latestPriceNum + 0.0003;
+          const newTPPrice = latestPriceNum - 0.0002;
+          const slMoveCount = Math.abs(newSLPrice - latestPriceNum!) * 10000;
+          const tpMoveCount = Math.abs(newTPPrice - latestPriceNum!) * 10000;
+          for (let i = 0; i < slMoveCount; i++) {
+            logToFileAsync(`Moving SL 3 pips away from current price for trade ID ${tradeId}`);
+            await moveTPSLMT(ACTION.MoveSL, ACTION.DOWN);
+            await wait(2000);
+          }
+          for (let i = 0; i < tpMoveCount; i++) {
+            logToFileAsync(`Moving TP 2 pips away from current price for trade ID ${tradeId}`);
+            await moveTPSLMT(ACTION.MoveTP, ACTION.DOWN);
+            await wait(2000);
+          }
         }
+        this.trades.set(tradeId, {
+          lastPrice: latestPriceNum
+        });
       } catch (error) {
         console.error(`Error during trailing for trade ID ${tradeId}:`, error);
       }

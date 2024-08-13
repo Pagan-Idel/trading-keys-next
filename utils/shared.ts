@@ -24,6 +24,10 @@ export interface SLTPMT {
   tpPrice: number;
 }
 
+export const wait = (ms: number): Promise<void> => {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export const calculateSLTPMT = (openPrice: string, orderSide: "BUY" | "SELL"): SLTPMT => {
   const stopLoss: number = parseFloat(localStorage.getItem('stopLoss')!);
   const takeProfit: number = stopLoss * 2;

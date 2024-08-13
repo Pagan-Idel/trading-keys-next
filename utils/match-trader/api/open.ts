@@ -2,7 +2,7 @@
 import { logToFileAsync } from "../../logger";
 import { ACTION } from "../../oanda/api";
 import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared";
-import { TradeManager } from "../../trade-manager2";
+import { TradeManager } from "../../trade-manager";
 import { editPositionMT, EditPositionRequestMT } from "./edit-position";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
  

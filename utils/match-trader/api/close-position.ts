@@ -1,6 +1,6 @@
 
 import { logToFileAsync } from "../../logger";
-import { TradeManager } from "../../trade-manager2";
+import { TradeManager } from "../../trade-manager";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
 export interface ClosePositionResponseMT {

@@ -1,3 +1,5 @@
+import { logToFileAsync } from "../../logger";
+
 export interface LoginRequest {
   username: string;
   domain: string;
@@ -51,7 +53,7 @@ export const handleDXLogin = async (accountType: string): Promise<void> => {
     }
 
     const data = await response.json();
-    console.log('Login successful', data);
+    logToFileAsync('Login successful', data);
   } catch (error) {
     console.error('An error occurred during login:', error);
   }

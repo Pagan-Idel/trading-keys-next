@@ -1,0 +1,128 @@
+[2024-08-13T00:09:42.296Z] Button 2 clicked
+[2024-08-13T00:09:43.043Z] Market Match Successful
+[2024-08-13T00:09:43.045Z] Balance 98755.04
+[2024-08-13T00:09:43.047Z] Pip Value 0.0006000000000000001
+[2024-08-13T00:09:43.046Z] Risk 1
+[2024-08-13T00:09:43.046Z] StopLoss 6
+[2024-08-13T00:09:43.047Z] Risk Amount 987.5504
+[2024-08-13T00:09:43.047Z] Volume 16.5
+[2024-08-13T00:09:43.331Z] Open Trade Successful
+[2024-08-13T00:09:43.587Z] Opened Positons Successful
+[2024-08-13T00:09:43.588Z] TakeProfit Price 1.0918
+[2024-08-13T00:09:43.587Z] OpenPrice 1.093
+[2024-08-13T00:09:43.588Z] StopLoss Price 1.0936
+[2024-08-13T00:09:43.859Z] Edit Position Successful
+[2024-08-13T00:09:43.860Z] No existing TradeManager instance found. Creating a new one.
+[2024-08-13T00:09:43.860Z] TradeManager instance created.
+[2024-08-13T00:09:43.861Z] Started 50% profit interval for trade ID: W657635897077887 with interval ID: 379
+[2024-08-13T00:09:48.862Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:09:49.431Z] Opened Positons Successful
+[2024-08-13T00:09:49.432Z] Fetching market data for trade ID: W657635897077887
+[2024-08-13T00:09:49.719Z] Market Match Successful
+[2024-08-13T00:09:49.719Z] Current price for trade ID W657635897077887: 1.09315
+[2024-08-13T00:09:52.307Z] Button 0 clicked
+[2024-08-13T00:09:52.512Z] Opened Positons Successful
+[2024-08-13T00:09:52.803Z] Using existing TradeManager instance.
+[2024-08-13T00:09:52.804Z] Stopped managing trade with ID: W657635897077887. Interval ID: 379 cleared.
+[2024-08-13T00:09:52.805Z] Close Position Successful
+[2024-08-13T00:09:55.348Z] Button 2 clicked
+[2024-08-13T00:09:55.570Z] Market Match Successful
+[2024-08-13T00:09:55.571Z] Balance 98326.04
+[2024-08-13T00:09:55.571Z] Risk 1
+[2024-08-13T00:09:55.572Z] Pip Value 0.0004
+[2024-08-13T00:09:55.571Z] StopLoss 4
+[2024-08-13T00:09:55.572Z] Risk Amount 983.2604
+[2024-08-13T00:09:55.572Z] Volume 24.6
+[2024-08-13T00:09:55.791Z] Open Trade Successful
+[2024-08-13T00:09:55.991Z] Opened Positons Successful
+[2024-08-13T00:09:55.992Z] OpenPrice 1.09302
+[2024-08-13T00:09:55.993Z] StopLoss Price 1.09342
+[2024-08-13T00:09:55.992Z] TakeProfit Price 1.09222
+[2024-08-13T00:09:56.199Z] Edit Position Successful
+[2024-08-13T00:09:56.199Z] Using existing TradeManager instance.
+[2024-08-13T00:09:56.199Z] Started 50% profit interval for trade ID: W657635897077888 with interval ID: 380
+[2024-08-13T00:10:01.737Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:02.361Z] Opened Positons Successful
+[2024-08-13T00:10:02.362Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:02.586Z] Market Match Successful
+[2024-08-13T00:10:02.587Z] Current price for trade ID W657635897077888: 1.09319
+[2024-08-13T00:10:06.741Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:06.948Z] Opened Positons Successful
+[2024-08-13T00:10:06.948Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:07.162Z] Market Match Successful
+[2024-08-13T00:10:07.162Z] Current price for trade ID W657635897077888: 1.09318
+[2024-08-13T00:10:11.749Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:11.985Z] Opened Positons Successful
+[2024-08-13T00:10:11.986Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:12.213Z] Market Match Successful
+[2024-08-13T00:10:12.214Z] Current price for trade ID W657635897077888: 1.09312
+[2024-08-13T00:10:16.738Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:17.209Z] Opened Positons Successful
+[2024-08-13T00:10:17.209Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:17.414Z] Market Match Successful
+[2024-08-13T00:10:17.415Z] Current price for trade ID W657635897077888: 1.09315
+[2024-08-13T00:10:21.736Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:21.965Z] Opened Positons Successful
+[2024-08-13T00:10:21.966Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:22.188Z] Market Match Successful
+[2024-08-13T00:10:22.189Z] Current price for trade ID W657635897077888: 1.09317
+[2024-08-13T00:10:26.738Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:26.944Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:26.942Z] Opened Positons Successful
+[2024-08-13T00:10:27.154Z] Current price for trade ID W657635897077888: 1.09316
+[2024-08-13T00:10:27.153Z] Market Match Successful
+[2024-08-13T00:10:31.736Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:31.926Z] Opened Positons Successful
+[2024-08-13T00:10:31.928Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:32.130Z] Market Match Successful
+[2024-08-13T00:10:32.132Z] Current price for trade ID W657635897077888: 1.09316
+[2024-08-13T00:10:36.743Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:36.947Z] Opened Positons Successful
+[2024-08-13T00:10:36.948Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:37.157Z] Market Match Successful
+[2024-08-13T00:10:37.159Z] Current price for trade ID W657635897077888: 1.09316
+[2024-08-13T00:10:41.737Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:42.293Z] Opened Positons Successful
+[2024-08-13T00:10:42.293Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:42.494Z] Market Match Successful
+[2024-08-13T00:10:42.495Z] Current price for trade ID W657635897077888: 1.09316
+[2024-08-13T00:10:46.740Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:46.970Z] Opened Positons Successful
+[2024-08-13T00:10:46.970Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:47.170Z] Market Match Successful
+[2024-08-13T00:10:47.171Z] Current price for trade ID W657635897077888: 1.09321
+[2024-08-13T00:10:51.744Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:52.280Z] Opened Positons Successful
+[2024-08-13T00:10:52.280Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:52.500Z] Market Match Successful
+[2024-08-13T00:10:52.502Z] Current price for trade ID W657635897077888: 1.09321
+[2024-08-13T00:10:56.741Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:10:57.201Z] Opened Positons Successful
+[2024-08-13T00:10:57.201Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:10:57.420Z] Market Match Successful
+[2024-08-13T00:10:57.421Z] Current price for trade ID W657635897077888: 1.09322
+[2024-08-13T00:11:01.738Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:11:01.986Z] Opened Positons Successful
+[2024-08-13T00:11:01.987Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:11:02.191Z] Market Match Successful
+[2024-08-13T00:11:02.191Z] Current price for trade ID W657635897077888: 1.09322
+[2024-08-13T00:11:06.739Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:11:06.944Z] Opened Positons Successful
+[2024-08-13T00:11:06.945Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:11:07.149Z] Market Match Successful
+[2024-08-13T00:11:07.149Z] Current price for trade ID W657635897077888: 1.09321
+[2024-08-13T00:11:11.745Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:11:11.980Z] Opened Positons Successful
+[2024-08-13T00:11:11.981Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:11:12.187Z] Market Match Successful
+[2024-08-13T00:11:12.189Z] Current price for trade ID W657635897077888: 1.09322
+[2024-08-13T00:11:54.738Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:11:55.309Z] Opened Positons Successful
+[2024-08-13T00:11:55.309Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:11:55.512Z] Market Match Successful
+[2024-08-13T00:11:55.512Z] Current price for trade ID W657635897077888: 1.0932
+[2024-08-13T00:12:54.748Z] Monitoring Price to take 50 percent profit.
+[2024-08-13T00:12:55.286Z] Opened Positons Successful
+[2024-08-13T00:12:55.287Z] Fetching market data for trade ID: W657635897077888
+[2024-08-13T00:12:55.773Z] Market Match Successful
+[2024-08-13T00:12:55.774Z] Current price for trade ID W657635897077888: 1.09321

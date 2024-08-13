@@ -1,3 +1,6 @@
+import { logToFileAsync } from "../../logger";
+
+
 export interface Account {
   guaranteedStopLossOrderMode: string;
   hedgingEnabled: boolean;
@@ -51,7 +54,7 @@ export const handleOandaLogin = async (): Promise<AccountResponse> => {
 
   // Check if the environment variable is set
   if (!token || !accountType) {
-    console.log("Token or AccountId is not set.");
+    logToFileAsync("Token or AccountId is not set.");
   }
 
   const api2: string = `${hostname}/v3/accounts`;
@@ -63,7 +66,7 @@ export const handleOandaLogin = async (): Promise<AccountResponse> => {
   });
   
   const responseData2: AccountResponse = await response2.json();
-  console.log(responseData2);
+  logToFileAsync(responseData2);
   const api: string = `${hostname}/v3/accounts/${accountId}`;
   const response: Response = await fetch(api, {
     headers: {
@@ -73,10 +76,10 @@ export const handleOandaLogin = async (): Promise<AccountResponse> => {
   });
 
   if (!response.ok) {
-    console.log(`HTTP error! Status: ${response.status}`);
+    logToFileAsync(`HTTP error! Status: ${response.status}`);
   }
 
   const responseData: AccountResponse = await response.json();
-  console.log(responseData);
+  logToFileAsync(responseData);
   return responseData
 };

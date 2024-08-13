@@ -7,6 +7,7 @@ import { closePositionMT } from '../../utils/match-trader/api/close-position';
 import { closePartiallyMT } from '../../utils/match-trader/api/close-partially';
 import { moveTPSLMT } from '../../utils/match-trader/api/move-TPSL';
 import { stopAtEntryMT } from '../../utils/match-trader/api/stop-at-entry';
+import { logToFileAsync } from '../../utils/logger';
 
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
 const functionNames = [
@@ -210,7 +211,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
         lastExecutionTimeRef.current = currentTime;
         callback();
       } else {
-        console.log('Function is rate-limited. Try again later.');
+        logToFileAsync('Function is rate-limited. Try again later.');
       }
     };
   }
@@ -238,43 +239,43 @@ const Keyboard = ({ platform }: KeyboardProps) => {
         switch (functionName) {
           case '0 - CLOSE':
             closeTrade({ action: ACTION.CLOSE });
-            console.log(`Button 0 clicked`);
+            logToFileAsync(`Button 0 clicked`);
             break;
           case '1 - BUY':
             rateLimitedBuyOanda();
-            console.log(`Button 1 clicked`);
+            logToFileAsync(`Button 1 clicked`);
             break;
           case '2 - SELL':
             rateLimitedSellOanda();
-            console.log(`Button 2 clicked`);
+            logToFileAsync(`Button 2 clicked`);
             break;
           case '3 - SL AT ENTRY':
             modifyTrade({ action: ACTION.SLatEntry });
-            console.log(`Button 3 clicked`);
+            logToFileAsync(`Button 3 clicked`);
             break;
           case '4 - SL DOWN':
             modifyTrade({ action: ACTION.MoveSL, action2: ACTION.DOWN });
-            console.log(`Button 4 clicked`);
+            logToFileAsync(`Button 4 clicked`);
             break;
           case '5 - TP DOWN':
             modifyTrade({ action: ACTION.MoveTP, action2: ACTION.DOWN });
-            console.log(`Button 5 clicked`);
+            logToFileAsync(`Button 5 clicked`);
             break;
           case '6 - 25% CLOSE':
             closeTrade({ action: ACTION.PartialClose25 });
-            console.log(`Button 6 clicked`);
+            logToFileAsync(`Button 6 clicked`);
             break;
           case '7 - SL UP':
             modifyTrade({ action: ACTION.MoveSL, action2: ACTION.UP });
-            console.log(`Button 7 clicked`);
+            logToFileAsync(`Button 7 clicked`);
             break;
           case '8 - TP UP':
             modifyTrade({ action: ACTION.MoveTP, action2: ACTION.UP });
-            console.log(`Button 8 clicked`);
+            logToFileAsync(`Button 8 clicked`);
             break;
           case '9 - 50% CLOSE':
             closeTrade({ action: ACTION.PartialClose50 });
-            console.log(`Button 9 clicked`);
+            logToFileAsync(`Button 9 clicked`);
             break;
           default:
             // Handle default case
@@ -289,39 +290,39 @@ const Keyboard = ({ platform }: KeyboardProps) => {
             break;
           case '1 - BUY':
             // rateLimitedBuyOanda();
-            console.log(`Button 1 clicked`);
+            logToFileAsync(`Button 1 clicked`);
             break;
           case '2 - SELL':
             // rateLimitedSellOanda();
-            console.log(`Button 2 clicked`);
+            logToFileAsync(`Button 2 clicked`);
             break;
           case '3 - SL AT ENTRY':
             // modifyTrade({ action: ACTION.SLatEntry });
-            console.log(`Button 3 clicked`);
+            logToFileAsync(`Button 3 clicked`);
             break;
           case '4 - SL DOWN':
             // modifyTrade({ action: ACTION.MoveSL, action2: ACTION.DOWN });
-            console.log(`Button 4 clicked`);
+            logToFileAsync(`Button 4 clicked`);
             break;
           case '5 - TP DOWN':
             // modifyTrade({ action: ACTION.MoveTP, action2: ACTION.DOWN });
-            console.log(`Button 5 clicked`);
+            logToFileAsync(`Button 5 clicked`);
             break;
           case '6 - 25% CLOSE':
             
-            console.log(`Button 6 clicked`);
+            logToFileAsync(`Button 6 clicked`);
             break;
           case '7 - SL UP':
             // modifyTrade({ action: ACTION.MoveSL, action2: ACTION.UP });
-            console.log(`Button 7 clicked`);
+            logToFileAsync(`Button 7 clicked`);
             break;
           case '8 - TP UP':
             // modifyTrade({ action: ACTION.MoveTP, action2: ACTION.UP });
-            console.log(`Button 8 clicked`);
+            logToFileAsync(`Button 8 clicked`);
             break;
           case '9 - 50% CLOSE':
             
-            console.log(`Button 9 clicked`);
+            logToFileAsync(`Button 9 clicked`);
             break;
           default:
             // Handle default case
@@ -334,43 +335,43 @@ const Keyboard = ({ platform }: KeyboardProps) => {
           case '0 - CLOSE':
             // Handle the case when button 0 is clicked for match-trader
             closePositionMT();
-            console.log(`Button 0 clicked`);
+            logToFileAsync(`Button 0 clicked`);
             break;
           case '1 - BUY':
             rateLimitedBuyMT();
-            console.log(`Button 1 clicked`);
+            logToFileAsync(`Button 1 clicked`);
             break;
           case '2 - SELL':
             rateLimitedSellMT();
-            console.log(`Button 2 clicked`);
+            logToFileAsync(`Button 2 clicked`);
             break;
           case '3 - SL AT ENTRY':
             stopAtEntryMT();
-            console.log(`Button 3 clicked`);
+            logToFileAsync(`Button 3 clicked`);
             break;
           case '4 - SL DOWN':
             moveTPSLMT(ACTION.MoveSL, ACTION.DOWN);
-            console.log(`Button 4 clicked`);
+            logToFileAsync(`Button 4 clicked`);
             break;
           case '5 - TP DOWN':
             moveTPSLMT(ACTION.MoveTP, ACTION.DOWN);
-            console.log(`Button 5 clicked`);
+            logToFileAsync(`Button 5 clicked`);
             break;
           case '6 - 25% CLOSE':
             closePartiallyMT(0.249999999999);
-            console.log(`Button 6 clicked`);
+            logToFileAsync(`Button 6 clicked`);
             break;
           case '7 - SL UP':
             moveTPSLMT(ACTION.MoveSL, ACTION.UP);
-            console.log(`Button 7 clicked`);
+            logToFileAsync(`Button 7 clicked`);
             break;
           case '8 - TP UP':
             moveTPSLMT(ACTION.MoveTP, ACTION.UP);
-            console.log(`Button 8 clicked`);
+            logToFileAsync(`Button 8 clicked`);
             break;
           case '9 - 50% CLOSE':
             closePartiallyMT(0.499999999999);
-            console.log(`Button 9 clicked`);
+            logToFileAsync(`Button 9 clicked`);
             break;
           default:
             // Handle default case

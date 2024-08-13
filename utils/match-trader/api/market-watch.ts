@@ -1,3 +1,6 @@
+import { logToFileAsync } from "../../logger";
+
+
 export interface BodyItem {
   symbol: string;
   alias: string;
@@ -17,7 +20,7 @@ export type MarketWatchResponseMT = BodyItem[];
   }
     
   export const marketWatchMT = async (currency: string = "EURUSD"): Promise<MarketWatchResponseMT | ErrorMTResponse> => {
-
+    const accountType = localStorage.getItem('accountType');
     const apiEndpoint = '/api/match-trader/market-watch';
 
     try {
@@ -26,7 +29,8 @@ export type MarketWatchResponseMT = BodyItem[];
         headers: {
           'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
           'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
         credentials: 'include'
       });
@@ -52,7 +56,7 @@ export type MarketWatchResponseMT = BodyItem[];
         throw new Error(`Error: ${rawResponseText}`);
       }
   
-      console.log('Market Match Successful');
+      logToFileAsync('Market Match Successful');
     
       return data;
     } catch (error) {

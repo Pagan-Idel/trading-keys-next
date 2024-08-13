@@ -1,4 +1,6 @@
 import { OrderParameters } from "../../../components/Keyboard";
+import { logToFileAsync } from "../../logger";
+
 import { pipIncrement, recentTrade } from "../../shared";
 import { OpenTrade, Trade, TradeById, openNow } from "./openNow";
 import { ACTION } from "./order";
@@ -19,7 +21,7 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
   const token = accountType === 'live' ? '[redacted]' : '[redacted]';
   // Check if the environment variable is set
   if (!accountId || !token) {
-    console.log("Token or AccountId is not set.");
+    logToFileAsync("Token or AccountId is not set.");
   }
   const mostRecentTrade: Trade | undefined = await recentTrade();
   if (!mostRecentTrade) {
@@ -47,7 +49,7 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
     });
 
     if (!response.ok) {
-      console.log(`HTTP error! Status: ${response.status}`);
+      logToFileAsync(`HTTP error! Status: ${response.status}`);
     }
     return true;
   } else if (orderType.action == ACTION.MoveSL || orderType.action == ACTION.MoveTP) {
@@ -61,13 +63,13 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
     });
 
     if (!response1.ok) {
-      console.log(`HTTP error! Status: ${response1.status}`);
+      logToFileAsync(`HTTP error! Status: ${response1.status}`);
     }
     const response1Object: TradeById = await response1.json();
-    console.log("response1Object", response1Object);
-    console.log("price",response1Object.trade.stopLossOrder!.price);
+    logToFileAsync("response1Object", response1Object);
+    logToFileAsync("price",response1Object.trade.stopLossOrder!.price);
     if (!response1Object.trade.stopLossOrder) {
-      console.log(`No Stop Loss Detected`);
+      logToFileAsync(`No Stop Loss Detected`);
       return false;
     }
     let requestBody: ModifyRequest = {};
@@ -101,7 +103,7 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
     });
 
     if (!response.ok) {
-      console.log(`HTTP error! Status: ${response.status}`);
+      logToFileAsync(`HTTP error! Status: ${response.status}`);
     }
     return true;
 

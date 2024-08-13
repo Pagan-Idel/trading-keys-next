@@ -1,3 +1,4 @@
+import { logToFileAsync } from "./logger";
 import { closePartiallyMT } from "./match-trader/api/close-partially";
 import { marketWatchMT, MarketWatchResponseMT, ErrorMTResponse } from "./match-trader/api/market-watch";
 import { stopAtEntryMT } from "./match-trader/api/stop-at-entry";
@@ -9,16 +10,16 @@ export class TradeManager {
 
   // Private constructor to prevent direct instantiation
   private constructor() {
-    console.log("TradeManager instance created.");
+    logToFileAsync("TradeManager instance created.");
   }
 
   // Method to get the singleton instance
   public static getInstance(): TradeManager {
     if (!TradeManager.instance) {
-      console.log("No existing TradeManager instance found. Creating a new one.");
+      logToFileAsync("No existing TradeManager instance found. Creating a new one.");
       TradeManager.instance = new TradeManager();
     } else {
-      console.log("Using existing TradeManager instance.");
+      logToFileAsync("Using existing TradeManager instance.");
     }
     return TradeManager.instance;
   }
@@ -35,7 +36,7 @@ export class TradeManager {
     // Start monitoring the price for this trade every 10 seconds
     const intervalId = setInterval(() => this.checkPrice(tradeId), 10000);
     this.tradeIntervals.set(tradeId, intervalId);
-    console.log(`Price monitoring started for trade ID: ${tradeId} with interval ID: ${intervalId}`);
+    logToFileAsync(`Price monitoring started for trade ID: ${tradeId} with interval ID: ${intervalId}`);
   }
 
   // Method to stop managing a trade
@@ -45,7 +46,7 @@ export class TradeManager {
       clearInterval(intervalId);
       this.tradeIntervals.delete(tradeId);
       this.trades.delete(tradeId);
-      console.log(`Stopped managing trade with ID: ${tradeId}. Interval ID: ${intervalId} cleared.`);
+      logToFileAsync(`Stopped managing trade with ID: ${tradeId}. Interval ID: ${intervalId} cleared.`);
     } else {
       console.warn(`No active trade found with ID ${tradeId}. Cannot stop monitoring.`);
     }
@@ -87,14 +88,14 @@ export class TradeManager {
   // Private method to execute trade actions for a specific trade
   private async executeTradeActions(tradeId: string, currentPrice: number) {
     try {
-      console.log(`Executing trade actions for trade ID: ${tradeId} at price: ${currentPrice}`);
+      logToFileAsync(`Executing trade actions for trade ID: ${tradeId} at price: ${currentPrice}`);
       // Close 50% of the position
       await closePartiallyMT(0.499999999);
-      console.log("50% of the position closed successfully.");
+      logToFileAsync("50% of the position closed successfully.");
 
       // Set SL at entry
       await stopAtEntryMT();
-      console.log("SL at entry set successfully.");
+      logToFileAsync("SL at entry set successfully.");
 
       // Stop monitoring after actions are executed
       this.stop(tradeId);

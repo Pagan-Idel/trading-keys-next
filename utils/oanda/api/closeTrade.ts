@@ -1,5 +1,7 @@
 import { ACTION, order, Trade } from ".";
 import { OrderParameters } from "../../../components/Keyboard";
+import { logToFileAsync } from "../../logger";
+
 import { recentTrade } from "../../shared";
 
 export interface TradeCloseResponse {
@@ -73,7 +75,7 @@ export const closeTrade = async (orderType: OrderParameters): Promise<TradeClose
 
   // Check if the environment variable is set
   if (!accountId || !token ) {
-    console.log("Token or AccountId is not set.");
+    logToFileAsync("Token or AccountId is not set.");
   }
 
   const mostRecentTrade: Trade | undefined = await recentTrade();
@@ -100,9 +102,9 @@ export const closeTrade = async (orderType: OrderParameters): Promise<TradeClose
   });
   
   if (!response.ok) {
-    console.log(`HTTP error! Status: ${response.status}`);
+    logToFileAsync(`HTTP error! Status: ${response.status}`);
   }
   const responseData: TradeCloseResponse = await response.json();
-  console.log("responseData",responseData);
+  logToFileAsync("responseData",responseData);
   return responseData;
 } 

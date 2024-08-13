@@ -1,3 +1,5 @@
+
+import { logToFileAsync } from "../../logger";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
 export interface ClosePositionResponseMT {
@@ -19,6 +21,7 @@ export interface ErrorMTResponse {
 }
     
 export const closePartiallyMT = async (partialAmount: number): Promise<ClosePartialPositionMT | ErrorMTResponse> => {
+  const accountType = localStorage.getItem('accountType');
   const recentTradeOpenVolume = localStorage.getItem('openVolume');
   if (recentTradeOpenVolume == 'null') {
     console.error(`Failed To Get Open Volume`, recentTradeOpenVolume);
@@ -47,7 +50,8 @@ export const closePartiallyMT = async (partialAmount: number): Promise<ClosePart
         headers: {
           'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
           'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
         body: JSON.stringify(requestBody),
         credentials: 'include'
@@ -74,7 +78,7 @@ export const closePartiallyMT = async (partialAmount: number): Promise<ClosePart
         throw new Error(`Error: ${rawResponseText}`);
       }
   
-      console.log(`Close Partial Position Successful`);
+      logToFileAsync(`Close Partial Position Successful`);
     
       return data;
     } catch (error) {

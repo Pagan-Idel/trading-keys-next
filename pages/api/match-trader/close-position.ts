@@ -18,7 +18,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
   const coAuth = await redisClient.get('co-auth');
-  const hostname = "https://mtr.gooeytrade.com";
+  const hostname = `${req.headers.hostname}`;
   const api: string = `/mtr-api/${req.headers.system_uuid}/positions/close`;
   
   try {

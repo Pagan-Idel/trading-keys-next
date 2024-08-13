@@ -1,3 +1,5 @@
+
+import { logToFileAsync } from "../../logger";
 import { TradeManager } from "../../trade-manager2";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
@@ -21,6 +23,7 @@ errorMessage: string;
 }
   
 export const closePositionMT = async (): Promise<ClosePositionsMT | ErrorMTResponse> => {
+  const accountType = localStorage.getItem('accountType');
   let requestBody: ClosePositionsMT = [{  
     positionId: "",
     instrument: "",
@@ -42,7 +45,8 @@ export const closePositionMT = async (): Promise<ClosePositionsMT | ErrorMTRespo
         headers: {
           'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
           'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
         body: JSON.stringify(requestBody),
         credentials: 'include'
@@ -77,7 +81,7 @@ export const closePositionMT = async (): Promise<ClosePositionsMT | ErrorMTRespo
       throw new Error(`Error: ${rawResponseText}`);
     }
 
-    console.log(`Close Position Successful`);
+    logToFileAsync(`Close Position Successful`);
   
     return data;
     } catch (error) {

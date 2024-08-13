@@ -1,4 +1,6 @@
 import { OrderParameters } from "../../../components/Keyboard";
+import { logToFileAsync } from "../../logger";
+
 import { RISK, calculalateRisk } from "../../shared";
 
 export enum TYPE {
@@ -60,13 +62,13 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
   // Check if the environment variable is set
   // Check if the environment variable is set
   if (!accountId || !hostname || !token) {
-    console.log("Token or AccountId is not set.");
+    logToFileAsync("Token or AccountId is not set.");
     return false;
   }
     const riskData: RISK | undefined = await calculalateRisk(orderType);
       // Check if the environment variable is set
     if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
-      console.log("Error Calculating Risk. No data found");
+      logToFileAsync("Error Calculating Risk. No data found");
       return false;
     }
     const requestBody: OrderRequest = {
@@ -94,7 +96,7 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
     });
   
     if (!response.ok) {
-      console.log(`HTTP error! Status: ${response.status}`);
+      logToFileAsync(`HTTP error! Status: ${response.status}`);
       return false;
     }
   return true;

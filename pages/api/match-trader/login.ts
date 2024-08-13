@@ -34,7 +34,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(404).end(`Path ${req.url} Not Found`);
     return;
   }
-  const hostname = "https://mtr.gooeytrade.com";
+  const hostname = `${req.headers.hostname}`;
   const credentials: LoginRequest = req.body;
   const api: string = "/manager/co-login";
   try {

@@ -1,3 +1,5 @@
+
+import { logToFileAsync } from "../../logger";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
 export interface EditPositionResponseMT {
@@ -21,6 +23,7 @@ export interface ErrorMTResponse {
 }
   
 export const stopAtEntryMT = async (): Promise<EditPositionRequestMT | ErrorMTResponse> => {
+  const accountType = localStorage.getItem('accountType');
   let requestBody: EditPositionRequestMT = {
       id: ""
   };
@@ -42,7 +45,8 @@ export const stopAtEntryMT = async (): Promise<EditPositionRequestMT | ErrorMTRe
         headers: {
           'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
           'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
         body: JSON.stringify(requestBody),
         credentials: 'include'
@@ -67,7 +71,7 @@ export const stopAtEntryMT = async (): Promise<EditPositionRequestMT | ErrorMTRe
         console.error('Error parsing success response as JSON:', e);
         throw new Error(`Error: ${rawResponseText}`);
       }
-      console.log('Stop At Entry Successful');
+      logToFileAsync('Stop At Entry Successful');
       return data;
     } catch (error) {
       console.error('An error occurred during moving stop loss at entry:', error);

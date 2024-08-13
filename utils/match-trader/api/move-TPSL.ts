@@ -1,3 +1,5 @@
+
+import { logToFileAsync } from "../../logger";
 import { ACTION } from "../../oanda/api";
 import { pipIncrement } from "../../shared";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
@@ -23,6 +25,7 @@ export interface ErrorMTResponse {
 }
   
 export const moveTPSLMT = async (action: ACTION, action2: ACTION): Promise<EditPositionRequestMT | ErrorMTResponse> => {
+  const accountType = localStorage.getItem('accountType');
   let requestBody: EditPositionRequestMT = {
     id: ""
   };
@@ -56,7 +59,8 @@ export const moveTPSLMT = async (action: ACTION, action2: ACTION): Promise<EditP
         headers: {
           'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
           'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
         body: JSON.stringify(requestBody),
         credentials: 'include'
@@ -83,7 +87,7 @@ export const moveTPSLMT = async (action: ACTION, action2: ACTION): Promise<EditP
         throw new Error(`Error: ${rawResponseText}`);
       }
 
-      console.log('Moving SL/TP Successful');
+      logToFileAsync('Moving SL/TP Successful');
     
       return data;
     } catch (error) {

@@ -1,3 +1,5 @@
+
+import { logToFileAsync } from "../../logger";
 import { ACTION } from "../../oanda/api";
 import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared";
 import { TradeManager } from "../../trade-manager2";
@@ -24,7 +26,7 @@ import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions
   }
   
   export const openPostionMT = async (risk: number, orderSide: ACTION.BUY | ACTION.SELL): Promise<OpenPostionResponseMT | ErrorMTResponse> => {
-
+    const accountType = localStorage.getItem('accountType');
     const apiEndpoint = '/api/match-trader/open';
     let requestBody: OpenPositionRequestMT = {
       instrument: "EURUSD",  // shortcut name of the instrument
@@ -46,7 +48,8 @@ import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions
         headers: {
           'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
           'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
         body: JSON.stringify(requestBody),
         credentials: 'include'
@@ -73,7 +76,7 @@ import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions
         throw new Error(`Error: ${rawResponseText}`);
       }
   
-      console.log('Open Trade Successful');
+      logToFileAsync('Open Trade Successful');
 
       // Call openPositions to get the openPrice and id
       let positionResponse : OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();

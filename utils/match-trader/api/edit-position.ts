@@ -1,3 +1,6 @@
+import { logToFileAsync } from "../../logger";
+
+
   export interface EditPositionResponseMT {
     status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';
     nativeCode: string | null;
@@ -19,7 +22,7 @@
   }
     
   export const editPositionMT = async (requestBody?: EditPositionRequestMT ): Promise<EditPositionRequestMT | ErrorMTResponse> => {
-
+    const accountType = localStorage.getItem('accountType');
     const apiEndpoint = '/api/match-trader/edit-position';
     try {
       const response = await fetch(apiEndpoint, {
@@ -27,7 +30,8 @@
         headers: {
           'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
           'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
         body: JSON.stringify(requestBody),
         credentials: 'include'
@@ -54,7 +58,7 @@
         throw new Error(`Error: ${rawResponseText}`);
       }
   
-      console.log('Edit Position Successful');
+      logToFileAsync('Edit Position Successful');
     
       return data;
     } catch (error) {

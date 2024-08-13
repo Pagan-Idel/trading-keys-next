@@ -1,3 +1,7 @@
+
+import { logToFileAsync } from "../../logger";
+import { balanceMT } from "./balance";
+
 export interface LoginRequestBodyMT {
     email: string;
     password: string;
@@ -61,24 +65,28 @@ export interface LoginRequestBodyMT {
   export interface LoginMTRequest {
     email: string;
     password: string;
+    brokerId: string;
   }
   
   const demoCreds: LoginMTRequest = {
     email: '[redacted]',
-    password: '[redacted]'
+    password: '[redacted]',
+    brokerId: '0'
   };
   
   const liveCreds: LoginMTRequest = {
     email: '[redacted]',
-    password: '[redacted]'
+    password: '[redacted]',
+    brokerId: '1'
   };
   
   export const handleMTLogin = async (accountType: string): Promise<LoginMTResponse | ErrorMTResponse> => {
+    localStorage.setItem('accountType', accountType);
     const apiEndpoint = '/api/match-trader/login';
     const loginRequestBody: LoginRequestBodyMT = {
       email: accountType === 'demo' ? demoCreds.email : liveCreds.email,
       password: accountType === 'demo' ? demoCreds.password : liveCreds.password,
-      brokerId: '1',
+      brokerId: accountType === 'demo' ? demoCreds.brokerId : liveCreds.brokerId
     };
   
     try {
@@ -87,6 +95,7 @@ export interface LoginRequestBodyMT {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
+          'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
         body: JSON.stringify(loginRequestBody),
         credentials: 'include'
@@ -114,7 +123,7 @@ export interface LoginRequestBodyMT {
         throw new Error(`Error: ${rawResponseText}`);
       }
   
-      console.log('Login Successful');
+      logToFileAsync('Login Successful');
 
       // // Extract and store cookies from response headers
       // const cookiesHeader = response.headers.get('set-cookie');
@@ -134,17 +143,16 @@ export interface LoginRequestBodyMT {
       //   }
       // }
       // Extract SYSTEM_UUID and store it in local storage
-      const systemUuid = data.accounts[0]?.offer.system.uuid;
+      const systemUuid = data.accounts[accountType === 'demo' ? 1 : 0]?.offer.system.uuid;
       if (systemUuid) {
         localStorage.setItem('SYSTEM_UUID', systemUuid);
       }
 
       // Extract tradingApiToken and store it in local storage
-      const tradingApiToken = data.accounts[0]?.tradingApiToken;
+      const tradingApiToken = data.accounts[accountType === 'demo' ? 1 : 0]?.tradingApiToken;
       if (tradingApiToken) {
         localStorage.setItem('TRADING_API_TOKEN', tradingApiToken);
       }
-    
       return data;
     } catch (error) {
       console.error('An error occurred during login:', error);

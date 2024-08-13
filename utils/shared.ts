@@ -1,4 +1,5 @@
 import { OrderParameters } from '../components/Keyboard';
+import { logToFileAsync } from './logger';
 import { balanceMT, ErrorMTResponse } from './match-trader/api/balance';
 import { marketWatchMT, MarketWatchResponseMT } from './match-trader/api/market-watch';
 import { openedPositionsMT } from './match-trader/api/opened-positions';
@@ -28,9 +29,9 @@ export const calculateSLTPMT = (openPrice: string, orderSide: "BUY" | "SELL"): S
   const takeProfit: number = stopLoss * 2;
   let tpPrice = orderSide == ACTION.BUY ? parseFloat((parseFloat(openPrice) + (pipIncrement * takeProfit)).toFixed(5)) : parseFloat((parseFloat(openPrice) - (pipIncrement * takeProfit)).toFixed(5));
   let slPrice = orderSide == ACTION.BUY ? parseFloat((parseFloat(openPrice) - (pipIncrement * stopLoss)).toFixed(5)) : parseFloat((parseFloat(openPrice) + (pipIncrement * stopLoss)).toFixed(5));
-  console.log("OpenPrice", openPrice);
-  console.log("TakeProfit Price", tpPrice);
-  console.log("StopLoss Price", slPrice);
+  logToFileAsync("OpenPrice", openPrice);
+  logToFileAsync("TakeProfit Price", tpPrice);
+  logToFileAsync("StopLoss Price", slPrice);
   return {slPrice, tpPrice};
 }
 
@@ -58,14 +59,14 @@ export const calculateVolumeMT = async (risk: number): Promise<number | string> 
     // // Calculate the lot size to return
     // const lotSize = parseFloat((adjustedRiskAmount / pipValue / contractSize).toFixed(1));
 
-    console.log("Balance", balance);
-    console.log("Risk", risk);
-    console.log("StopLoss", stopLoss);
-    console.log("Pip Value", pipValue);
-    console.log("Risk Amount", riskAmount);
-    // console.log("Total Commission", totalCommission);
-    // console.log("Adjusted Risk Amount", adjustedRiskAmount);
-    console.log("Volume", volume);
+    logToFileAsync("Balance", balance);
+    logToFileAsync("Risk", risk);
+    logToFileAsync("StopLoss", stopLoss);
+    logToFileAsync("Pip Value", pipValue);
+    logToFileAsync("Risk Amount", riskAmount);
+    // logToFileAsync("Total Commission", totalCommission);
+    // logToFileAsync("Adjusted Risk Amount", adjustedRiskAmount);
+    logToFileAsync("Volume", volume);
 
     return volume;
   } else {
@@ -90,22 +91,22 @@ export const calculalateRisk = async (orderType: OrderParameters): Promise<RISK 
     throw new Error("Token or AccountId is not set.");
   }
     const { ask, bid} = await currentPrice(INSTRUMENT.EUR_USD);
-    console.log("account", account);
+    logToFileAsync("account", account);
     const a = parseFloat(account.balance) * ( orderType.risk! / 100 );
     const b = stopLoss * pipIncrement;
     const units = a / b;
     riskResponse.units = units.toFixed(0);
     riskResponse.takeProfit = orderType.action == ACTION.BUY ? (parseFloat(ask) + (pipIncrement * takeProfit)).toFixed(5) : (parseFloat(bid) - (pipIncrement * takeProfit)).toFixed(5);
     riskResponse.stopLoss = orderType.action == ACTION.BUY ? (parseFloat(ask) - (pipIncrement * stopLoss)).toFixed(5) : (parseFloat(bid) + (pipIncrement * stopLoss)).toFixed(5);
-    console.log("Balance", account.balance);
-    console.log("Risk", orderType.risk!);
-    console.log("stopLoss", stopLoss);
-    console.log("pipIncrement", pipIncrement);
-    console.log("a", a);
-    console.log("b", b);
-    console.log("Units", riskResponse.units);
-    console.log("TakeProfit Price", riskResponse.takeProfit);
-    console.log("StopLoss Price", riskResponse.stopLoss);
+    logToFileAsync("Balance", account.balance);
+    logToFileAsync("Risk", orderType.risk!);
+    logToFileAsync("stopLoss", stopLoss);
+    logToFileAsync("pipIncrement", pipIncrement);
+    logToFileAsync("a", a);
+    logToFileAsync("b", b);
+    logToFileAsync("Units", riskResponse.units);
+    logToFileAsync("TakeProfit Price", riskResponse.takeProfit);
+    logToFileAsync("StopLoss Price", riskResponse.stopLoss);
     return riskResponse;
   } catch (error: any) {
     // Log any errors that occur during the process
@@ -134,11 +135,11 @@ export const getBidAndAsk = async (currency: string = "EURUSD") => {
 export const recentTrade = async (): Promise<Trade | undefined> => {
   const openTrades: OpenTrade | undefined = await openNow();
   if (!openTrades) {
-    console.log("No response from openTrades()");
+    logToFileAsync("No response from openTrades()");
   }
   const trades = openTrades!.trades;
   if (!trades || trades.length === 0) {
-    console.log("No trades available");
+    logToFileAsync("No trades available");
   }
 
   // Find the trade with the latest openTime

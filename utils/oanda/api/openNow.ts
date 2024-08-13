@@ -1,3 +1,6 @@
+import { logToFileAsync } from "../../logger";
+
+
 export interface Price {
   priceValue: string;
 }
@@ -45,7 +48,7 @@ export const openNow = async (): Promise<OpenTrade | undefined> => {
   const token = accountType === 'live' ? '[redacted]' : '[redacted]';
   // Check if the environment variable is set
   if (!accountId || !token || !hostname) {
-    console.log("Token or AccountId is not set.");
+    logToFileAsync("Token or AccountId is not set.");
     // You might want to handle this case differently, e.g., throw an error or return a specific value
   }
 

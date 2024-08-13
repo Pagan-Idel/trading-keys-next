@@ -1,5 +1,9 @@
 // src/utils/api/currentPrice.ts
 
+import { logToFileAsync } from "../../logger";
+
+
+
 interface PriceTick {
   liquidity: number;
   price: string;
@@ -23,7 +27,7 @@ export const currentPrice = async (symbol: string): Promise<{ bid: string; ask: 
 
   // Check if the environment variable is set
   if (!accountId || !token || !hostname) {
-    console.log("Token or AccountId is not set.");
+    logToFileAsync("Token or AccountId is not set.");
   }
  if (hostname?.includes("practice")) {
     hostname = "https://stream-fxpractice.oanda.com";
@@ -62,8 +66,8 @@ export const currentPrice = async (symbol: string): Promise<{ bid: string; ask: 
           // Extract the most recent ask and bid prices
           const mostRecentAsk = priceData.asks[priceData.asks.length - 1]?.price || '';
           const mostRecentBid = priceData.bids[priceData.bids.length - 1]?.price || '';
-          console.log("mostRecentBid", mostRecentBid);
-          console.log("mostRecentAsk", mostRecentAsk);
+          logToFileAsync("mostRecentBid", mostRecentBid);
+          logToFileAsync("mostRecentAsk", mostRecentAsk);
           return { bid: mostRecentBid, ask: mostRecentAsk };
         }
       } catch (error) {

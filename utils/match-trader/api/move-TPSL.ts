@@ -87,7 +87,7 @@ export const moveTPSLMT = async (action: ACTION, action2: ACTION): Promise<EditP
         throw new Error(`Error: ${rawResponseText}`);
       }
 
-      logToFileAsync('Moving SL/TP Successful');
+      console.log('Moving SL/TP Successful');
     
       return data;
     } catch (error) {

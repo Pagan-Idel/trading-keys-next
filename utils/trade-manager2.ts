@@ -33,8 +33,8 @@ export class TradeManager {
 
     this.trades.set(tradeId, { slPrice, tpPrice, orderSide, openPrice, inTrailing: false, lastPrice: 0 });
 
-    // Start the first interval for taking % profit
-    this.startcoverCommisions(tradeId);
+    // Start the first interval for taking 50% profit
+    this.startTake50PercentProfit(tradeId);
   }
 
   public stop(tradeId: string) {
@@ -49,8 +49,8 @@ export class TradeManager {
     }
   }
 
-  private startcoverCommisions(tradeId: string) {
-    logToFileAsync(`Monitoring Price to take  percent profit.`);
+  private startTake50PercentProfit(tradeId: string) {
+    logToFileAsync(`Monitoring Price to take 50 percent profit.`);
     const intervalId = setInterval(async () => {
       try {
         const positionExists = await this.checkIfPositionExists(tradeId);
@@ -79,8 +79,8 @@ export class TradeManager {
           (orderSide === 'BUY' && currentPriceNum >= ((tpPrice! + openPrice!) / 2) && currentPriceNum <= openPrice! + 0.9 * (tpPrice! - openPrice!)) ||
           (orderSide === 'SELL' && currentPriceNum <= ((tpPrice! + openPrice!) / 2) && currentPriceNum >= openPrice! - 0.9 * (openPrice! - tpPrice!))
         ) {
-          await logToFileAsync(`Taking % profit for trade ID ${tradeId} at price: ${currentPriceNum}`);
-          this.coverCommisions(tradeId, currentPriceNum);
+          await logToFileAsync(`Taking 50% profit for trade ID ${tradeId} at price: ${currentPriceNum}`);
+          this.take50PercentProfit(tradeId, currentPriceNum);
           
           clearInterval(intervalId);
           this.tradeIntervals.delete(tradeId);
@@ -89,23 +89,23 @@ export class TradeManager {
           this.startTakeAdditionalProfitAndTightenSL(tradeId);
         }
       } catch (error) {
-        logToFileAsync("Error during % profit interval:", error);
+        logToFileAsync("Error during 50% profit interval:", error);
       }
     }, 3000);
 
     this.tradeIntervals.set(tradeId, intervalId);
-    logToFileAsync(`Started % profit interval for trade ID: ${tradeId} with interval ID: ${intervalId}`);
+    logToFileAsync(`Started 50% profit interval for trade ID: ${tradeId} with interval ID: ${intervalId}`);
   }
 
-  private async coverCommisions(tradeId: string, currentPrice: number) {
+  private async take50PercentProfit(tradeId: string, currentPrice: number) {
     try {
-      await closePartiallyMT(0.10);
-      await logToFileAsync("10% of the position closed successfully.");
+      await closePartiallyMT(0.499999999);
+      await logToFileAsync("50% of the position closed successfully.");
 
       const trade = this.trades.get(tradeId);
       if (trade) {
         const { slPrice, orderSide } = trade;
-        const newSLPrice = (trade.openPrice! + (orderSide === 'BUY' ? -0.0001 : 0.0001));
+        const newSLPrice = (trade.openPrice! + (orderSide === 'BUY' ? 0.0001 : -0.0001));
         trade.slPrice = parseFloat(newSLPrice.toFixed(5));
         await logToFileAsync(`Moving stop loss 1 pip above/below open price: ${newSLPrice}`);
 
@@ -117,12 +117,12 @@ export class TradeManager {
         }
       }
     } catch (error) {
-      logToFileAsync(`Error taking % profit for trade ID ${tradeId}:`, error);
+      logToFileAsync(`Error taking 50% profit for trade ID ${tradeId}:`, error);
     }
   }
 
   private startTakeAdditionalProfitAndTightenSL(tradeId: string) {
-    logToFileAsync(`Monitoring Price to take 80 percent profit when price reaches 90% of TP`);
+    logToFileAsync(`Monitoring Price to take 40 percent profit when profit reaches 90%`);
     const intervalId = setInterval(async () => {
       try {
         const positionExists = await this.checkIfPositionExists(tradeId);
@@ -172,9 +172,9 @@ export class TradeManager {
 
   private async takeAdditionalProfitAndTightenSL(tradeId: string, currentPrice: number) {
     try {
-      await logToFileAsync(`Taking additional 80% profit for trade ID: ${tradeId} at price: ${currentPrice}`);
-      await closePartiallyMT(0.799999999);
-      await logToFileAsync("80% of the position closed successfully.");
+      await logToFileAsync(`Taking additional 40% profit for trade ID: ${tradeId} at price: ${currentPrice}`);
+      await closePartiallyMT(0.399999999);
+      await logToFileAsync("40% of the position closed successfully.");
 
       const trade = this.trades.get(tradeId);
       if (trade) {

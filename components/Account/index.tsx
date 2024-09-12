@@ -2,8 +2,7 @@ import { useState } from 'react';
 import styled from 'styled-components';
 import Keyboard from '../Keyboard';
 import { handleOandaLogin } from '../../utils/oanda/api';
-// import { handleDXLogin } from '../../utils/dxtrade/api';
-import { handleMTLogin } from '../../utils/match-trader/api';
+import { handleMTLogin } from '../../utils/match-trader/api/login';
 import { marketWatchMT } from '../../utils/match-trader/api/market-watch';
 
 // Dark mode color variables

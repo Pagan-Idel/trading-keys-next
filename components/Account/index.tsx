@@ -1,4 +1,4 @@
-import { useState, useEffect, ChangeEvent } from 'react';
+import { useState } from 'react';
 import styled from 'styled-components';
 import Keyboard from '../Keyboard';
 import { handleOandaLogin } from '../../utils/oanda/api';
@@ -25,26 +25,6 @@ const Container = styled.div`
 `;
 
 const Content = styled.div`
-`;
-
-const Input = styled.input`
-  margin-bottom: 5px;
-  padding: 8px;
-  font-size: 16px;
-  border: 1px solid ${darkBorderColor};
-  color: ${darkTextColor};
-  background-color: ${darkBackgroundColor};
-`;
-
-const Select = styled.select`
-  margin-bottom: 10px;
-  padding: 8px;
-  font-size: 16px;
-  border: 1px solid ${darkBorderColor};
-  color: ${darkTextColor};
-  background-color: ${darkBackgroundColor};
-  margin-right: 20px;
-  height: 40px !important;
 `;
 
 const Button = styled.button`
@@ -95,7 +75,7 @@ const Account = () => {
     localStorage.setItem('platform', platform);
     localStorage.setItem('accountType', accountType);
   
-    if (platform == 'oanda' && accountType !== '') {
+    if (platform === 'oanda' && accountType !== '') {
       handleOandaLogin().then((data) => {
         if (!data.errorMessage) {
           setIsLoginSuccessful(true);
@@ -111,7 +91,7 @@ const Account = () => {
           }, 3000);
         }
       });
-    } else if (platform == 'dxtrade' && accountType !== '' ){ 
+    } else if (platform === 'dxtrade' && accountType !== '' ){ 
       // Support for DX API still needed.
       // handleDXLogin(accountType).then((data) => {
       //   if (!data.errorMessage) {
@@ -128,7 +108,7 @@ const Account = () => {
       //     }, 3000);
       //   }
       // });
-    } else if (platform == 'match-trader' && accountType !== ''){ 
+    } else if (platform === 'match-trader' && accountType !== ''){ 
       handleMTLogin(accountType).then((data) => {
         if ('token' in data) {
           setIsLoginSuccessful(true);
@@ -171,7 +151,7 @@ const Account = () => {
               </ButtonsContainer>
             )}
   
-            {platform !== '' && accountType == '' && !isLoginSuccessful  && (
+            {platform !== '' && accountType === '' && !isLoginSuccessful  && (
               <>
               <br />
               <InputLabel htmlFor="login">Select Account</InputLabel>
@@ -181,7 +161,7 @@ const Account = () => {
               </ButtonsContainer>
             </>
             )}
-            {accountType !== '' && isLoginSuccessful == false && (
+            {accountType !== '' && isLoginSuccessful === false && (
               <>
                 <ButtonsContainer>
                   <BlueButton onClick={() => setAccountType(accountType === 'live' ? 'demo' : 'live')}>

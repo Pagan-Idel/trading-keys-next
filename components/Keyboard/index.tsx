@@ -181,6 +181,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
     return () => {
       window.removeEventListener('keydown', handleKeyPress);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty dependency array to ensure the effect runs only once on mount
 
   useEffect(() => {
@@ -419,7 +420,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
           <NumberButton
             key={idx}
             id={`numberButton-${idx}`}
-            pressed={name == buttonPressed}
+            pressed={name === buttonPressed}
             onClick={() => handleButtonClick(name)}
           >
             {name}

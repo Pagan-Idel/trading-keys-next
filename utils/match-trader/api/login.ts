@@ -69,14 +69,14 @@ export interface LoginRequestBodyMT {
   }
   
   const demoCreds: LoginMTRequest = {
-    email: '[redacted]',
-    password: '[redacted]',
+    email: process.env.MTR_DEMO_EMAIL!,
+    password: process.env.MTR_DEMO_PASSWORD!,
     brokerId: '0'
   };
   
   const liveCreds: LoginMTRequest = {
-    email: '[redacted]',
-    password: '[redacted]',
+    email: process.env.MTR_LIVE_EMAIL!,
+    password: process.env.MTR_LIVE_EMAIL!,
     brokerId: '1'
   };
   

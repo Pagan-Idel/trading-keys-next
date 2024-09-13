@@ -16,15 +16,15 @@ export interface ErrorResponse {
 }
 
 const demoCreds: LoginRequest = {
-  username: '[redacted]',
+  username: process.env.DX_DEMO_USER!,
   domain: 'https://trade.gooeytrade.com/',
-  password: '[redacted]'
+  password: process.env.DX_DEMO_PASSWORD!
 };
 
 const liveCreds: LoginRequest = {
-  username: '[redacted]',
+  username:  process.env.DX_LIVE_USER!,
   domain: 'https://trade.gooeytrade.com/',
-  password: '[redacted]'
+  password:  process.env.DX_LIVE_PASSWORD!
 };
 
 export const handleDXLogin = async (accountType: string): Promise<void> => { 

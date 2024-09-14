@@ -1,8 +1,6 @@
 // src/utils/api/currentPrice.ts
-
 import { logToFileAsync } from "../../logger";
-
-
+import credentials from "../../../credentials.json";
 
 interface PriceTick {
   liquidity: number;
@@ -22,9 +20,9 @@ interface PriceStreamResponse {
 export const currentPrice = async (symbol: string): Promise<{ bid: string; ask: string }> => {
   const accountType = localStorage.getItem('accountType');
   let hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
-  const accountId = accountType === 'live' ? '[redacted]' : '[redacted]';
-  const token = accountType === 'live' ? '[redacted]' : '[redacted]';
-
+  const accountId = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
+  const token = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
+  
   // Check if the environment variable is set
   if (!accountId || !token || !hostname) {
     logToFileAsync("Token or AccountId is not set.");

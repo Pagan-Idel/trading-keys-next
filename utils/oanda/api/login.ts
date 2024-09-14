@@ -1,5 +1,5 @@
 import { logToFileAsync } from "../../logger";
-
+import credentials from "../../../credentials.json"; // Import credentials.json at the top
 
 export interface Account {
   guaranteedStopLossOrderMode: string;
@@ -49,12 +49,15 @@ export interface AccountResponse {
 export const handleOandaLogin = async (): Promise<AccountResponse> => {
   const accountType = localStorage.getItem('accountType');
   const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
-  const accountId = accountType === 'live' ? process.env.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID : process.env.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
-  const token = accountType === 'live' ? process.env.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN : process.env.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
+  
+  // Using credentials from credentials.json instead of process.env
+  const accountId = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
+  const token = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
 
-  // Check if the environment variable is set
-  if (!token || !accountType) {
+  // Check if the credentials are set
+  if (!token || !accountId) {
     logToFileAsync("Token or AccountId is not set.");
+    throw new Error("Token or AccountId is not set.");
   }
 
   const api2: string = `${hostname}/v3/accounts`;
@@ -64,9 +67,10 @@ export const handleOandaLogin = async (): Promise<AccountResponse> => {
       'Authorization': `Bearer ${token}`
     }
   });
-  
+
   const responseData2: AccountResponse = await response2.json();
   logToFileAsync(responseData2);
+
   const api: string = `${hostname}/v3/accounts/${accountId}`;
   const response: Response = await fetch(api, {
     headers: {
@@ -77,9 +81,10 @@ export const handleOandaLogin = async (): Promise<AccountResponse> => {
 
   if (!response.ok) {
     logToFileAsync(`HTTP error! Status: ${response.status}`);
+    throw new Error(`HTTP error! Status: ${response.status}`);
   }
 
   const responseData: AccountResponse = await response.json();
   logToFileAsync(responseData);
-  return responseData
+  return responseData;
 };

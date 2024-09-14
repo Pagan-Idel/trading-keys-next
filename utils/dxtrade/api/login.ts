@@ -1,4 +1,5 @@
 import { logToFileAsync } from "../../logger";
+import credentials from "../../../credentials.json";  // Import credentials from credentials.json
 
 export interface LoginRequest {
   username: string;
@@ -15,25 +16,26 @@ export interface ErrorResponse {
   errorMessage: string;
 }
 
+// Use credentials from credentials.json instead of process.env
 const demoCreds: LoginRequest = {
-  username: process.env.DX_DEMO_USER!,
+  username: credentials.DX_DEMO_USER,
   domain: 'https://trade.gooeytrade.com/',
-  password: process.env.DX_DEMO_PASSWORD!
+  password: credentials.DX_DEMO_PASSWORD
 };
 
 const liveCreds: LoginRequest = {
-  username:  process.env.DX_LIVE_USER!,
+  username: credentials.DX_LIVE_USER,
   domain: 'https://trade.gooeytrade.com/',
-  password:  process.env.DX_LIVE_PASSWORD!
+  password: credentials.DX_LIVE_PASSWORD
 };
 
-export const handleDXLogin = async (accountType: string): Promise<void> => { 
-  
+export const handleDXLogin = async (accountType: string): Promise<void> => {
   const apiEndpoint = '/api/dxtrade/login';
+  
   const loginRequest = {
     username: accountType === 'demo' ? demoCreds.username : liveCreds.username,
-    domain:  accountType === 'demo' ? demoCreds.domain : liveCreds.domain,
-    password:  accountType === 'demo' ? demoCreds.password : liveCreds.password,
+    domain: accountType === 'demo' ? demoCreds.domain : liveCreds.domain,
+    password: accountType === 'demo' ? demoCreds.password : liveCreds.password,
   };
 
   try {
@@ -41,7 +43,6 @@ export const handleDXLogin = async (accountType: string): Promise<void> => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // 'Accountenv': `${accountEnv}`
       },
       body: JSON.stringify(loginRequest),
     });

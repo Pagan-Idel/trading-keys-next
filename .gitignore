@@ -1,4 +1,4 @@
 node_modules
 .next
 logs
-.env.local
+credentials.json

@@ -14,27 +14,26 @@ To set up the Trading Keys app locally, follow these steps:
 
 Clone the repository:
 
-bash
-Copy code
+```bash
 git clone https://github.com/your-username/trading-keys-next.git
+```
 Note: Cloning this repository is only allowed for personal use by the owner of this project.
 
 Install dependencies:
 
 Navigate to the project directory and install the required dependencies:
 
-bash
-Copy code
+```bash
 cd trading-keys-next
 npm install
+```
 Set up environment variables:
 
 The app requires API credentials for both Match-Trader and Oanda. These should be provided in a credentials.json file located at the root of the project.
 
 Example credentials.json:
 
-json
-Copy code
+...json
 {
   "MTR_DEMO_EMAIL": "your-demo-email",
   "MTR_DEMO_PASSWORD": "your-demo-password",
@@ -45,27 +44,30 @@ Copy code
   "NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID": "your-demo-account-id",
   "NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN": "your-demo-account-token"
 }
+```
 Run the application:
 
 You can run the app in development mode with the following command:
 
-bash
-Copy code
+```bash
 npm run dev
+```
 Start Redis (If Applicable):
 
 If Redis is required for session or trade management, make sure to start Redis using the appropriate command for your environment.
 
 On Ubuntu:
 
-bash
-Copy code
+```bash
 npm run redis-ubuntu
+```
+
 On Windows:
 
-bash
-Copy code
+```bash
 npm run redis-windows
+```
+
 Usage
 Match-Trader Integration
 The app provides full integration with Match-Trader for executing and managing trades. The app will automatically fetch your account data, including positions, orders, and balances, and allows you to interact with the platform seamlessly.

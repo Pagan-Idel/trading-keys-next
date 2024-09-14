@@ -76,7 +76,7 @@ export interface LoginRequestBodyMT {
   
   const liveCreds: LoginMTRequest = {
     email: process.env.MTR_LIVE_EMAIL!,
-    password: process.env.MTR_LIVE_EMAIL!,
+    password: process.env.MTR_LIVE_PASSWORD!,
     brokerId: '1'
   };
   

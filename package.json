@@ -23,7 +23,8 @@
   },
   "scripts": {
     "dev": "next dev -p 4000",
-    "redis": "redis-server C:/Documents/trading-keys-next/redis.windows.conf",
+    "redis-windows": "redis-server C:/Documents/trading-keys-next/redis.windows.conf",
+    "redis-ubuntu": "redis-server /etc/redis/redis.conf",
     "build": "next build",
     "start": "next start -p 4000"
   },

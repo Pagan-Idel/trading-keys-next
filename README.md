@@ -33,7 +33,7 @@ The app requires API credentials for both Match-Trader and Oanda. These should b
 
 Example credentials.json:
 
-...json
+```json
 {
   "MTR_DEMO_EMAIL": "your-demo-email",
   "MTR_DEMO_PASSWORD": "your-demo-password",

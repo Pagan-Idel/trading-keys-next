@@ -1,4 +1,4 @@
-import { ACTION, Trade } from ".";
+import { ACTION, TradeOpenNow } from ".";
 import { OrderParameters } from "../../../components/Keyboard";
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json";
@@ -85,13 +85,13 @@ export const closeTrade = async (orderType: OrderParameters): Promise<TradeClose
     return false;
   }
 
-  const mostRecentTrade: Trade | undefined = await recentTrade();
+  const mostRecentTrade: TradeOpenNow | undefined = await recentTrade();
   if (!mostRecentTrade || !mostRecentTrade.units) { // Use 'units' or the appropriate property
     return false;
   }
 
   const partialClose: number = orderType.action === ACTION.PartialClose25 ? 0.24999999999 : 0.4999999999;
-  const initialUnitsString: string = mostRecentTrade.units!;  // Use 'units' for trade units
+  const initialUnitsString: string = mostRecentTrade.units!;  // Use 'units' for TradeOpenNow units
   const initialUnitsWithoutNegative: string = initialUnitsString.replace('-', '');
   const partialUnits: string = (parseFloat(initialUnitsWithoutNegative) * partialClose).toFixed(0);
 
@@ -124,7 +124,7 @@ export const closeTrade = async (orderType: OrderParameters): Promise<TradeClose
     return responseData;
 
   } catch (error) {
-    logToFileAsync(`Error closing trade: ${error}`);
+    logToFileAsync(`Error closing TradeOpenNow: ${error}`);
     return false;
   }
 };

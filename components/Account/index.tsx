@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import Keyboard from '../Keyboard';
-import { handleOandaLogin } from '../../utils/oanda/api';
 import { handleMTLogin } from '../../utils/match-trader/api/login';
 import { marketWatchMT } from '../../utils/match-trader/api/market-watch';
+import { handleOandaLogin } from '../../utils/oanda/api/login';
 
 // Dark mode color variables
 const darkBackgroundColor = '#333333';

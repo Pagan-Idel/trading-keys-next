@@ -2,7 +2,7 @@ import { OrderParameters } from "../../../components/Keyboard";
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json";
 import { pipIncrement, recentTrade } from "../../shared";
-import { Trade, TradeById } from "./openNow";
+import { TradeOpenNow, TradeById } from "./openNow";
 import { ACTION } from "./order";
 
 interface ModifyRequest {
@@ -35,7 +35,7 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
     throw new Error("Token or AccountId is not set.");
   }
 
-  const mostRecentTrade: Trade | undefined = await recentTrade();
+  const mostRecentTrade: TradeOpenNow | undefined = await recentTrade();
   if (!mostRecentTrade) {
     return false;
   }
@@ -82,7 +82,7 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
     const response1Object: TradeById = await response1.json();
     logToFileAsync("response1Object", response1Object);
 
-    if (!response1Object.trade.stopLossOrder && orderType.action === ACTION.MoveSL) {
+    if (!response1Object.TradeOpenNow.stopLossOrder && orderType.action === ACTION.MoveSL) {
       logToFileAsync(`No Stop Loss Detected`);
       return false;
     }
@@ -92,8 +92,8 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
       requestBody = {
         stopLoss: {
           price: orderType.action2 === ACTION.DOWN 
-            ? (parseFloat(response1Object.trade.stopLossOrder!.price) - pipIncrement).toFixed(5) 
-            : (parseFloat(response1Object.trade.stopLossOrder!.price) + pipIncrement).toFixed(5),
+            ? (parseFloat(response1Object.TradeOpenNow.stopLossOrder!.price) - pipIncrement).toFixed(5) 
+            : (parseFloat(response1Object.TradeOpenNow.stopLossOrder!.price) + pipIncrement).toFixed(5),
           timeInForce: "GTC",
         },
       };
@@ -101,8 +101,8 @@ export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> 
       requestBody = {
         takeProfit: {
           price: orderType.action2 === ACTION.DOWN 
-            ? (parseFloat(response1Object.trade.takeProfitOrder!.price) - pipIncrement).toFixed(5) 
-            : (parseFloat(response1Object.trade.takeProfitOrder!.price) + pipIncrement).toFixed(5),
+            ? (parseFloat(response1Object.TradeOpenNow.takeProfitOrder!.price) - pipIncrement).toFixed(5) 
+            : (parseFloat(response1Object.TradeOpenNow.takeProfitOrder!.price) + pipIncrement).toFixed(5),
           timeInForce: "GTC",
         },
       };

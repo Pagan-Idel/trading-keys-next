@@ -1,9 +1,10 @@
 import { OrderParameters } from '../components/Keyboard';
 import { logToFileAsync } from './logger';
 import { balanceMT, ErrorMTResponse } from './match-trader/api/balance';
-import { marketWatchMT, MarketWatchResponseMT } from './match-trader/api/market-watch';
-import { openedPositionsMT } from './match-trader/api/opened-positions';
-import { ACTION, INSTRUMENT, OpenTrade, Trade, handleOandaLogin, currentPrice, openNow } from './oanda/api'; 
+import { marketWatchMT } from './match-trader/api/market-watch';
+import { ACTION, INSTRUMENT, OpenTrade, currentPrice, TradeOpenNow } from './oanda/api'; 
+import { handleOandaLogin } from './oanda/api/login';
+import { openNow } from './oanda/api/openNow';
 
 export const pipIncrement: number = 0.0001;
 export const contractSize: number = 100000;
@@ -146,7 +147,7 @@ export const getBidAndAsk = async (currency: string = "EURUSD") => {
 };
 
 // Use Redis or an appropriate backend for recent trades
-export const recentTrade = async (): Promise<Trade | undefined> => {
+export const recentTrade = async (): Promise<TradeOpenNow | undefined> => {
   const openTrades: OpenTrade | undefined = await openNow();
   
   if (!openTrades) {
@@ -158,7 +159,7 @@ export const recentTrade = async (): Promise<Trade | undefined> => {
   }
 
   // Find the trade with the latest openTime
-  let mostRecentTrade: Trade = trades.reduce((prevTrade, currentTrade) => {
+  let mostRecentTrade: TradeOpenNow = trades.reduce((prevTrade, currentTrade) => {
     if (prevTrade.openTime && currentTrade.openTime) {
       const prevTime = new Date(prevTrade.openTime).getTime();
       const currentTime = new Date(currentTrade.openTime).getTime();

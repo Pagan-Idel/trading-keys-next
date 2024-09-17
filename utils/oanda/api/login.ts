@@ -17,8 +17,8 @@ export interface Position {
   side: 'BUY' | 'SELL';
 }
 
-export interface Trade {
-  // Define the structure of a trade if known
+export interface TradeLogin {
+  // Define the structure of a TradeLogin if known
   id: string;
   instrument: string;
   price: string;
@@ -49,7 +49,7 @@ export interface Account {
   guaranteedExecutionFees: string;
   orders: Order[];  // Replaced 'any[]' with 'Order[]' for stronger typing
   positions: Position[]; // Replaced 'any[]' with 'Position[]' for stronger typing
-  trades: Trade[]; // Replaced 'any[]' with 'Trade[]' for stronger typing
+  trades: TradeLogin[]; // Replaced 'any[]' with 'TradeLogin[]' for stronger typing
   unrealizedPL: string;
   NAV: string;
   marginUsed: string;

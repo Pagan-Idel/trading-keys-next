@@ -13,7 +13,7 @@ export interface TakeProfitOrder {
   price: string;
 }
 
-export interface Trade {
+export interface TradeOpenNow {
   currentUnits?: string;
   financing?: string;
   id?: string;
@@ -29,16 +29,17 @@ export interface Trade {
   };
   stopLossOrder?: StopLossOrder;
   takeProfitOrder?: TakeProfitOrder;
+  units?: string;
 }
 
 export interface OpenTrade {
   lastTransactionID: string;
-  trades: Trade[];
+  trades: TradeOpenNow[];
 }
 
 export interface TradeById {
   lastTransactionID: string;
-  trade: Trade;
+  TradeOpenNow: TradeOpenNow;
 }
 
 // Helper function to safely access localStorage on the client side

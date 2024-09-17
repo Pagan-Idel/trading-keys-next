@@ -138,13 +138,13 @@ export const handleMTLogin = async (
     logToFileAsync("Login Successful");
 
     // Extract SYSTEM_UUID and store it in local storage
-    const systemUuid = data.accounts[0]?.offer.system.uuid;
+    const systemUuid = data.accounts[accountType === "demo" ? 1 : 0]?.offer.system.uuid;
     if (systemUuid) {
       localStorage.setItem("SYSTEM_UUID", systemUuid);
     }
 
     // Extract tradingApiToken and store it in local storage
-    const tradingApiToken = data.accounts[0]?.tradingApiToken;
+    const tradingApiToken = data.accounts[accountType === "demo" ? 1 : 0]?.tradingApiToken;
     if (tradingApiToken) {
       localStorage.setItem("TRADING_API_TOKEN", tradingApiToken);
     }

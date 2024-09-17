@@ -83,7 +83,14 @@ const liveCreds: LoginMTRequest = {
 export const handleMTLogin = async (
   accountType: string
 ): Promise<LoginMTResponse | ErrorMTResponse> => {
+  // Ensure localStorage is only accessed on the client-side
+  if (typeof window === 'undefined') {
+    return { errorMessage: 'localStorage is not available in the current environment.' } as ErrorMTResponse;
+  }
+
+  // Set account type in local storage
   localStorage.setItem("accountType", accountType);
+
   const apiEndpoint = "/api/match-trader/login";
   const loginRequestBody: LoginRequestBodyMT = {
     email: accountType === "demo" ? demoCreds.email : liveCreds.email,
@@ -131,16 +138,17 @@ export const handleMTLogin = async (
     logToFileAsync("Login Successful");
 
     // Extract SYSTEM_UUID and store it in local storage
-    const systemUuid = data.accounts[accountType === "demo" ? 1 : 0]?.offer.system.uuid;
+    const systemUuid = data.accounts[0]?.offer.system.uuid;
     if (systemUuid) {
       localStorage.setItem("SYSTEM_UUID", systemUuid);
     }
 
     // Extract tradingApiToken and store it in local storage
-    const tradingApiToken = data.accounts[accountType === "demo" ? 1 : 0]?.tradingApiToken;
+    const tradingApiToken = data.accounts[0]?.tradingApiToken;
     if (tradingApiToken) {
       localStorage.setItem("TRADING_API_TOKEN", tradingApiToken);
     }
+
     return data;
   } catch (error) {
     console.error("An error occurred during login:", error);

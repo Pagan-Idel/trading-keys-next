@@ -186,17 +186,21 @@ const Keyboard = ({ platform }: KeyboardProps) => {
 
   useEffect(() => {
     // Set initial value of Pip Stop Loss in local storage on component mount
-    const storedStopLoss = localStorage.getItem('stopLoss');
-    if (storedStopLoss) {
-      setPipStopLoss(Number(storedStopLoss));
-    } else {
-      localStorage.setItem('stopLoss', '6');
+    if (typeof window !== 'undefined') {
+      const storedStopLoss = localStorage.getItem('stopLoss');
+      if (storedStopLoss) {
+        setPipStopLoss(Number(storedStopLoss));
+      } else {
+        localStorage.setItem('stopLoss', '6');
+      }
     }
   }, []);
 
   const handlePipStopLossChange = (value: number) => {
     // Update Pip Stop Loss value in local storage
-    localStorage.setItem('stopLoss', value.toString());
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('stopLoss', value.toString());
+    }
     setPipStopLoss(value);
   };
 

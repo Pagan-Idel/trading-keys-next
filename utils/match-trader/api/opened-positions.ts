@@ -1,6 +1,5 @@
 import { logToFileAsync } from "../../logger";
 
-
 export interface Position {
   id: string;
   symbol: string;
@@ -29,17 +28,27 @@ export interface ErrorMTResponse {
   errorMessage: string;
 }
 
-// TODO: Ability to get open pisition by ID 
+// Function to fetch opened positions
 export const openedPositionsMT = async (): Promise<OpenedPositionsResponseMT | ErrorMTResponse> => {
-  const accountType = localStorage.getItem('accountType');
+  let accountType = '';
+  let tradingApiToken = '';
+  let systemUuid = '';
+
+  // Check if running in browser to access localStorage
+  if (typeof window !== 'undefined') {
+    accountType = localStorage.getItem('accountType') || '';
+    tradingApiToken = localStorage.getItem('TRADING_API_TOKEN') || '';
+    systemUuid = localStorage.getItem('SYSTEM_UUID') || '';
+  }
+
   const apiEndpoint = '/api/match-trader/opened-positions';
 
   try {
     const response = await fetch(apiEndpoint, {
       method: 'GET',
       headers: {
-        'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
-        'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
+        'TRADING_API_TOKEN': tradingApiToken,
+        'SYSTEM_UUID': systemUuid,
         'Accept': 'application/json',
         'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
       },
@@ -68,11 +77,11 @@ export const openedPositionsMT = async (): Promise<OpenedPositionsResponseMT | E
     }
 
     if (data.positions.length === 0) {
-      let errorResponse: ErrorMTResponse = {errorMessage: "No Opened Positions"};
+      let errorResponse: ErrorMTResponse = { errorMessage: "No Opened Positions" };
       console.error('No Opened Positions');
       return errorResponse;
     }
-  
+
     return data;
   } catch (error) {
     console.error('An error occurred opening positions:', error);

@@ -1,4 +1,3 @@
-
 import { logToFileAsync } from "../../logger";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
@@ -19,44 +18,53 @@ export interface ClosePartialPositionMT {
 export interface ErrorMTResponse {
   errorMessage: string;
 }
-    
+
 export const closePartiallyMT = async (partialAmount: number): Promise<ClosePartialPositionMT | ErrorMTResponse> => {
+  // Ensure localStorage is only accessed on the client-side
+  if (typeof window === 'undefined') {
+    return { errorMessage: 'localStorage is not available in the current environment.' } as ErrorMTResponse;
+  }
+
   const accountType = localStorage.getItem('accountType');
   const recentTradeOpenVolume = localStorage.getItem('openVolume');
-  if (recentTradeOpenVolume == 'null') {
+  if (!recentTradeOpenVolume || recentTradeOpenVolume === 'null') {
     console.error(`Failed To Get Open Volume`, recentTradeOpenVolume);
     return { errorMessage: `Failed To Get Open Volume` } as ErrorMTResponse;
-  } 
-  let requestBody: ClosePartialPositionMT = {  
+  }
+
+  let requestBody: ClosePartialPositionMT = {
     positionId: "",
     instrument: "",
     orderSide: "",
     isMobile: false,
-    volume: 0 
+    volume: 0
   };
+
   const apiEndpoint = '/api/match-trader/close-partially';
   const recentPosition: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
+
   if ('positions' in recentPosition) {
     requestBody = {
-      positionId: recentPosition.positions[0].id,         
-      instrument: recentPosition.positions[0].symbol,     
+      positionId: recentPosition.positions[0].id,
+      instrument: recentPosition.positions[0].symbol,
       orderSide: recentPosition.positions[0].side,
       isMobile: false,
-      volume: parseFloat((parseFloat(recentTradeOpenVolume!) * partialAmount).toFixed(2))
+      volume: parseFloat((parseFloat(recentTradeOpenVolume) * partialAmount).toFixed(2))
     };
+
     try {
       const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
-          'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
-          'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
+          'TRADING_API_TOKEN': localStorage.getItem('TRADING_API_TOKEN') || '',
+          'SYSTEM_UUID': localStorage.getItem('SYSTEM_UUID') || '',
           'Accept': 'application/json',
           'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
         body: JSON.stringify(requestBody),
         credentials: 'include'
       });
-  
+
       const rawResponseText = await response.text();
       if (!response.ok) {
         let errorResponse: ErrorMTResponse;
@@ -69,7 +77,7 @@ export const closePartiallyMT = async (partialAmount: number): Promise<ClosePart
         console.error(`Close Partial Position Failed`, errorResponse.errorMessage);
         return errorResponse;
       }
-  
+
       let data: ClosePartialPositionMT;
       try {
         data = JSON.parse(rawResponseText);
@@ -77,17 +85,16 @@ export const closePartiallyMT = async (partialAmount: number): Promise<ClosePart
         console.error('Error parsing success response as JSON:', e);
         throw new Error(`Error: ${rawResponseText}`);
       }
-  
+
       logToFileAsync(`Close Partial Position Successful`);
-    
+
       return data;
     } catch (error) {
       console.error(`An error occurred during Partial closing position:`, error);
-      return { errorMessage: `An unknown error occurred during Partial closing postion` } as ErrorMTResponse;
+      return { errorMessage: `An unknown error occurred during Partial closing position` } as ErrorMTResponse;
     }
   } else {
-    console.error("Error Getting Recent Postion - ", recentPosition.errorMessage);
+    console.error("Error Getting Recent Position - ", recentPosition.errorMessage);
     return { errorMessage: recentPosition.errorMessage } as ErrorMTResponse;
   }
 };
-  

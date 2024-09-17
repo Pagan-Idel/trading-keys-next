@@ -1,6 +1,31 @@
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json"; // Import credentials.json at the top
 
+export interface Order {
+  // Define the structure of an order if known
+  id: string;
+  units: string;
+  instrument: string;
+  price: string;
+  time: string;
+}
+
+export interface Position {
+  // Define the structure of a position if known
+  instrument: string;
+  units: string;
+  side: 'BUY' | 'SELL';
+}
+
+export interface Trade {
+  // Define the structure of a trade if known
+  id: string;
+  instrument: string;
+  price: string;
+  units: string;
+  realizedPL: string;
+}
+
 export interface Account {
   guaranteedStopLossOrderMode: string;
   hedgingEnabled: boolean;
@@ -22,9 +47,9 @@ export interface Account {
   commission: string;
   dividendAdjustment: string;
   guaranteedExecutionFees: string;
-  orders: any[]; // Replace 'any' with the actual type for orders, positions, trades, if known
-  positions: any[];
-  trades: any[];
+  orders: Order[];  // Replaced 'any[]' with 'Order[]' for stronger typing
+  positions: Position[]; // Replaced 'any[]' with 'Position[]' for stronger typing
+  trades: Trade[]; // Replaced 'any[]' with 'Trade[]' for stronger typing
   unrealizedPL: string;
   NAV: string;
   marginUsed: string;
@@ -43,11 +68,19 @@ export interface Account {
 export interface AccountResponse {
   account: Account;
   lastTransactionID: string;
-  errorMessage: string;
+  errorMessage?: string; // Make this optional since it may not always be present
 }
 
+// Helper function to safely access localStorage on the client side
+const getLocalStorageItem = (key: string): string | null => {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem(key);
+  }
+  return null;
+};
+
 export const handleOandaLogin = async (): Promise<AccountResponse> => {
-  const accountType = localStorage.getItem('accountType');
+  const accountType = getLocalStorageItem('accountType');
   const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
   
   // Using credentials from credentials.json instead of process.env
@@ -60,31 +93,49 @@ export const handleOandaLogin = async (): Promise<AccountResponse> => {
     throw new Error("Token or AccountId is not set.");
   }
 
-  const api2: string = `${hostname}/v3/accounts`;
-  const response2: Response = await fetch(api2, {
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
+  try {
+    // Fetch all accounts
+    const accountsApiUrl = `${hostname}/v3/accounts`;
+    const accountsResponse: Response = await fetch(accountsApiUrl, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    const accountsResponseData: AccountResponse = await accountsResponse.json();
+    logToFileAsync(accountsResponseData);
+
+    if (!accountsResponse.ok) {
+      logToFileAsync(`HTTP error when fetching accounts! Status: ${accountsResponse.status}`);
+      throw new Error(`HTTP error when fetching accounts! Status: ${accountsResponse.status}`);
     }
-  });
 
-  const responseData2: AccountResponse = await response2.json();
-  logToFileAsync(responseData2);
+    // Fetch account details for the specific account ID
+    const accountDetailsApiUrl = `${hostname}/v3/accounts/${accountId}`;
+    const accountDetailsResponse: Response = await fetch(accountDetailsApiUrl, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
 
-  const api: string = `${hostname}/v3/accounts/${accountId}`;
-  const response: Response = await fetch(api, {
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
+    if (!accountDetailsResponse.ok) {
+      logToFileAsync(`HTTP error when fetching account details! Status: ${accountDetailsResponse.status}`);
+      throw new Error(`HTTP error when fetching account details! Status: ${accountDetailsResponse.status}`);
     }
-  });
 
-  if (!response.ok) {
-    logToFileAsync(`HTTP error! Status: ${response.status}`);
-    throw new Error(`HTTP error! Status: ${response.status}`);
+    const accountDetailsResponseData: AccountResponse = await accountDetailsResponse.json();
+    logToFileAsync(accountDetailsResponseData);
+
+    return accountDetailsResponseData;
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      logToFileAsync(`Error during OANDA login: ${error.message}`);
+      throw error;
+    } else {
+      logToFileAsync("An unknown error occurred during OANDA login.");
+      throw new Error("An unknown error occurred during OANDA login.");
+    }
   }
-
-  const responseData: AccountResponse = await response.json();
-  logToFileAsync(responseData);
-  return responseData;
 };

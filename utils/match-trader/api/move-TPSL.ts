@@ -1,4 +1,3 @@
-
 import { logToFileAsync } from "../../logger";
 import { ACTION } from "../../oanda/api";
 import { pipIncrement } from "../../shared";
@@ -25,40 +24,64 @@ export interface ErrorMTResponse {
 }
   
 export const moveTPSLMT = async (action: ACTION, action2: ACTION): Promise<EditPositionRequestMT | ErrorMTResponse> => {
-  const accountType = localStorage.getItem('accountType');
+  let accountType = '';
+  let tradingApiToken = '';
+  let systemUuid = '';
+
+  // Only access localStorage if on the client-side
+  if (typeof window !== 'undefined') {
+    accountType = localStorage.getItem('accountType') || '';
+    tradingApiToken = localStorage.getItem('TRADING_API_TOKEN') || '';
+    systemUuid = localStorage.getItem('SYSTEM_UUID') || '';
+  }
+
   let requestBody: EditPositionRequestMT = {
     id: ""
   };
+
   const apiEndpoint = '/api/match-trader/edit-position';
-  const recentPosition: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
-  if ('positions' in recentPosition) {
-    if (action == ACTION.MoveSL) {
+  const recentPosition = await openedPositionsMT();
+
+  // Check if recentPosition is an error response
+  if ('errorMessage' in recentPosition) {
+    console.error('Error getting positions:', recentPosition.errorMessage);
+    return recentPosition;
+  }
+
+  if (recentPosition.positions.length > 0) {
+    const position = recentPosition.positions[0];  // Use the first position for example purposes
+
+    // Handle moving stop-loss (SL)
+    if (action === ACTION.MoveSL) {
       requestBody = {
-          id: recentPosition.positions[0].id,
-          instrument: recentPosition.positions[0].symbol,
-          orderSide: recentPosition.positions[0].side, 
-          volume: parseFloat(recentPosition.positions[0].volume), 
-          slPrice: action2 == ACTION.DOWN ? parseFloat(recentPosition.positions[0].stopLoss) - pipIncrement : parseFloat(recentPosition.positions[0].stopLoss) + pipIncrement,  
-          tpPrice: parseFloat(recentPosition.positions[0].takeProfit),
+          id: position.id,
+          instrument: position.symbol,
+          orderSide: position.side,
+          volume: parseFloat(position.volume),
+          slPrice: action2 === ACTION.DOWN ? parseFloat(position.stopLoss) - pipIncrement : parseFloat(position.stopLoss) + pipIncrement,
+          tpPrice: parseFloat(position.takeProfit),
           isMobile: false
       };
-    } else if (action == ACTION.MoveTP) {
+    }
+    // Handle moving take-profit (TP)
+    else if (action === ACTION.MoveTP) {
       requestBody = {
-        id: recentPosition.positions[0].id,
-        instrument: recentPosition.positions[0].symbol,
-        orderSide: recentPosition.positions[0].side, 
-        volume: parseFloat(recentPosition.positions[0].volume), 
-        slPrice: parseFloat(recentPosition.positions[0].stopLoss),  
-        tpPrice: action2 == ACTION.DOWN ? parseFloat(recentPosition.positions[0].takeProfit) - pipIncrement : parseFloat(recentPosition.positions[0].takeProfit) + pipIncrement,
+        id: position.id,
+        instrument: position.symbol,
+        orderSide: position.side,
+        volume: parseFloat(position.volume),
+        slPrice: parseFloat(position.stopLoss),
+        tpPrice: action2 === ACTION.DOWN ? parseFloat(position.takeProfit) - pipIncrement : parseFloat(position.takeProfit) + pipIncrement,
         isMobile: false
       };
-    };
+    }
+    
     try {
       const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
-          'TRADING_API_TOKEN': `${localStorage.getItem('TRADING_API_TOKEN')}`,
-          'SYSTEM_UUID': `${localStorage.getItem('SYSTEM_UUID')}`,
+          'TRADING_API_TOKEN': tradingApiToken,
+          'SYSTEM_UUID': systemUuid,
           'Accept': 'application/json',
           'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
         },
@@ -88,14 +111,13 @@ export const moveTPSLMT = async (action: ACTION, action2: ACTION): Promise<EditP
       }
 
       console.log('Moving SL/TP Successful');
-    
       return data;
     } catch (error) {
       console.error('An error occurred during moving SL/TP position:', error);
       return { errorMessage: 'An unknown error occurred during moving SL/TP' } as ErrorMTResponse;
     }
   } else {
-    console.error('Error getting positions:', recentPosition.errorMessage);
-    return recentPosition ;
+    console.error('No positions available');
+    return { errorMessage: 'No positions available' } as ErrorMTResponse;
   }
 };

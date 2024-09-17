@@ -1,4 +1,4 @@
-import { ACTION, TradeOpenNow } from ".";
+import { ACTION, order, Trade } from ".";
 import { OrderParameters } from "../../../components/Keyboard";
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json";
@@ -71,60 +71,47 @@ export const closeTrade = async (orderType: OrderParameters): Promise<TradeClose
   let accountType = '';
   let accountId = '';
   let token = '';
-
+  let hostname = '';
   // Check if running in browser to access localStorage
   if (typeof window !== 'undefined') {
     accountType = localStorage.getItem('accountType') || '';
+    hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
     accountId = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
     token = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
   }
 
   // Check if the environment variable is set
-  if (!accountId || !token) {
+  if (!accountId || !token ) {
     logToFileAsync("Token or AccountId is not set.");
-    return false;
   }
 
-  const mostRecentTrade: TradeOpenNow | undefined = await recentTrade();
-  if (!mostRecentTrade || !mostRecentTrade.units) { // Use 'units' or the appropriate property
+  const mostRecentTrade: Trade | undefined = await recentTrade();
+  if (!mostRecentTrade) {
     return false;
   }
-
   const partialClose: number = orderType.action === ACTION.PartialClose25 ? 0.24999999999 : 0.4999999999;
-  const initialUnitsString: string = mostRecentTrade.units!;  // Use 'units' for TradeOpenNow units
+  const initialUnitsString: string = mostRecentTrade.initialUnits!;
   const initialUnitsWithoutNegative: string = initialUnitsString.replace('-', '');
   const partialUnits: string = (parseFloat(initialUnitsWithoutNegative) * partialClose).toFixed(0);
-
   const requestBody: CloseRequestBody = orderType.action === ACTION.PartialClose25 || orderType.action === ACTION.PartialClose50
-    ? { units: partialUnits }
-    : {};
-
-  const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
+  ? { units: partialUnits }
+  : {};
   const api: string = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/close`;
-
-  try {
-    const response: Response = await fetch(api, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        ...requestBody,
-      }),
-    });
-
-    if (!response.ok) {
-      logToFileAsync(`HTTP error! Status: ${response.status}`);
-      return false;
-    }
-
-    const responseData: TradeCloseResponse = await response.json();
-    logToFileAsync("responseData", responseData);
-    return responseData;
-
-  } catch (error) {
-    logToFileAsync(`Error closing TradeOpenNow: ${error}`);
-    return false;
+  const response: Response = await fetch(api, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      ...requestBody, // Merge additional body parameters if needed
+    }),
+  });
+  
+  if (!response.ok) {
+    logToFileAsync(`HTTP error! Status: ${response.status}`);
   }
-};
+  const responseData: TradeCloseResponse = await response.json();
+  logToFileAsync("responseData",responseData);
+  return responseData;
+} 

@@ -13,7 +13,7 @@ export interface TakeProfitOrder {
   price: string;
 }
 
-export interface TradeOpenNow {
+export interface Trade {
   currentUnits?: string;
   financing?: string;
   id?: string;
@@ -29,17 +29,16 @@ export interface TradeOpenNow {
   };
   stopLossOrder?: StopLossOrder;
   takeProfitOrder?: TakeProfitOrder;
-  units?: string;
 }
 
 export interface OpenTrade {
   lastTransactionID: string;
-  trades: TradeOpenNow[];
+  trades: Trade[];
 }
 
 export interface TradeById {
   lastTransactionID: string;
-  TradeOpenNow: TradeOpenNow;
+  trade: Trade;
 }
 
 // Helper function to safely access localStorage on the client side
@@ -52,26 +51,16 @@ const getLocalStorageItem = (key: string): string | null => {
 
 export const openNow = async (): Promise<OpenTrade | undefined> => {
   const accountType = getLocalStorageItem('accountType');
-  let hostname = accountType === 'live' 
-    ? 'https://api-fxtrade.oanda.com' 
-    : 'https://api-fxpractice.oanda.com';
-  
-  const accountId = accountType === 'live' 
-    ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID 
-    : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
-  
-  const token = accountType === 'live' 
-    ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN 
-    : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
-
-  // Check if the credentials are set
+  let hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
+  const accountId = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
+  const token = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
+  // Check if the environment variable is set
   if (!accountId || !token || !hostname) {
     logToFileAsync("Token or AccountId is not set.");
-    return undefined;
+    // You might want to handle this case differently, e.g., throw an error or return a specific value
   }
 
   const apiUrl = `${hostname}/v3/accounts/${accountId}/openTrades`;
-
   try {
     const response = await fetch(apiUrl, {
       headers: {
@@ -81,20 +70,18 @@ export const openNow = async (): Promise<OpenTrade | undefined> => {
     });
 
     if (!response.ok) {
-      logToFileAsync(`HTTP error! Status: ${response.status}`);
-      return undefined;
+      // Handle error responses, e.g., throw an error or return a specific value
+      console.error(`Error: ${response.status} - ${response.statusText}`);
+      // You might want to throw an error or return a specific value here
     }
 
     const responseData: OpenTrade = await response.json();
-    logToFileAsync("Open Trades Response", responseData);
 
+    // Assuming the API response structure matches the OpenTrades interface
     return responseData;
-  } catch (error: unknown) {
-    if (error instanceof Error) {
-      logToFileAsync('Error fetching open trades:', error.message);
-    } else {
-      logToFileAsync('Unknown error occurred while fetching open trades');
-    }
+  } catch (error) {
+    console.error('Error fetching open trades:', error);
+    // You might want to throw an error or return a specific value here
     return undefined;
   }
 };

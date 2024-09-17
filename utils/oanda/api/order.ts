@@ -30,7 +30,7 @@ export enum ACTION {
 
 export enum INSTRUMENT {
   EUR_USD = 'EUR_USD',
-  GBP_USD = 'GBP_USD'
+  GBP_USD = 'GPB_USD'
 }
 
 export interface ActionOnFill {
@@ -65,35 +65,30 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
   const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
   const accountId = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
   const token = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
-
-  // Check if the credentials are set
+  // Check if the environment variable is set
+  // Check if the environment variable is set
   if (!accountId || !hostname || !token) {
     logToFileAsync("Token or AccountId is not set.");
     return false;
   }
-
-  // Calculate risk data
-  const riskData: RISK | undefined = await calculalateRisk(orderType);
-  if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
-    logToFileAsync("Error Calculating Risk. No data found");
-    return false;
-  }
-
-  // Create the request body for the order
-  const requestBody: OrderRequest = {
-    order: {
-      type: TYPE.MARKET, 
-      instrument: INSTRUMENT.EUR_USD,
-      units: `${orderType.action === ACTION.SELL ? `-` : ``}${riskData.units}`,
-      stopLossOnFill: { price: riskData.stopLoss.toString() },
-      takeProfitOnFill: { price: riskData.takeProfit.toString() },
-      timeInForce: "FOK"
+    const riskData: RISK | undefined = await calculalateRisk(orderType);
+      // Check if the environment variable is set
+    if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
+      logToFileAsync("Error Calculating Risk. No data found");
+      return false;
     }
-  };
+    const requestBody: OrderRequest = {
+      order: {
+        type: TYPE.MARKET, 
+        instrument: INSTRUMENT.EUR_USD,
+        units: `${orderType.action == ACTION.SELL ? `-` : ``}${riskData!.units}`,
+        stopLossOnFill: { price: riskData!.stopLoss.toString() },
+        takeProfitOnFill: { price: riskData!.takeProfit.toString() },
+        timeInForce: "FOK"
+      }
+    };
+    const apiUrl = `${hostname}/v3/accounts/${accountId}/orders`;
 
-  const apiUrl = `${hostname}/v3/accounts/${accountId}/orders`;
-
-  try {
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -101,22 +96,14 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
         'Authorization': `Bearer ${token}`,
         'Accept-Datetime-Format': 'RFC3339'
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({
+        ...requestBody, // Merge additional body parameters if needed
+      }),
     });
-
+  
     if (!response.ok) {
       logToFileAsync(`HTTP error! Status: ${response.status}`);
       return false;
     }
-
-    logToFileAsync("Order placed successfully", requestBody);
-    return true;
-  } catch (error: unknown) {
-    if (error instanceof Error) {
-      logToFileAsync('Error placing order:', error.message);
-    } else {
-      logToFileAsync('Unknown error occurred while placing order');
-    }
-    return false;
-  }
+  return true;
 };

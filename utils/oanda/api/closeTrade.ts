@@ -86,12 +86,12 @@ export const closeTrade = async (orderType: OrderParameters): Promise<TradeClose
   }
 
   const mostRecentTrade: Trade | undefined = await recentTrade();
-  if (!mostRecentTrade) {
+  if (!mostRecentTrade || !mostRecentTrade.units) { // Use 'units' or the appropriate property
     return false;
   }
 
   const partialClose: number = orderType.action === ACTION.PartialClose25 ? 0.24999999999 : 0.4999999999;
-  const initialUnitsString: string = mostRecentTrade.initialUnits!;
+  const initialUnitsString: string = mostRecentTrade.units!;  // Use 'units' for trade units
   const initialUnitsWithoutNegative: string = initialUnitsString.replace('-', '');
   const partialUnits: string = (parseFloat(initialUnitsWithoutNegative) * partialClose).toFixed(0);
 

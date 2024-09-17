@@ -1,4 +1,4 @@
-import { ACTION, order, Trade } from ".";
+import { ACTION, Trade } from ".";
 import { OrderParameters } from "../../../components/Keyboard";
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json";

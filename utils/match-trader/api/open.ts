@@ -5,7 +5,7 @@ import { TradeManager } from "../../trade-manager3";
 import { editPositionMT, EditPositionRequestMT } from "./edit-position";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
-export interface OpenPostionResponseMT {
+export interface OpenPositionResponseMT {
   status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';
   nativeCode: string | null;
   errorMessage: string | null;
@@ -24,7 +24,7 @@ export interface ErrorMTResponse {
   errorMessage: string;
 }
 
-export const openPostionMT = async (risk: number, orderSide: ACTION.BUY | ACTION.SELL): Promise<OpenPostionResponseMT | ErrorMTResponse> => {
+export const openPostionMT = async (risk: number, orderSide: ACTION.BUY | ACTION.SELL): Promise<OpenPositionResponseMT | ErrorMTResponse> => {
   let accountType = '';
   let tradingApiToken = '';
   let systemUuid = '';
@@ -82,7 +82,7 @@ export const openPostionMT = async (risk: number, orderSide: ACTION.BUY | ACTION
       return errorResponse;
     }
 
-    let data: OpenPostionResponseMT;
+    let data: OpenPositionResponseMT;
     try {
       data = JSON.parse(rawResponseText);
     } catch (e) {

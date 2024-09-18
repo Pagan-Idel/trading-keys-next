@@ -178,3 +178,19 @@ export const recentTrade = async (): Promise<Trade | undefined> => {
   return mostRecentTrade;
   }
 }
+
+// Call this function to store tokens in Redis when a user logs in
+export const storeTokensInRedis = async (TRADING_API_TOKEN: string, SYSTEM_UUID: string) => {
+  const response = await fetch('/api/store-tokens', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ TRADING_API_TOKEN, SYSTEM_UUID }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.errorMessage || 'Failed to store tokens in Redis');
+  }
+};

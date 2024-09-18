@@ -1,5 +1,6 @@
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json";  // Import credentials.json at the top
+import { storeTokensInRedis } from "../../shared";
 
 export interface LoginRequestBodyMT {
   email: string;
@@ -139,13 +140,11 @@ export const handleMTLogin = async (
 
     // Extract SYSTEM_UUID and store it in local storage
     const systemUuid = data.accounts[accountType === "demo" ? 1 : 0]?.offer.system.uuid;
-    if (systemUuid) {
-      localStorage.setItem("SYSTEM_UUID", systemUuid);
-    }
-
     // Extract tradingApiToken and store it in local storage
     const tradingApiToken = data.accounts[accountType === "demo" ? 1 : 0]?.tradingApiToken;
-    if (tradingApiToken) {
+    if (systemUuid && tradingApiToken) {
+      storeTokensInRedis(tradingApiToken, systemUuid);
+      localStorage.setItem("SYSTEM_UUID", systemUuid);
       localStorage.setItem("TRADING_API_TOKEN", tradingApiToken);
     }
 

@@ -1,6 +1,5 @@
-// pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
-import { OpenPostionResponseMT } from '../../../utils/match-trader/api/open';
+import { OpenPositionResponseMT } from '../../../utils/match-trader/api/open';
 import redisClient from '../../../redisClient';
 
 export interface ErrorResponse {
@@ -13,25 +12,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
+
   if (!req.url?.includes('/open')) {
     res.status(404).end(`Path ${req.url} Not Found`);
     return;
   }
-  const coAuth = await redisClient.get('co-auth');
-  const hostname = `${req.headers.hostname}`;
-  const api: string = `/mtr-api/${req.headers.system_uuid}/position/open`;
 
-  console.log(req.body);
   try {
+    // Retrieve tokens from Redis
+    const coAuth = await redisClient.get('co-auth');
+    const tradingApiToken = await redisClient.get('TRADING_API_TOKEN');
+    const systemUuid = await redisClient.get('SYSTEM_UUID');
+
+    if (!tradingApiToken || !systemUuid) {
+      res.status(400).json({ errorMessage: 'Missing TRADING_API_TOKEN or SYSTEM_UUID from Redis' });
+      return;
+    }
+
+    const hostname = `${req.headers.hostname}`;
+    const api: string = `/mtr-api/${systemUuid}/position/open`;
+
+    console.log(req.body);
+
     const response = await fetch(hostname + api, {
       method: 'POST',
       headers: {
         'Cookie': `co-auth=${coAuth};`,
-        'Auth-trading-api': `${req.headers.trading_api_token}`,
+        'Auth-trading-api': tradingApiToken,
         'Accept': 'application/json',
         'Content-Type': 'application/json',
       },
-      body: req.body
+      body: req.body,
     });
 
     if (!response.ok) {
@@ -40,8 +51,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       res.status(response.status).json({ errorMessage: `HTTP error! Status: ${response.status}`, details: errorResponse });
       return;
     }
-    
-    const responseData: OpenPostionResponseMT = await response.json();
+
+    const responseData: OpenPositionResponseMT = await response.json();
     res.status(200).json(responseData);
   } catch (error: unknown) {
     let errorMessage = 'An unknown error occurred';

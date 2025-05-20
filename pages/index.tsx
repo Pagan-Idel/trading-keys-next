@@ -1,4 +1,3 @@
-// NumberPad.tsx
 import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { ACTION, TYPE, order, modifyTrade, closeTrade } from '../utils/oanda/api';
@@ -181,10 +180,10 @@ const Keyboard = ({ platform }: KeyboardProps) => {
           case '3 - SL AT ENTRY': stopAtEntryMT(pair); break;
           case '4 - SL DOWN': moveTPSLMT(ACTION.MoveSL, ACTION.DOWN, pair); break;
           case '5 - TP DOWN': moveTPSLMT(ACTION.MoveTP, ACTION.DOWN, pair); break;
-          case '6 - 25% CLOSE': closePartiallyMT(0.249999999999, pair); break;
+          case '6 - 25% CLOSE': closePartiallyMT(0.25, pair); break;
           case '7 - SL UP': moveTPSLMT(ACTION.MoveSL, ACTION.UP, pair); break;
           case '8 - TP UP': moveTPSLMT(ACTION.MoveTP, ACTION.UP, pair); break;
-          case '9 - 50% CLOSE': closePartiallyMT(0.499999999999, pair); break;
+          case '9 - 50% CLOSE': closePartiallyMT(0.5, pair); break;
         }
         break;
     }

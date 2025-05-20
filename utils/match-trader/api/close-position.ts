@@ -1,5 +1,5 @@
 import { logToFileAsync } from "../../logger";
-import { TradeManager } from "../../trade-manager3"; 
+import { TradeManager } from "../../trade-manager";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
 export interface ClosePositionResponseMT {
@@ -9,9 +9,9 @@ export interface ClosePositionResponseMT {
 }
 
 export interface ClosePositionMT {
-  positionId: string; // Unique identifier for the position
-  instrument: string; // shortcut name of instrument
-  orderSide: string;  // side of trade: BUY or SELL
+  positionId: string;
+  instrument: string;
+  orderSide: string;
   volume: string;
 }
 
@@ -21,31 +21,29 @@ export interface ErrorMTResponse {
   errorMessage: string;
 }
 
-export const closePositionMT = async (): Promise<ClosePositionsMT | ErrorMTResponse> => {
-  // Ensure localStorage is only accessed on the client-side
+export const closePositionMT = async (pair: string): Promise<ClosePositionsMT | ErrorMTResponse> => {
   if (typeof window === 'undefined') {
-    return { errorMessage: 'localStorage is not available in the current environment.' } as ErrorMTResponse;
+    return { errorMessage: 'localStorage is not available in the current environment.' };
   }
 
   const accountType = localStorage.getItem('accountType');
-  let requestBody: ClosePositionsMT = [{
-    positionId: "",
-    instrument: "",
-    orderSide: "",
-    volume: ""
-  }];
-
   const recentPosition: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
 
   if ('positions' in recentPosition) {
-    requestBody = [{
-      positionId: recentPosition.positions[0].id,
-      instrument: recentPosition.positions[0].symbol,
-      orderSide: recentPosition.positions[0].side,
-      volume: recentPosition.positions[0].volume
+    const matched = recentPosition.positions.find(p => p.symbol === pair);
+    if (!matched) {
+      return { errorMessage: `No open position found for ${pair}` };
+    }
+
+    const requestBody: ClosePositionsMT = [{
+      positionId: matched.id,
+      instrument: matched.symbol,
+      orderSide: matched.side,
+      volume: matched.volume
     }];
 
     const apiEndpoint = '/api/match-trader/close-position';
+
     try {
       const response = await fetch(apiEndpoint, {
         method: 'POST',
@@ -61,42 +59,35 @@ export const closePositionMT = async (): Promise<ClosePositionsMT | ErrorMTRespo
 
       const rawResponseText = await response.text();
       if (!response.ok) {
-        let errorResponse: ErrorMTResponse;
         try {
-          errorResponse = JSON.parse(rawResponseText);
+          const errorResponse: ErrorMTResponse = JSON.parse(rawResponseText);
+          console.error(`Close Position Failed`, errorResponse.errorMessage);
+          return errorResponse;
         } catch (e) {
-          console.error('Error parsing error response as JSON:', e);
-          throw new Error(`Error: ${rawResponseText}`);
+          throw new Error(`Error parsing error response: ${rawResponseText}`);
         }
-        console.error(`Close Position Failed`, errorResponse.errorMessage);
-        return errorResponse;
       }
 
-      let data: ClosePositionsMT;
-      try {
-        data = JSON.parse(rawResponseText);
-      } catch (e) {
-        console.error('Error parsing success response as JSON:', e);
-        throw new Error(`Error: ${rawResponseText}`);
-      }
+      const data: ClosePositionsMT = JSON.parse(rawResponseText);
 
       try {
         const tradeManager = TradeManager.getInstance();
-        tradeManager.stop(requestBody[0].positionId);
+        tradeManager.stop(matched.id);
       } catch (e) {
         console.error('Error stopping trade manager:', e);
         throw new Error(`Error: ${rawResponseText}`);
       }
 
-      logToFileAsync(`Close Position Successful`);
+      logToFileAsync(`✅ Close Position Successful for ${pair}`);
       return data;
-      
+
     } catch (error) {
-      console.error(`An error occurred during closing position:`, error);
-      return { errorMessage: `An unknown error occurred during closing position` } as ErrorMTResponse;
+      console.error(`❌ Error closing position:`, error);
+      return { errorMessage: `An unknown error occurred during closing position for ${pair}` };
     }
+
   } else {
     console.error("Error Getting Recent Position - ", recentPosition.errorMessage);
-    return { errorMessage: recentPosition.errorMessage } as ErrorMTResponse;
+    return { errorMessage: recentPosition.errorMessage };
   }
 };

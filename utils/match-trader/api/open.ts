@@ -1,7 +1,7 @@
 import { logToFileAsync } from "../../logger";
 import { ACTION } from "../../oanda/api";
 import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared";
-import { TradeManager } from "../../trade-manager3";
+import { TradeManager } from "../../trade-manager";
 import { editPositionMT, EditPositionRequestMT } from "./edit-position";
 import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
 
@@ -12,24 +12,27 @@ export interface OpenPositionResponseMT {
 }
 
 export interface OpenPositionRequestMT {
-  instrument: string;  // shortcut name of the instrument
-  orderSide: 'BUY' | 'SELL';  // side of trade: BUY or SELL
-  volume: number;  // amount of trade
-  slPrice: number;  // stop-loss price: 0 if not set
-  tpPrice: number;  // take-profit price: 0 if not set
-  isMobile: boolean;  // request source: true if mobile, false if desktop
+  instrument: string;
+  orderSide: 'BUY' | 'SELL';
+  volume: number;
+  slPrice: number;
+  tpPrice: number;
+  isMobile: boolean;
 }
 
 export interface ErrorMTResponse {
   errorMessage: string;
 }
 
-export const openPostionMT = async (risk: number, orderSide: ACTION.BUY | ACTION.SELL): Promise<OpenPositionResponseMT | ErrorMTResponse> => {
+export const openPostionMT = async (
+  risk: number,
+  orderSide: ACTION.BUY | ACTION.SELL,
+  pair: string
+): Promise<OpenPositionResponseMT | ErrorMTResponse> => {
   let accountType = '';
   let tradingApiToken = '';
   let systemUuid = '';
 
-  // Only access localStorage if on the client-side
   if (typeof window !== 'undefined') {
     accountType = localStorage.getItem('accountType') || '';
     tradingApiToken = localStorage.getItem('TRADING_API_TOKEN') || '';
@@ -37,23 +40,24 @@ export const openPostionMT = async (risk: number, orderSide: ACTION.BUY | ACTION
   }
 
   const apiEndpoint = '/api/match-trader/open';
-  let requestBody: OpenPositionRequestMT = {
-    instrument: "EURUSD",  // default instrument for the example
-    orderSide,  // side of trade: BUY or SELL
-    volume: await calculateVolumeMT(risk) as number,  // calculate trade volume
-    slPrice: 0,  // stop-loss price, set later
-    tpPrice: 0,  // take-profit price, set later
-    isMobile: false  // request source: desktop in this case
-  };
+  const volume = await calculateVolumeMT(risk, pair) as number;
 
-  if (typeof requestBody.volume !== 'number') {
-    console.error(`Invalid volume: ${requestBody.volume}`);
-    return { errorMessage: 'Invalid volume' } as ErrorMTResponse;
+  if (typeof volume !== 'number' || volume <= 0) {
+    console.error(`Invalid volume: ${volume}`);
+    return { errorMessage: 'Invalid volume' };
   }
 
-  // Store open volume in localStorage on the client-side
+  const requestBody: OpenPositionRequestMT = {
+    instrument: pair,
+    orderSide,
+    volume,
+    slPrice: 0,
+    tpPrice: 0,
+    isMobile: false
+  };
+
   if (typeof window !== 'undefined') {
-    localStorage.setItem('openVolume', requestBody.volume.toString());
+    localStorage.setItem('openVolume', volume.toString());
   }
 
   try {
@@ -63,7 +67,9 @@ export const openPostionMT = async (risk: number, orderSide: ACTION.BUY | ACTION
         'TRADING_API_TOKEN': tradingApiToken,
         'SYSTEM_UUID': systemUuid,
         'Accept': 'application/json',
-        'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
+        'Hostname': accountType === 'demo'
+          ? "https://demo.match-trader.com"
+          : "https://mtr.gooeytrade.com"
       },
       body: JSON.stringify(requestBody),
       credentials: 'include'
@@ -71,62 +77,60 @@ export const openPostionMT = async (risk: number, orderSide: ACTION.BUY | ACTION
 
     const rawResponseText = await response.text();
     if (!response.ok) {
-      let errorResponse: ErrorMTResponse;
       try {
-        errorResponse = JSON.parse(rawResponseText);
+        const errorResponse: ErrorMTResponse = JSON.parse(rawResponseText);
+        console.error('Open Trade Failed:', errorResponse.errorMessage);
+        return errorResponse;
       } catch (e) {
-        console.error('Error parsing error response as JSON:', e);
-        throw new Error(`Error: ${rawResponseText}`);
+        throw new Error(`Error parsing error response: ${rawResponseText}`);
       }
-      console.error('Open Trade Failed:', errorResponse.errorMessage);
-      return errorResponse;
     }
 
-    let data: OpenPositionResponseMT;
-    try {
-      data = JSON.parse(rawResponseText);
-    } catch (e) {
-      console.error('Error parsing success response as JSON:', e);
-      throw new Error(`Error: ${rawResponseText}`);
-    }
+    const data: OpenPositionResponseMT = JSON.parse(rawResponseText);
+    logToFileAsync(`✅ Open Trade Successful for ${pair}`);
 
-    logToFileAsync('Open Trade Successful');
-
-    // Call openPositions to get the openPrice and id
-    let positionResponse: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
+    const positionResponse = await openedPositionsMT();
     if ('errorMessage' in positionResponse) {
       console.error('Error getting positions:', positionResponse.errorMessage);
       return positionResponse;
     }
 
-    const positionsResponse = positionResponse as OpenedPositionsResponseMT;
-    const latestPosition = positionsResponse.positions[0];
-    const sltpPrices: SLTPMT = calculateSLTPMT(latestPosition.openPrice, latestPosition.side);
+    const matchedPosition = positionResponse.positions.find(p => p.symbol === pair);
+    if (!matchedPosition) {
+      return { errorMessage: `Could not find open position for ${pair}` };
+    }
+
+    const sltpPrices: SLTPMT = calculateSLTPMT(matchedPosition.openPrice, matchedPosition.side, pair);
 
     try {
-      // Call editPosition with the id and sltpPrices
-      let requestEditBody: EditPositionRequestMT = {
-        id: latestPosition.id,
-        instrument: latestPosition.symbol,
-        orderSide,  // side of trade: BUY or SELL
-        volume: parseFloat(latestPosition.volume),  // amount of trade
-        slPrice: sltpPrices.slPrice,  // stop-loss price
-        tpPrice: sltpPrices.tpPrice,  // take-profit price
-        isMobile: false  // request source: desktop
+      const requestEditBody: EditPositionRequestMT = {
+        id: matchedPosition.id,
+        instrument: matchedPosition.symbol,
+        orderSide,
+        volume: parseFloat(matchedPosition.volume),
+        slPrice: sltpPrices.slPrice,
+        tpPrice: sltpPrices.tpPrice,
+        isMobile: false
       };
       await editPositionMT(requestEditBody);
 
-      // Get the singleton instance of TradeManager and start managing the trade
       const tradeManager = TradeManager.getInstance();
-      tradeManager.start(latestPosition.id, sltpPrices.slPrice, sltpPrices.tpPrice, latestPosition.side, parseFloat(latestPosition.openPrice));
+      tradeManager.start(
+        matchedPosition.id,
+        sltpPrices.slPrice,
+        sltpPrices.tpPrice,
+        matchedPosition.side,
+        parseFloat(matchedPosition.openPrice),
+        pair
+      );
     } catch (e) {
       console.error('Error editing position:', e);
     }
 
-    return { ...data }; // Merging the openPostionMT response with the editPosition response
+    return data;
 
   } catch (error) {
-    console.error('An error occurred during opening position:', error);
-    return { errorMessage: 'An unknown error occurred during opening position' } as ErrorMTResponse;
+    console.error(`❌ An error occurred during opening position for ${pair}:`, error);
+    return { errorMessage: 'An unknown error occurred during opening position' };
   }
 };

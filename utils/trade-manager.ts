@@ -3,13 +3,22 @@ import { closePartiallyMT } from "./match-trader/api/close-partially";
 import { marketWatchMT, MarketWatchResponseMT, ErrorMTResponse } from "./match-trader/api/market-watch";
 import { moveTPSLMT } from "./match-trader/api/move-TPSL";
 import { openedPositionsMT, OpenedPositionsResponseMT, Position } from "./match-trader/api/opened-positions";
+import { stopAtEntryMT } from "./match-trader/api/stop-at-entry";
 import { ACTION } from "./oanda/api";
 import { wait } from "./shared";
 
 export class TradeManager {
   private static instance: TradeManager;
   private tradeIntervals: Map<string, NodeJS.Timeout> = new Map();
-  private trades: Map<string, { slPrice?: number; tpPrice?: number; orderSide?: 'BUY' | 'SELL'; openPrice?: number; inTrailing?: boolean, lastPrice?: number }> = new Map();
+  private trades: Map<string, {
+    pair: string;
+    slPrice?: number;
+    tpPrice?: number;
+    orderSide?: 'BUY' | 'SELL';
+    openPrice?: number;
+    inTrailing?: boolean;
+    lastPrice?: number;
+  }> = new Map();
 
   private constructor() {
     logToFileAsync("TradeManager instance created.");
@@ -25,16 +34,21 @@ export class TradeManager {
     return TradeManager.instance;
   }
 
-  public start(tradeId: string, slPrice: number, tpPrice: number, orderSide: 'BUY' | 'SELL', openPrice: number) {
+  public start(
+    tradeId: string,
+    slPrice: number,
+    tpPrice: number,
+    orderSide: 'BUY' | 'SELL',
+    openPrice: number,
+    pair: string
+  ) {
     if (this.tradeIntervals.has(tradeId)) {
       logToFileAsync(`Trade with ID ${tradeId} is already being managed. Skipping start.`);
       return;
     }
 
-    this.trades.set(tradeId, { slPrice, tpPrice, orderSide, openPrice, inTrailing: false, lastPrice: 0 });
-
-    // Start the first interval for taking % profit
-    this.startcoverCommisions(tradeId);
+    this.trades.set(tradeId, { slPrice, tpPrice, orderSide, openPrice, inTrailing: false, lastPrice: 0, pair });
+    this.startTake50PercentProfit(tradeId);
   }
 
   public stop(tradeId: string) {
@@ -49,96 +63,26 @@ export class TradeManager {
     }
   }
 
-  private startcoverCommisions(tradeId: string) {
-    logToFileAsync(`Monitoring Price to take  percent profit.`);
+  private startTake50PercentProfit(tradeId: string) {
+    logToFileAsync(`Monitoring Price to move SL @ Entry after 30% profit (BE)`);
     const intervalId = setInterval(async () => {
       try {
-        const positionExists = await this.checkIfPositionExists(tradeId);
-        if (!positionExists) {
-          await logToFileAsync(`Position with ID ${tradeId} is no longer open. Stopping monitoring.`);
-          this.stop(tradeId);
-          return;
-        }    
         const trade = this.trades.get(tradeId);
         if (!trade) {
           logToFileAsync(`No trade data found for ID: ${tradeId}. Skipping price check.`);
           this.stop(tradeId);
           return;
         }
-        const { tpPrice, orderSide, openPrice } = trade;
-        const marketData: MarketWatchResponseMT | ErrorMTResponse = await marketWatchMT();
-        if ('errorMessage' in marketData) {
-          logToFileAsync("Error fetching market data:", marketData.errorMessage);
-          return;
-        }
 
-        const latestData = marketData[marketData.length - 1];
-        const currentPrice: string = orderSide === 'BUY' ? latestData.bid : latestData.ask;
-        const currentPriceNum = parseFloat(currentPrice);
-        if (
-          (orderSide === 'BUY' && currentPriceNum >= ((tpPrice! + openPrice!) / 2) && currentPriceNum <= openPrice! + 0.9 * (tpPrice! - openPrice!)) ||
-          (orderSide === 'SELL' && currentPriceNum <= ((tpPrice! + openPrice!) / 2) && currentPriceNum >= openPrice! - 0.9 * (openPrice! - tpPrice!))
-        ) {
-          await logToFileAsync(`Taking % profit for trade ID ${tradeId} at price: ${currentPriceNum}`);
-          this.coverCommisions(tradeId, currentPriceNum);
-          
-          clearInterval(intervalId);
-          this.tradeIntervals.delete(tradeId);
-          
-          // Proceed to the next step
-          this.startTakeAdditionalProfitAndTightenSL(tradeId);
-        }
-      } catch (error) {
-        logToFileAsync("Error during % profit interval:", error);
-      }
-    }, 3000);
-
-    this.tradeIntervals.set(tradeId, intervalId);
-    logToFileAsync(`Started % profit interval for trade ID: ${tradeId} with interval ID: ${intervalId}`);
-  }
-
-  private async coverCommisions(tradeId: string, currentPrice: number) {
-    try {
-      await closePartiallyMT(0.10);
-      await logToFileAsync("10% of the position closed successfully.");
-
-      const trade = this.trades.get(tradeId);
-      if (trade) {
-        const { slPrice, orderSide } = trade;
-        const newSLPrice = (trade.openPrice! + (orderSide === 'BUY' ? -0.0001 : 0.0001));
-        trade.slPrice = parseFloat(newSLPrice.toFixed(5));
-        await logToFileAsync(`Moving stop loss 1 pip above/below open price: ${newSLPrice}`);
-
-        const slMoveCount = Math.abs(newSLPrice - slPrice!) * 10000;
-        for (let i = 0; i < slMoveCount; i++) {
-          await moveTPSLMT(ACTION.MoveSL, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN);
-          await wait(3000);
-          await logToFileAsync(`Stop Loss moved.`);
-        }
-      }
-    } catch (error) {
-      logToFileAsync(`Error taking % profit for trade ID ${tradeId}:`, error);
-    }
-  }
-
-  private startTakeAdditionalProfitAndTightenSL(tradeId: string) {
-    logToFileAsync(`Monitoring Price to take 80 percent profit when price reaches 90% of TP`);
-    const intervalId = setInterval(async () => {
-      try {
         const positionExists = await this.checkIfPositionExists(tradeId);
         if (!positionExists) {
           await logToFileAsync(`Position with ID ${tradeId} is no longer open. Stopping monitoring.`);
           this.stop(tradeId);
           return;
-        }    
-        const trade = this.trades.get(tradeId);
-        if (!trade) {
-          await logToFileAsync(`No trade data found for ID: ${tradeId}. Skipping price check.`);
-          return;
         }
-        const { tpPrice, orderSide, openPrice } = trade;
-        const marketData: MarketWatchResponseMT | ErrorMTResponse = await marketWatchMT();
 
+        const { tpPrice, orderSide, openPrice, pair } = trade;
+        const marketData: MarketWatchResponseMT | ErrorMTResponse = await marketWatchMT(pair);
         if ('errorMessage' in marketData) {
           logToFileAsync("Error fetching market data:", marketData.errorMessage);
           return;
@@ -148,22 +92,68 @@ export class TradeManager {
         const currentPrice: string = orderSide === 'BUY' ? latestData.bid : latestData.ask;
         const currentPriceNum = parseFloat(currentPrice);
 
-        if (orderSide === 'SELL' && currentPriceNum <= openPrice! - (0.90 * (openPrice! - tpPrice!))) {
-          await logToFileAsync(`Taking additional profit and tightening SL for trade ID ${tradeId} at price: ${currentPriceNum}`);
-          this.takeAdditionalProfitAndTightenSL(tradeId, currentPriceNum);
-          clearInterval(intervalId);
-          // Proceed to the final step
-          this.startContinueTrailing(tradeId, currentPriceNum);
-          this.tradeIntervals.delete(tradeId);
-        } else if (orderSide === 'BUY' && currentPriceNum >= openPrice! + (0.90 * (tpPrice! - openPrice!))) {
-          await logToFileAsync(`Taking additional profit and tightening SL for trade ID ${tradeId} at price: ${currentPriceNum}`);
-          this.takeAdditionalProfitAndTightenSL(tradeId, currentPriceNum);
+        if (
+          (orderSide === 'BUY' && currentPriceNum >= ((tpPrice! + openPrice!) / 2) && currentPriceNum <= openPrice! + 0.9 * (tpPrice! - openPrice!)) ||
+          (orderSide === 'SELL' && currentPriceNum <= ((tpPrice! + openPrice!) / 2) && currentPriceNum >= openPrice! - 0.9 * (openPrice! - tpPrice!))
+        ) {
+          await logToFileAsync(`Taking 30% profit for trade ID ${tradeId} at price: ${currentPriceNum}`);
+          this.take50PercentProfit(tradeId);
           clearInterval(intervalId);
           this.tradeIntervals.delete(tradeId);
-          this.startContinueTrailing(tradeId, currentPriceNum)
+          this.startTakeAdditionalProfitAndTightenSL(tradeId);
         }
       } catch (error) {
-        logToFileAsync("Error during additional profit and SL tightening interval:", error);
+        logToFileAsync("Error during 30% profit interval:", error);
+      }
+    }, 3000);
+
+    this.tradeIntervals.set(tradeId, intervalId);
+  }
+
+  private async take50PercentProfit(tradeId: string) {
+    const trade = this.trades.get(tradeId);
+    if (!trade) return;
+    try {
+      await closePartiallyMT(0.30, trade.pair);
+      await logToFileAsync("30% of the position closed successfully. Changing SL to Entry");
+      await stopAtEntryMT(trade.pair);
+    } catch (error) {
+      logToFileAsync(`Error taking 30% profit for trade ID ${tradeId}:`, error);
+    }
+  }
+
+  private startTakeAdditionalProfitAndTightenSL(tradeId: string) {
+    const trade = this.trades.get(tradeId);
+    if (!trade) return;
+    const { pair } = trade;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const trade = this.trades.get(tradeId);
+        if (!trade) return;
+
+        const { tpPrice, orderSide, openPrice } = trade;
+        const marketData: MarketWatchResponseMT | ErrorMTResponse = await marketWatchMT(pair);
+        if ('errorMessage' in marketData) return;
+
+        const latestData = marketData[marketData.length - 1];
+        const currentPrice: string = orderSide === 'BUY' ? latestData.bid : latestData.ask;
+        const currentPriceNum = parseFloat(currentPrice);
+
+        const reachedTarget =
+          orderSide === 'BUY'
+            ? currentPriceNum >= openPrice! + (0.90 * (tpPrice! - openPrice!))
+            : currentPriceNum <= openPrice! - (0.90 * (openPrice! - tpPrice!));
+
+        if (reachedTarget) {
+          await logToFileAsync(`Taking additional profit for trade ID ${tradeId} at price: ${currentPriceNum}`);
+          this.takeAdditionalProfitAndTightenSL(tradeId, currentPriceNum);
+          clearInterval(intervalId);
+          this.tradeIntervals.delete(tradeId);
+          this.startContinueTrailing(tradeId, currentPriceNum);
+        }
+      } catch (error) {
+        logToFileAsync("Error during additional profit interval:", error);
       }
     }, 3000);
 
@@ -171,134 +161,83 @@ export class TradeManager {
   }
 
   private async takeAdditionalProfitAndTightenSL(tradeId: string, currentPrice: number) {
+    const trade = this.trades.get(tradeId);
+    if (!trade) return;
+    const { orderSide, slPrice, tpPrice, pair } = trade;
+
     try {
-      await logToFileAsync(`Taking additional 80% profit for trade ID: ${tradeId} at price: ${currentPrice}`);
-      await closePartiallyMT(0.799999999);
-      await logToFileAsync("80% of the position closed successfully.");
+      await closePartiallyMT(0.5999999999, pair);
+      await logToFileAsync("60% closed. Moving SL/TP");
 
-      const trade = this.trades.get(tradeId);
-      if (trade) {
-        const { orderSide } = trade;
-        const currentSLPrice = trade.slPrice;
-        const currentTPPrice = trade.tpPrice;
-        // Dynamically move SL to 3 pips behind current price
-        const newSLPrice = currentPrice - (orderSide === 'BUY' ? 0.0003 : -0.0003);
-        const newTPPrice = currentPrice - (orderSide === 'BUY' ? 0.0002 : -0.0002);
-        const slMoveCount = Math.abs(newSLPrice - currentSLPrice!) * 10000;
-        const tpMoveCount = Math.abs(newTPPrice - currentTPPrice!) * 10000;
-        await logToFileAsync(`Moving TP 2 pips away from current price for trade ID ${tradeId}`);
-        for (let i = 0; i < tpMoveCount; i++) {
-          await moveTPSLMT(ACTION.MoveTP, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN);
-          await wait(2000);
-          await logToFileAsync(`Take Profit moved.`);
-        }
-        await logToFileAsync(`Moving SL 3 pips away from current price for trade ID ${tradeId}`);
-        for (let i = 0; i < slMoveCount; i++) {
-          await moveTPSLMT(ACTION.MoveSL, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN);
-          await wait(2000);
-          await logToFileAsync(`Stop Loss moved.`);
-        }
+      const newSLPrice = currentPrice - (orderSide === 'BUY' ? 0.0003 : -0.0003);
+      const newTPPrice = currentPrice - (orderSide === 'BUY' ? 0.0002 : -0.0002);
+      const slMoveCount = Math.abs(newSLPrice - slPrice!) * 10000;
+      const tpMoveCount = Math.abs(newTPPrice - tpPrice!) * 10000;
 
-        await logToFileAsync(`New SL set at 3 pips behind the current price: ${newSLPrice}`);
+      for (let i = 0; i < tpMoveCount; i++) {
+        await moveTPSLMT(ACTION.MoveTP, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN, pair);
+        await wait(2000);
       }
+      for (let i = 0; i < slMoveCount; i++) {
+        await moveTPSLMT(ACTION.MoveSL, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN, pair);
+        await wait(2000);
+      }
+
+      logToFileAsync(`New SL/TP set around ${currentPrice} for trade ID: ${tradeId}`);
     } catch (error) {
-      logToFileAsync(`Error during additional profit and SL tightening for trade ID ${tradeId}:`, error);
+      logToFileAsync(`Error in tightening SL/TP for ${tradeId}`, error);
     }
   }
 
   private startContinueTrailing(tradeId: string, currentPrice: number) {
-    logToFileAsync(`Monitoring Price to Continue Trailing.`);
-    this.trades.set(tradeId, {
-      lastPrice: currentPrice
-    });
+    const trade = this.trades.get(tradeId);
+    if (!trade) return;
+    const { pair, orderSide } = trade;
+
+    trade.lastPrice = currentPrice;
     const intervalId = setInterval(async () => {
-      try {
-        const positionExists = await this.checkIfPositionExists(tradeId);
-        if (!positionExists) {
-          await logToFileAsync(`Position with ID ${tradeId} is no longer open. Stopping monitoring.`);
-          this.stop(tradeId);
-          return;
-        }    
-        const trade = this.trades.get(tradeId);
-        if (!trade) {
-          logToFileAsync(`No trade data found for ID ${tradeId}. Skipping trailing.`);
-          this.stop(tradeId);
-          return;
+      const trade = this.trades.get(tradeId);
+      if (!trade) return;
+
+      const marketData: MarketWatchResponseMT | ErrorMTResponse = await marketWatchMT(pair);
+      if ('errorMessage' in marketData) return;
+
+      const latestData = marketData[marketData.length - 1];
+      const latestPriceNum = parseFloat(orderSide === 'BUY' ? latestData.bid : latestData.ask);
+
+      const hasImproved =
+        (orderSide === 'BUY' && latestPriceNum > trade.lastPrice!) ||
+        (orderSide === 'SELL' && latestPriceNum < trade.lastPrice!);
+
+      if (hasImproved) {
+        const newSL = orderSide === 'BUY' ? latestPriceNum - 0.0003 : latestPriceNum + 0.0003;
+        const newTP = orderSide === 'BUY' ? latestPriceNum + 0.0002 : latestPriceNum - 0.0002;
+        const slMoves = Math.abs(newSL - latestPriceNum) * 10000;
+        const tpMoves = Math.abs(newTP - latestPriceNum) * 10000;
+
+        for (let i = 0; i < slMoves; i++) {
+          await moveTPSLMT(ACTION.MoveSL, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN, pair);
+          await wait(2000);
         }
 
-        const { orderSide, lastPrice } = trade;
-
-        const marketData: MarketWatchResponseMT | ErrorMTResponse = await marketWatchMT();
-        if ('errorMessage' in marketData) {
-          logToFileAsync("Error fetching market data:", marketData.errorMessage);
-          return;
+        for (let i = 0; i < tpMoves; i++) {
+          await moveTPSLMT(ACTION.MoveTP, orderSide === 'BUY' ? ACTION.UP : ACTION.DOWN, pair);
+          await wait(2000);
         }
 
-        const latestData = marketData[marketData.length - 1];
-        const latestPrice: string = orderSide === 'BUY' ? latestData.bid : latestData.ask;
-        const latestPriceNum = parseFloat(latestPrice);
-
-        if (orderSide === 'BUY' && latestPriceNum > lastPrice!) {
-          // Dynamically move SL to 3 pips behind and TP to 2 pips in front current price
-          const newSLPrice = latestPriceNum - 0.0003;
-          const newTPPrice = latestPriceNum + 0.0002;
-          const slMoveCount = Math.abs(newSLPrice - latestPriceNum!) * 10000;
-          const tpMoveCount = Math.abs(newTPPrice - latestPriceNum!) * 10000;
-          await logToFileAsync(`Moving SL 3 pips away from current price for trade ID ${tradeId}`);
-          for (let i = 0; i < slMoveCount; i++) {
-            await moveTPSLMT(ACTION.MoveSL, ACTION.UP);
-            await wait(2000);
-            await logToFileAsync(`Stop Loss moved.`);
-          }
-          await logToFileAsync(`Moving TP 2 pips away from current price for trade ID ${tradeId}`);
-          for (let i = 0; i < tpMoveCount; i++) {
-            await moveTPSLMT(ACTION.MoveTP, ACTION.UP);
-            await wait(2000);
-            await logToFileAsync(`Take Profit moved.`);
-          }
-        } else if (orderSide === 'SELL' && latestPriceNum < lastPrice!) {
-          // Dynamically move SL to 3 pips behind and TP to 2 pips in front current price
-          const newSLPrice = latestPriceNum + 0.0003;
-          const newTPPrice = latestPriceNum - 0.0002;
-          const slMoveCount = Math.abs(newSLPrice - latestPriceNum!) * 10000;
-          const tpMoveCount = Math.abs(newTPPrice - latestPriceNum!) * 10000;
-          await logToFileAsync(`Moving SL 3 pips away from current price for trade ID ${tradeId}`);
-          for (let i = 0; i < slMoveCount; i++) {
-            await moveTPSLMT(ACTION.MoveSL, ACTION.DOWN);
-            await wait(2000);
-            await logToFileAsync(`Stop Loss moved.`);
-          }
-          await logToFileAsync(`Moving TP 2 pips away from current price for trade ID ${tradeId}`);
-          for (let i = 0; i < tpMoveCount; i++) {
-            await moveTPSLMT(ACTION.MoveTP, ACTION.DOWN);
-            await wait(2000);
-            await logToFileAsync(`Take Profit moved.`);
-          }
-        }
-        this.trades.set(tradeId, {
-          lastPrice: latestPriceNum
-        });
-      } catch (error) {
-        logToFileAsync(`Error during trailing for trade ID ${tradeId}:`, error);
+        this.trades.set(tradeId, { ...trade, lastPrice: latestPriceNum });
       }
     }, 3000);
 
     this.tradeIntervals.set(tradeId, intervalId);
-    logToFileAsync(`Started trailing interval for trade ID: ${tradeId} with interval ID: ${intervalId}`);
   }
 
   private async checkIfPositionExists(tradeId: string): Promise<boolean> {
     try {
-      const positionsResponse: OpenedPositionsResponseMT | ErrorMTResponse = await openedPositionsMT();
-      if ('errorMessage' in positionsResponse) {
-        logToFileAsync("Error fetching open positions:", positionsResponse.errorMessage);
-        return false;
-      }
-  
-      // Access the positions array and use `some` method
-      return positionsResponse.positions.some((position: Position) => position.id === tradeId);
-    } catch (error) {
-      logToFileAsync(`Error checking if position exists for trade ID ${tradeId}:`, error);
+      const response = await openedPositionsMT();
+      if ('errorMessage' in response) return false;
+      return response.positions.some((pos: Position) => pos.id === tradeId);
+    } catch (e) {
       return false;
     }
   }

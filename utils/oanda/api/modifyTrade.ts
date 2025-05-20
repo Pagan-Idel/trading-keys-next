@@ -1,7 +1,7 @@
 import { OrderParameters } from "../../../components/Keyboard";
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json";
-import { pipIncrement, recentTrade } from "../../shared";
+import { getPipIncrement, recentTrade } from "../../shared";
 import { Trade, TradeById } from "./openNow";
 import { ACTION } from "./order";
 
@@ -15,7 +15,6 @@ interface OrderDetails {
   price: string;
 }
 
-// Helper function to safely access localStorage on the client side
 const getLocalStorageItem = (key: string): string | null => {
   if (typeof window !== "undefined") {
     return localStorage.getItem(key);
@@ -23,100 +22,137 @@ const getLocalStorageItem = (key: string): string | null => {
   return null;
 };
 
-export const modifyTrade = async (orderType: OrderParameters): Promise<boolean> => {
-  const accountType = getLocalStorageItem('accountType');
-  const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
-  const accountId = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
-  const token = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
-  
-  // Check if the environment variable is set
+export const modifyTrade = async (
+  orderType: OrderParameters,
+  pair?: string
+): Promise<boolean> => {
+  const accountType = getLocalStorageItem("accountType");
+  const hostname =
+    accountType === "live"
+      ? "https://api-fxtrade.oanda.com"
+      : "https://api-fxpractice.oanda.com";
+
+  const accountId =
+    accountType === "live"
+      ? credentials.OANDA_LIVE_ACCOUNT_ID
+      : credentials.OANDA_DEMO_ACCOUNT_ID;
+
+  const token =
+    accountType === "live"
+      ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
+      : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
+
   if (!accountId || !token) {
     logToFileAsync("Token or AccountId is not set.");
-  }
-  const mostRecentTrade: Trade | undefined = await recentTrade();
-  if (!mostRecentTrade) {
     return false;
   }
-  if (orderType.action == ACTION.SLatEntry) {
+
+  const mostRecentTrade: Trade | undefined = await recentTrade(pair);
+  if (!mostRecentTrade) {
+    logToFileAsync(`No recent trade found${pair ? ` for ${pair}` : ""}`);
+    return false;
+  }
+
+  const pipIncrement = getPipIncrement(pair || mostRecentTrade.instrument || "EURUSD");
+
+  if (orderType.action === ACTION.SLatEntry) {
     const requestBody: ModifyRequest = {
       stopLoss: {
         price: mostRecentTrade.price!,
-        timeInForce: "GTC"
-      }
+        timeInForce: "GTC",
+      },
     };
+
     const apiUrl = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/orders`;
 
     const response = await fetch(apiUrl, {
-      method: 'PUT',
+      method: "PUT",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'Accept-Datetime-Format': 'RFC3339'
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "Accept-Datetime-Format": "RFC3339",
       },
-      body: JSON.stringify({
-        ...requestBody, // Merge additional body parameters if needed
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
       logToFileAsync(`HTTP error! Status: ${response.status}`);
+      return false;
     }
-    return true;
-  } else if (orderType.action == ACTION.MoveSL || orderType.action == ACTION.MoveTP) {
-    const apiUrl1: string = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}`;
 
-    const response1: Response = await fetch(apiUrl1, {
+    return true;
+  }
+
+  if (orderType.action === ACTION.MoveSL || orderType.action === ACTION.MoveTP) {
+    const apiUrl1 = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}`;
+
+    const response1 = await fetch(apiUrl1, {
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
       },
     });
 
     if (!response1.ok) {
       logToFileAsync(`HTTP error! Status: ${response1.status}`);
-    }
-    const response1Object: TradeById = await response1.json();
-    logToFileAsync("response1Object", response1Object);
-    logToFileAsync("price",response1Object.trade.stopLossOrder!.price);
-    if (!response1Object.trade.stopLossOrder) {
-      logToFileAsync(`No Stop Loss Detected`);
       return false;
     }
+
+    const response1Object: TradeById = await response1.json();
+
     let requestBody: ModifyRequest = {};
-    if (orderType.action == ACTION.MoveSL) {
+
+    if (orderType.action === ACTION.MoveSL) {
+      const oldSL = parseFloat(response1Object.trade.stopLossOrder?.price || "0");
+      if (!oldSL) {
+        logToFileAsync(`No Stop Loss Detected`);
+        return false;
+      }
+
       requestBody = {
         stopLoss: {
-          price: orderType.action2 == ACTION.DOWN ? (parseFloat(response1Object.trade.stopLossOrder!.price) - pipIncrement).toFixed(5) : (parseFloat(response1Object.trade.stopLossOrder!.price) + pipIncrement).toFixed(5),
-          timeInForce: "GTC"
-        }
+          price: orderType.action2 === ACTION.DOWN
+            ? (oldSL - pipIncrement).toFixed(5)
+            : (oldSL + pipIncrement).toFixed(5),
+          timeInForce: "GTC",
+        },
       };
-   } else {
-    requestBody = {
-      takeProfit: {
-        price: orderType.action2 == ACTION.DOWN ? (parseFloat(response1Object.trade.takeProfitOrder!.price) - pipIncrement).toFixed(5) : (parseFloat(response1Object.trade.takeProfitOrder!.price) + pipIncrement).toFixed(5),
-        timeInForce: "GTC"
+    } else if (orderType.action === ACTION.MoveTP) {
+      const oldTP = parseFloat(response1Object.trade.takeProfitOrder?.price || "0");
+      if (!oldTP) {
+        logToFileAsync(`No Take Profit Detected`);
+        return false;
       }
-    };
-   }
+
+      requestBody = {
+        takeProfit: {
+          price: orderType.action2 === ACTION.DOWN
+            ? (oldTP - pipIncrement).toFixed(5)
+            : (oldTP + pipIncrement).toFixed(5),
+          timeInForce: "GTC",
+        },
+      };
+    }
+
     const apiUrl2 = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/orders`;
 
-    const response = await fetch(apiUrl2, {
-      method: 'PUT',
+    const response2 = await fetch(apiUrl2, {
+      method: "PUT",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'Accept-Datetime-Format': 'RFC3339'
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "Accept-Datetime-Format": "RFC3339",
       },
-      body: JSON.stringify({
-        ...requestBody, // Merge additional body parameters if needed
-      }),
+      body: JSON.stringify(requestBody),
     });
 
-    if (!response.ok) {
-      logToFileAsync(`HTTP error! Status: ${response.status}`);
+    if (!response2.ok) {
+      logToFileAsync(`HTTP error! Status: ${response2.status}`);
+      return false;
     }
-    return true;
 
+    return true;
   }
+
   return false;
 };

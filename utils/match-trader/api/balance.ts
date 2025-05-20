@@ -21,10 +21,9 @@ export interface LoginMTRequest {
   password: string;
 }
 
-export const balanceMT = async (): Promise<BalanceResponseMT | ErrorMTResponse> => {
-  // Ensure localStorage is only accessed on the client-side
+export const balanceMT = async (pair?: string): Promise<BalanceResponseMT | ErrorMTResponse> => {
   if (typeof window === 'undefined') {
-    return { errorMessage: 'localStorage is not available in the current environment.' } as ErrorMTResponse;
+    return { errorMessage: 'localStorage is not available in the current environment.' };
   }
 
   const accountType = localStorage.getItem('accountType');
@@ -38,36 +37,30 @@ export const balanceMT = async (): Promise<BalanceResponseMT | ErrorMTResponse> 
         'SYSTEM_UUID': localStorage.getItem('SYSTEM_UUID') || '',
         'Accept': 'application/json',
         'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
+        // 'Symbol': pair || '' // Uncomment if backend expects pair
       },
       credentials: 'include'
     });
 
     const rawResponseText = await response.text();
+
     if (!response.ok) {
-      let errorResponse: ErrorMTResponse;
       try {
-        errorResponse = JSON.parse(rawResponseText);
+        const errorResponse: ErrorMTResponse = JSON.parse(rawResponseText);
+        console.error('Balance fetch failed:', errorResponse.errorMessage);
+        return errorResponse;
       } catch (e) {
-        console.error('Error parsing error response as JSON:', e);
-        throw new Error(`Error: ${rawResponseText}`);
+        throw new Error(`Error parsing error response: ${rawResponseText}`);
       }
-      console.error('Balance fetch failed:', errorResponse.errorMessage);
-      return errorResponse;
     }
 
-    let data: BalanceResponseMT;
-    try {
-      data = JSON.parse(rawResponseText);
-    } catch (e) {
-      console.error('Error parsing success response as JSON:', e);
-      throw new Error(`Error: ${rawResponseText}`);
-    }
-
-    logToFileAsync('Balance fetch successful');
+    const data: BalanceResponseMT = JSON.parse(rawResponseText);
+    logToFileAsync(`✅ Balance fetch successful${pair ? ` for ${pair}` : ''}`);
 
     return data;
+
   } catch (error) {
-    console.error('An error occurred while fetching balance:', error);
-    return { errorMessage: 'An unknown error occurred while fetching balance.' } as ErrorMTResponse;
+    console.error(`❌ An error occurred while fetching balance${pair ? ` for ${pair}` : ''}:`, error);
+    return { errorMessage: 'An unknown error occurred while fetching balance.' };
   }
 };

@@ -19,7 +19,7 @@ export interface Position {
   bidPrice: number;
   askPrice: number;
 }
-  
+
 export interface OpenedPositionsResponseMT {
   positions: Position[];
 }
@@ -28,13 +28,14 @@ export interface ErrorMTResponse {
   errorMessage: string;
 }
 
-// Function to fetch opened positions
-export const openedPositionsMT = async (): Promise<OpenedPositionsResponseMT | ErrorMTResponse> => {
+// Function to fetch all or a specific pair's open position
+export const openedPositionsMT = async (
+  pair?: string
+): Promise<OpenedPositionsResponseMT | ErrorMTResponse> => {
   let accountType = '';
   let tradingApiToken = '';
   let systemUuid = '';
 
-  // Check if running in browser to access localStorage
   if (typeof window !== 'undefined') {
     accountType = localStorage.getItem('accountType') || '';
     tradingApiToken = localStorage.getItem('TRADING_API_TOKEN') || '';
@@ -50,41 +51,45 @@ export const openedPositionsMT = async (): Promise<OpenedPositionsResponseMT | E
         'TRADING_API_TOKEN': tradingApiToken,
         'SYSTEM_UUID': systemUuid,
         'Accept': 'application/json',
-        'Hostname': accountType === 'demo' ? "https://demo.match-trader.com" : "https://mtr.gooeytrade.com"
+        'Hostname':
+          accountType === 'demo'
+            ? 'https://demo.match-trader.com'
+            : 'https://mtr.gooeytrade.com'
       },
       credentials: 'include'
     });
 
     const rawResponseText = await response.text();
+
     if (!response.ok) {
-      let errorResponse: ErrorMTResponse;
       try {
-        errorResponse = JSON.parse(rawResponseText);
+        const errorResponse: ErrorMTResponse = JSON.parse(rawResponseText);
+        console.error('Opened Positions Failed:', errorResponse.errorMessage);
+        return errorResponse;
       } catch (e) {
-        console.error('Error parsing error response as JSON:', e);
-        throw new Error(`Error: ${rawResponseText}`);
+        throw new Error(`Error parsing error response: ${rawResponseText}`);
       }
-      console.error('Opened Positions Failed:', errorResponse.errorMessage);
-      return errorResponse;
     }
 
-    let data: OpenedPositionsResponseMT;
-    try {
-      data = JSON.parse(rawResponseText);
-    } catch (e) {
-      console.error('Error parsing success response as JSON:', e);
-      throw new Error(`Error: ${rawResponseText}`);
+    const data: OpenedPositionsResponseMT = JSON.parse(rawResponseText);
+
+    if (!data.positions || data.positions.length === 0) {
+      return { errorMessage: "No Opened Positions" };
     }
 
-    if (data.positions.length === 0) {
-      let errorResponse: ErrorMTResponse = { errorMessage: "No Opened Positions" };
-      console.error('No Opened Positions');
-      return errorResponse;
+    // ✅ Filter by pair if provided
+    if (pair) {
+      const filtered = data.positions.filter(p => p.symbol === pair);
+      if (filtered.length === 0) {
+        return { errorMessage: `No Opened Position found for ${pair}` };
+      }
+      return { positions: filtered };
     }
 
     return data;
+
   } catch (error) {
-    console.error('An error occurred opening positions:', error);
-    return { errorMessage: 'An unknown error occurred opening positions' } as ErrorMTResponse;
+    console.error('An error occurred fetching opened positions:', error);
+    return { errorMessage: 'An unknown error occurred fetching opened positions' };
   }
 };

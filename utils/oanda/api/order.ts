@@ -1,7 +1,14 @@
+// src/utils/oanda/api/order.ts
+
 import { OrderParameters } from "../../../components/Keyboard";
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json";
-import { RISK, calculalateRisk } from "../../shared";
+import { RISK, calculalateRisk, getPrecision } from "../../shared";
+
+// Normalize symbol: "EURUSD" => "EUR_USD"
+const normalizeOandaSymbol = (symbol: string): string => {
+  return symbol.length === 6 ? `${symbol.slice(0, 3)}_${symbol.slice(3, 6)}` : symbol;
+};
 
 export enum TYPE {
   MARKET = 'MARKET',
@@ -28,18 +35,13 @@ export enum ACTION {
   DOWN = 'Down'
 }
 
-export enum INSTRUMENT {
-  EUR_USD = 'EUR_USD',
-  GBP_USD = 'GPB_USD'
-}
-
 export interface ActionOnFill {
   price: string;
 }
 
 export interface MarketOrderRequest {
-  type?: TYPE; 
-  instrument?: INSTRUMENT;
+  type?: TYPE;
+  instrument?: string;
   units?: string;
   price?: string;
   tradeID?: string;
@@ -49,10 +51,9 @@ export interface MarketOrderRequest {
 }
 
 export interface OrderRequest {
-  order: MarketOrderRequest;  
+  order: MarketOrderRequest;
 }
 
-// Helper function to safely access localStorage on the client side
 const getLocalStorageItem = (key: string): string | null => {
   if (typeof window !== "undefined") {
     return localStorage.getItem(key);
@@ -61,49 +62,74 @@ const getLocalStorageItem = (key: string): string | null => {
 };
 
 export const order = async (orderType: OrderParameters): Promise<boolean> => {
-  const accountType = getLocalStorageItem('accountType');
-  const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
-  const accountId = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
-  const token = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
-  // Check if the environment variable is set
-  // Check if the environment variable is set
-  if (!accountId || !hostname || !token) {
-    logToFileAsync("Token or AccountId is not set.");
+  const pair = orderType.pair;
+  if (!pair) {
+    logToFileAsync("❌ Pair is not specified in orderType.");
     return false;
   }
-    const riskData: RISK | undefined = await calculalateRisk(orderType);
-      // Check if the environment variable is set
-    if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
-      logToFileAsync("Error Calculating Risk. No data found");
-      return false;
-    }
-    const requestBody: OrderRequest = {
-      order: {
-        type: TYPE.MARKET, 
-        instrument: INSTRUMENT.EUR_USD,
-        units: `${orderType.action == ACTION.SELL ? `-` : ``}${riskData!.units}`,
-        stopLossOnFill: { price: riskData!.stopLoss.toString() },
-        takeProfitOnFill: { price: riskData!.takeProfit.toString() },
-        timeInForce: "FOK"
-      }
-    };
-    const apiUrl = `${hostname}/v3/accounts/${accountId}/orders`;
 
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'Accept-Datetime-Format': 'RFC3339'
+  const normalizedPair = normalizeOandaSymbol(pair);
+  const precision = getPrecision(pair);
+
+  const accountType = getLocalStorageItem("accountType");
+  const hostname =
+    accountType === "live"
+      ? "https://api-fxtrade.oanda.com"
+      : "https://api-fxpractice.oanda.com";
+
+  const accountId =
+    accountType === "live"
+      ? credentials.OANDA_LIVE_ACCOUNT_ID
+      : credentials.OANDA_DEMO_ACCOUNT_ID;
+
+  const token =
+    accountType === "live"
+      ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
+      : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
+
+  if (!accountId || !hostname || !token) {
+    logToFileAsync("❌ Token or AccountId is not set.");
+    return false;
+  }
+
+  const riskData: RISK | undefined = await calculalateRisk(orderType, pair);
+  if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
+    logToFileAsync("❌ Error Calculating Risk. No data found");
+    return false;
+  }
+
+  const requestBody: OrderRequest = {
+    order: {
+      type: TYPE.MARKET,
+      instrument: normalizedPair,
+      units: `${orderType.action === ACTION.SELL ? '-' : ''}${riskData.units}`,
+      stopLossOnFill: {
+        price: parseFloat(riskData.stopLoss).toFixed(precision)
       },
-      body: JSON.stringify({
-        ...requestBody, // Merge additional body parameters if needed
-      }),
-    });
-  
-    if (!response.ok) {
-      logToFileAsync(`HTTP error! Status: ${response.status}`);
-      return false;
+      takeProfitOnFill: {
+        price: parseFloat(riskData.takeProfit).toFixed(precision)
+      },
+      timeInForce: "FOK"
     }
+  };
+
+  const apiUrl = `${hostname}/v3/accounts/${accountId}/orders`;
+
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+      "Accept-Datetime-Format": "RFC3339"
+    },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logToFileAsync(`❌ HTTP error! Status: ${response.status}`, errorText);
+    return false;
+  }
+
   return true;
 };

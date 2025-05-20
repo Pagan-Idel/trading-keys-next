@@ -19,7 +19,6 @@ export interface ErrorMTResponse {
 export const marketWatchMT = async (
   currency: string = "EURUSD"
 ): Promise<MarketWatchResponseMT | ErrorMTResponse> => {
-  // Ensure localStorage is only accessed on the client-side
   let accountType = "";
   let tradingApiToken = "";
   let systemUuid = "";
@@ -48,31 +47,33 @@ export const marketWatchMT = async (
     });
 
     const rawResponseText = await response.text();
+
     if (!response.ok) {
-      let errorResponse: ErrorMTResponse;
       try {
-        errorResponse = JSON.parse(rawResponseText);
+        const errorResponse: ErrorMTResponse = JSON.parse(rawResponseText);
+        console.error("Market Watch failed:", errorResponse.errorMessage);
+        return errorResponse;
       } catch (e) {
-        console.error("Error parsing error response as JSON:", e);
-        throw new Error(`Error: ${rawResponseText}`);
+        throw new Error(`Error parsing error response: ${rawResponseText}`);
       }
-      console.error("Market Watch failed:", errorResponse.errorMessage);
-      return errorResponse;
     }
 
-    let data: MarketWatchResponseMT;
-    try {
-      data = JSON.parse(rawResponseText);
-    } catch (e) {
-      console.error("Error parsing success response as JSON:", e);
-      throw new Error(`Error: ${rawResponseText}`);
+    const data: MarketWatchResponseMT = JSON.parse(rawResponseText);
+
+    // ✅ Filter by specific currency if passed
+    const filtered = data.filter(item => item.symbol === currency.toUpperCase());
+
+    if (filtered.length === 0) {
+      return {
+        errorMessage: `Currency ${currency} not found in market watch data.`
+      };
     }
 
-    return data;
+    return filtered;
   } catch (error) {
     console.error("An error occurred during market watch:", error);
     return {
-      errorMessage: "An unknown error occurred during market watch",
-    } as ErrorMTResponse;
+      errorMessage: "An unknown error occurred during market watch"
+    };
   }
 };

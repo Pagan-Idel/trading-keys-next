@@ -8,22 +8,23 @@ export interface EditPositionResponseMT {
 
 export interface EditPositionRequestMT {
   id: string;
-  instrument?: string;  // shortcut name of the instrument
-  orderSide?: 'BUY' | 'SELL';  // side of trade: BUY or SELL
-  volume?: number;  // amount of trade
-  slPrice?: number;  // stop-loss price: 0 if not set
-  tpPrice?: number;  // take-profit price: 0 if not set
-  isMobile?: boolean;  // request source: true if mobile, false if desktop
+  instrument?: string;
+  orderSide?: 'BUY' | 'SELL';
+  volume?: number;
+  slPrice?: number;
+  tpPrice?: number;
+  isMobile?: boolean;
 }
 
 export interface ErrorMTResponse {
   errorMessage: string;
 }
 
-export const editPositionMT = async (requestBody?: EditPositionRequestMT): Promise<EditPositionRequestMT | ErrorMTResponse> => {
-  // Ensure localStorage is only accessed on the client-side
+export const editPositionMT = async (
+  requestBody?: EditPositionRequestMT
+): Promise<EditPositionRequestMT | ErrorMTResponse> => {
   if (typeof window === 'undefined') {
-    return { errorMessage: 'localStorage is not available in the current environment.' } as ErrorMTResponse;
+    return { errorMessage: 'localStorage is not available in the current environment.' };
   }
 
   const accountType = localStorage.getItem('accountType');
@@ -43,30 +44,30 @@ export const editPositionMT = async (requestBody?: EditPositionRequestMT): Promi
     });
 
     const rawResponseText = await response.text();
+
     if (!response.ok) {
-      let errorResponse: ErrorMTResponse;
       try {
-        errorResponse = JSON.parse(rawResponseText);
+        const errorResponse: ErrorMTResponse = JSON.parse(rawResponseText);
+        console.error('Edit Position Failed:', errorResponse.errorMessage);
+        return errorResponse;
       } catch (e) {
-        console.error('Error parsing error response as JSON:', e);
-        throw new Error(`Error: ${rawResponseText}`);
+        throw new Error(`Error parsing error response: ${rawResponseText}`);
       }
-      console.error('Edit Position Failed:', errorResponse.errorMessage);
-      return errorResponse;
     }
 
-    let data: EditPositionRequestMT;
-    try {
-      data = JSON.parse(rawResponseText);
-    } catch (e) {
-      console.error('Error parsing success response as JSON:', e);
-      throw new Error(`Error: ${rawResponseText}`);
-    }
+    const data: EditPositionRequestMT = JSON.parse(rawResponseText);
 
-    logToFileAsync('Edit Position Successful');
+    logToFileAsync(
+      `✅ Edit Position Successful${requestBody?.instrument ? ` for ${requestBody.instrument}` : ''}`
+    );
+
     return data;
+
   } catch (error) {
-    console.error('An error occurred during editing position:', error);
-    return { errorMessage: 'An unknown error occurred during editing position' } as ErrorMTResponse;
+    console.error(
+      `❌ Error editing position${requestBody?.instrument ? ` for ${requestBody.instrument}` : ''}:`,
+      error
+    );
+    return { errorMessage: 'An unknown error occurred during editing position' };
   }
 };

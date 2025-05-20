@@ -22,7 +22,7 @@ export interface Account {
   commission: string;
   dividendAdjustment: string;
   guaranteedExecutionFees: string;
-  orders: any[]; // Replace 'any' with the actual type for orders, positions, trades, if known
+  orders: any[];
   positions: any[];
   trades: any[];
   unrealizedPL: string;
@@ -46,7 +46,6 @@ export interface AccountResponse {
   errorMessage: string;
 }
 
-// Helper function to safely access localStorage on the client side
 const getLocalStorageItem = (key: string): string | null => {
   if (typeof window !== "undefined") {
     return localStorage.getItem(key);
@@ -54,34 +53,42 @@ const getLocalStorageItem = (key: string): string | null => {
   return null;
 };
 
+export const handleOandaLogin = async (
+  pair?: string
+): Promise<AccountResponse> => {
+  const accountType = getLocalStorageItem('accountType') || 'demo';
+  const hostname =
+    accountType === 'live'
+      ? 'https://api-fxtrade.oanda.com'
+      : 'https://api-fxpractice.oanda.com';
 
-export const handleOandaLogin = async (): Promise<AccountResponse> => {
-  const accountType = getLocalStorageItem('accountType');
-  const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
-  
-  // Using credentials from credentials.json instead of process.env
-  const accountId = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID;
-  const token = accountType === 'live' ? credentials.NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN : credentials.NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN;
+  const accountId =
+    accountType === 'live'
+      ? credentials.OANDA_LIVE_ACCOUNT_ID
+      : credentials.OANDA_DEMO_ACCOUNT_ID;
 
-  // Check if the credentials are set
+  const token =
+    accountType === 'live'
+      ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
+      : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
+
   if (!token || !accountId) {
-    logToFileAsync("Token or AccountId is not set.");
+    logToFileAsync("❌ Token or AccountId is not set.");
     throw new Error("Token or AccountId is not set.");
   }
 
-  const api2: string = `${hostname}/v3/accounts`;
-  const response2: Response = await fetch(api2, {
+  const accountListUrl = `${hostname}/v3/accounts`;
+  const response2: Response = await fetch(accountListUrl, {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
     }
   });
-
   const responseData2: AccountResponse = await response2.json();
-  logToFileAsync(responseData2);
+  logToFileAsync("✅ /accounts list response", responseData2);
 
-  const api: string = `${hostname}/v3/accounts/${accountId}`;
-  const response: Response = await fetch(api, {
+  const accountDetailsUrl = `${hostname}/v3/accounts/${accountId}`;
+  const response: Response = await fetch(accountDetailsUrl, {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`
@@ -89,11 +96,11 @@ export const handleOandaLogin = async (): Promise<AccountResponse> => {
   });
 
   if (!response.ok) {
-    logToFileAsync(`HTTP error! Status: ${response.status}`);
+    logToFileAsync(`❌ HTTP error! Status: ${response.status}`);
     throw new Error(`HTTP error! Status: ${response.status}`);
   }
 
   const responseData: AccountResponse = await response.json();
-  logToFileAsync(responseData);
+  logToFileAsync(`✅ Account details${pair ? ` for ${pair}` : ""}`, responseData);
   return responseData;
 };

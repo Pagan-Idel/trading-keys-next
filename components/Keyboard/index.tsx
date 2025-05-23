@@ -7,9 +7,9 @@ import { closePartiallyMT } from '../../utils/match-trader/api/close-partially';
 import { moveTPSLMT } from '../../utils/match-trader/api/move-TPSL';
 import { stopAtEntryMT } from '../../utils/match-trader/api/stop-at-entry';
 import { logToFileAsync } from '../../utils/logger';
+import { forexPairs } from '../../utils/shared';
 
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
-const majorForexPairs = ['EURUSD', 'USDJPY', 'GBPUSD', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD', 'EURJPY'];
 const functionNames = [
   '7 - SL UP', '8 - TP UP', '9 - 50% CLOSE',
   '4 - SL DOWN', '5 - TP DOWN', '6 - 25% CLOSE',
@@ -38,7 +38,7 @@ const Button = styled.button`
   border: none;
   font-size: 18px;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.3s ease, filter 0.1s ease;
   position: relative;
 `;
 
@@ -56,6 +56,16 @@ const NumberButton = styled(Button)<{ pressed: boolean }>`
 
   &:hover {
     background-color: #2980b9;
+  }
+
+  &:after {
+    content: attr(data-function-name);
+    font-size: 12px;
+    color: #ffffff;
+    position: absolute;
+    bottom: 5px;
+    left: 50%;
+    transform: translateX(-50%);
   }
 `;
 
@@ -115,7 +125,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
     const handleKeyPress = (event: KeyboardEvent) => {
       const key = event.key;
       if (/^[0-9]$/.test(key)) {
-        const functionName = functionNames.find(name => name.startsWith(key));
+        const functionName = functionNames.find(name => name.includes(`${key} - `));
         if (functionName) {
           handleButtonClick(functionName);
         }
@@ -196,7 +206,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
 
       <h2 style={{ color: 'white' }}>Forex Pair</h2>
       <Dropdown value={pair} onChange={(e) => setPair(e.target.value)}>
-        {majorForexPairs.map(p => (
+        {forexPairs.map((p) => (
           <option key={p} value={p}>{p}</option>
         ))}
       </Dropdown>

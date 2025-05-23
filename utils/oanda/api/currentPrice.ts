@@ -1,6 +1,7 @@
 // src/utils/api/currentPrice.ts
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json";
+import { normalizeOandaSymbol } from "../../shared";
 
 interface PriceTick {
   liquidity: number;
@@ -16,13 +17,6 @@ interface PriceStreamResponse {
   status: string;
   time: string;
 }
-
-// Converts symbols like "EURUSD" → "EUR_USD" for OANDA compatibility
-const normalizeOandaSymbol = (symbol: string): string => {
-  return symbol.length === 6
-    ? `${symbol.slice(0, 3)}_${symbol.slice(3, 6)}`
-    : symbol;
-};
 
 export const currentPrice = async (symbol: string): Promise<{ bid: string; ask: string }> => {
   let accountType = '';

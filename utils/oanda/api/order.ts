@@ -3,12 +3,7 @@
 import { OrderParameters } from "../../../components/Keyboard";
 import { logToFileAsync } from "../../logger";
 import credentials from "../../../credentials.json";
-import { RISK, calculalateRisk, getPrecision } from "../../shared";
-
-// Normalize symbol: "EURUSD" => "EUR_USD"
-const normalizeOandaSymbol = (symbol: string): string => {
-  return symbol.length === 6 ? `${symbol.slice(0, 3)}_${symbol.slice(3, 6)}` : symbol;
-};
+import { RISK, calculalateRisk, getPrecision, normalizeOandaSymbol } from "../../shared";
 
 export enum TYPE {
   MARKET = 'MARKET',

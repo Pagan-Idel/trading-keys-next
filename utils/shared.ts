@@ -9,31 +9,46 @@ import { ACTION, OpenTrade, Trade, handleOandaLogin, currentPrice, openNow } fro
 export const contractSize = 100000;
 export const commissionPerLot = 7;
 
-// Accurate pip increments
+export const forexPairs = [
+  'EUR/USD', 'USD/JPY', 'GBP/USD', 'AUD/USD', 'USD/CAD',
+  'USD/CHF', 'NZD/USD', 'EUR/JPY', 'GBP/JPY', 'EUR/GBP',
+  'AUD/JPY', 'GBP/CAD', 'EUR/CHF', 'NZD/JPY', 'USD/SGD'
+];
+
+export const intervals = ['1day', '4h', '1h', '15m', '5m'];
 export const pipMap: Record<string, number> = {
   EURUSD: 0.0001, GBPUSD: 0.0001, AUDUSD: 0.0001,
   USDCAD: 0.0001, USDCHF: 0.0001, NZDUSD: 0.0001,
   USDJPY: 0.01, EURJPY: 0.01, GBPJPY: 0.01, CHFJPY: 0.01
 };
 
-// Decimal precision per instrument (for rounding prices correctly)
 export const instrumentPrecision: Record<string, number> = {
-  EURUSD: 2, GBPUSD: 2, AUDUSD: 2, NZDUSD: 2,
-  USDCAD: 2, USDCHF: 2, EURJPY: 3, USDJPY: 1,
-  GBPJPY: 1, CHFJPY: 1
+  EURUSD: 5, GBPUSD: 5, AUDUSD: 5, NZDUSD: 5,
+  USDCAD: 5, USDCHF: 5, EURJPY: 3, USDJPY: 3,
+  GBPJPY: 3, CHFJPY: 3
 };
 
-export const getPipIncrement = (pair: string): number => pipMap[pair] ?? 0.0001;
-export const getPrecision = (pair: string): number => instrumentPrecision[pair] ?? 2;
-
-// TradingView-style rounding for precision
-export const roundToPrecision = (value: number, pair: string): number => {
-  const precision = getPrecision(pair);
-  const multiplier = Math.pow(10, precision);
-  return Math.round(value * multiplier) / multiplier;
+const normalizePairKey = (pair: string): string => {
+  return pair.replace(/[^A-Z]/gi, '').toUpperCase(); // e.g., "usd_jpy" → "USDJPY"
 };
 
-// Simple async wait
+export const getPipIncrement = (pair: string): number => {
+  const key = normalizePairKey(pair);
+  return pipMap[key] ?? 0.0001;
+};
+
+export const getPrecision = (pair: string): number => {
+  const key = normalizePairKey(pair);
+  return instrumentPrecision[key] ?? 5;
+};
+
+// Converts symbols like "EURUSD" → "EUR_USD" for OANDA compatibility
+export const normalizeOandaSymbol = (symbol: string): string => {
+  return symbol.length === 6
+    ? `${symbol.slice(0, 3)}_${symbol.slice(3, 6)}`
+    : symbol;
+};
+
 export const wait = (ms: number): Promise<void> => {
   return new Promise(resolve => setTimeout(resolve, ms));
 };
@@ -60,17 +75,18 @@ export const calculateSLTPMT = (
   pair: string
 ): SLTPMT => {
   const pip = getPipIncrement(pair);
+  const precision = getPrecision(pair);
   const stopLoss = parseFloat(getLocalStorageItem('stopLoss') || '0');
   const takeProfit = stopLoss * 2;
   const price = parseFloat(openPrice);
 
   const tpPrice = orderSide === ACTION.BUY
-    ? roundToPrecision(price + pip * takeProfit, pair)
-    : roundToPrecision(price - pip * takeProfit, pair);
+    ? parseFloat((price + pip * takeProfit).toFixed(precision))
+    : parseFloat((price - pip * takeProfit).toFixed(precision));
 
   const slPrice = orderSide === ACTION.BUY
-    ? roundToPrecision(price - pip * stopLoss, pair)
-    : roundToPrecision(price + pip * stopLoss, pair);
+    ? parseFloat((price - pip * stopLoss).toFixed(precision))
+    : parseFloat((price + pip * stopLoss).toFixed(precision));
 
   return { slPrice, tpPrice };
 };
@@ -98,6 +114,7 @@ export const calculalateRisk = async (
   pair: string
 ): Promise<RISK | undefined> => {
   const pip = getPipIncrement(pair);
+  const precision = getPrecision(pair);
   const stopLoss = parseFloat(getLocalStorageItem('stopLoss') || '0');
   const takeProfit = stopLoss * 2;
 
@@ -112,18 +129,16 @@ export const calculalateRisk = async (
 
     return {
       units: units.toFixed(0),
-      takeProfit: roundToPrecision(
+      takeProfit: (
         orderType.action === ACTION.BUY
           ? parseFloat(ask) + pip * takeProfit
-          : parseFloat(bid) - pip * takeProfit,
-        pair
-      ).toString(),
-      stopLoss: roundToPrecision(
+          : parseFloat(bid) - pip * takeProfit
+      ).toFixed(precision),
+      stopLoss: (
         orderType.action === ACTION.BUY
           ? parseFloat(ask) - pip * stopLoss
-          : parseFloat(bid) + pip * stopLoss,
-        pair
-      ).toString()
+          : parseFloat(bid) + pip * stopLoss
+      ).toFixed(precision)
     };
   } catch (error: any) {
     console.error('Error calculating risk:', error.message);

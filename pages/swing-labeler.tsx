@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import styled from 'styled-components';
 import { Candle, determineSwingPoints, SwingResult } from '../utils/swingLabeler';
+import { fetchCandles } from '../utils/oanda/api/fetchCandles';
+import { forexPairs, getPrecision, intervals } from '../utils/shared';
 
 const Container = styled.main`
   padding: 2rem;
@@ -96,19 +98,14 @@ export default function Home() {
 
     try {
       const adjustedSize = outputSize + 1;
-      const res = await fetch(
-        `/api/oanda/fetch-candles?symbol=${symbol}&interval=${interval}&outputsize=${adjustedSize}`
-      );
-      const data = await res.json();
+      const candles = await fetchCandles(symbol, interval, adjustedSize);
 
-      if (!data.candles || !Array.isArray(data.candles)) {
-        throw new Error('Missing candle data');
-      }
+  if (!candles || !Array.isArray(candles)) {
+    throw new Error('Missing candle data');
+  }
 
-      const candles: Candle[] = [...data.candles].slice(0, outputSize);
-      const swingPoints: SwingResult[] = determineSwingPoints(candles).sort(
-        (a, b) => a.candleIndex - b.candleIndex
-      );
+  const slicedCandles: Candle[] = candles.slice(0, outputSize);
+  const swingPoints: SwingResult[] = determineSwingPoints(slicedCandles);
       setSwingResults(swingPoints);
     } catch (err: any) {
       setError('Failed to fetch or process swing data.');
@@ -116,14 +113,6 @@ export default function Home() {
 
     setLoading(false);
   };
-
-  const forexPairs = [
-    'EUR/USD', 'USD/JPY', 'GBP/USD', 'AUD/USD', 'USD/CAD',
-    'USD/CHF', 'NZD/USD', 'EUR/JPY', 'GBP/JPY', 'EUR/GBP',
-    'AUD/JPY', 'GBP/CAD', 'EUR/CHF', 'NZD/JPY', 'USD/SGD'
-  ];
-
-  const intervals = ['1day', '4h', '1h', '15m', '5m'];
 
   return (
     <Container>
@@ -169,7 +158,7 @@ export default function Home() {
             <ResultItem key={idx}>
               [Candle {step.candleIndex}] →{' '}
               <Highlight label={step.swing}>{step.swing}</Highlight>{' '}
-              at <strong>{step.price.toFixed(5)}</strong>
+              at <strong>{step.price.toFixed(getPrecision(symbol))}</strong>
             </ResultItem>
           ))}
         </ResultList>

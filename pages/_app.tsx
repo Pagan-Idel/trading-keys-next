@@ -12,13 +12,12 @@ const Container = styled.div`
 
 const MyApp = ({ Component, pageProps }: AppProps) => {
   return (
-    <>
-      <Container>
-        <h1>Trading Keys</h1>
-        <Account/>
-      </Container>
-    </>
+    <Container>
+      <h1>Trading Keys</h1>
+      <Account />
+      <Component {...pageProps} />
+    </Container>
   );
-}
+};
 
 export default MyApp;

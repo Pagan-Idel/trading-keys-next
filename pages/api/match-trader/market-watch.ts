@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { MarketWatchResponseMT } from '../../../utils/match-trader/api/market-watch';
-import redisClient from '../../../redisClient';
+import { MarketWatchResponseMT } from '../../../utils/match-trader/api/market-watch.js';
+import redisClient from '../../../redisClient.js';
 
 export interface ErrorResponse {
   errorMessage: string;

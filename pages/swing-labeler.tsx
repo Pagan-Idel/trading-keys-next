@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import styled from 'styled-components';
-import { Candle, determineSwingPoints, SwingResult } from '../utils/swingLabeler';
-import { fetchCandles } from '../utils/oanda/api/fetchCandles';
-import { forexPairs, getPrecision, intervals } from '../utils/shared';
+import { Candle, determineSwingPoints, SwingResult } from '../utils/swingLabeler.js';
+import { fetchCandles } from '../utils/oanda/api/fetchCandles.js';
+import { forexPairs, getPrecision, intervals } from '../utils/shared.js';
 
 const Container = styled.main`
   padding: 2rem;

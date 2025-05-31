@@ -1,5 +1,5 @@
-import { logToFileAsync } from "../../logger";
-import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
+import { logToFileAsync } from "../../logger.js";
+import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions.js";
 
 export interface EditPositionResponseMT {
   status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';

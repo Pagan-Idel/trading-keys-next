@@ -1,9 +1,17 @@
 // src/utils/oanda/api/order.ts
 
-import { OrderParameters } from "../../../components/Keyboard";
-import { logToFileAsync } from "../../logger";
-import credentials from "../../../credentials.json";
-import { RISK, calculalateRisk, getPrecision, normalizeOandaSymbol } from "../../shared";
+import { OrderParameters } from "../../shared.js";
+import { logMessage  } from "../../logger.js";
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
+const credentials = JSON.parse(credentialsRaw);
+
+import { RISK, calculalateRisk, getPrecision, normalizeOandaSymbol } from "../../shared.js";
+import { loginMode } from '../../../runner/startRunner.js';
 
 export enum TYPE {
   MARKET = 'MARKET',
@@ -59,14 +67,14 @@ const getLocalStorageItem = (key: string): string | null => {
 export const order = async (orderType: OrderParameters): Promise<boolean> => {
   const pair = orderType.pair;
   if (!pair) {
-    logToFileAsync("❌ Pair is not specified in orderType.");
+    logMessage ("❌ Pair is not specified in orderType.");
     return false;
   }
 
   const normalizedPair = normalizeOandaSymbol(pair);
   const precision = getPrecision(pair);
 
-  const accountType = getLocalStorageItem("accountType");
+  const accountType = getLocalStorageItem("accountType") || loginMode;
   const hostname =
     accountType === "live"
       ? "https://api-fxtrade.oanda.com"
@@ -83,26 +91,43 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
       : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
   if (!accountId || !hostname || !token) {
-    logToFileAsync("❌ Token or AccountId is not set.");
+    logMessage ("❌ Token or AccountId is not set.");
     return false;
   }
 
-  const riskData: RISK | undefined = await calculalateRisk(orderType, pair);
-  if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
-    logToFileAsync("❌ Error Calculating Risk. No data found");
-    return false;
+  let units: string;
+  let stopLoss = orderType.stopLoss;
+  let takeProfit = orderType.takeProfit;
+
+  if (!stopLoss || !takeProfit) {
+    const riskData: RISK | undefined = await calculalateRisk(orderType, pair);
+    if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
+      logMessage ("❌ Error Calculating Risk. No data found");
+      return false;
+    }
+    units = riskData.units;
+    stopLoss = stopLoss ?? riskData.stopLoss;
+    takeProfit = takeProfit ?? riskData.takeProfit;
+  } else {
+    const conservative: OrderParameters = { ...orderType, risk: 0.25 };
+    const riskData = await calculalateRisk(conservative, pair);
+    if (!riskData?.units) {
+      logMessage ("❌ Error calculating units");
+      return false;
+    }
+    units = riskData.units;
   }
 
   const requestBody: OrderRequest = {
     order: {
       type: TYPE.MARKET,
       instrument: normalizedPair,
-      units: `${orderType.action === ACTION.SELL ? '-' : ''}${riskData.units}`,
+      units: `${orderType.action === ACTION.SELL ? '-' : ''}${units}`,
       stopLossOnFill: {
-        price: parseFloat(riskData.stopLoss).toFixed(precision)
+        price: parseFloat(stopLoss).toFixed(precision)
       },
       takeProfitOnFill: {
-        price: parseFloat(riskData.takeProfit).toFixed(precision)
+        price: parseFloat(takeProfit).toFixed(precision)
       },
       timeInForce: "FOK"
     }
@@ -122,7 +147,7 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
 
   if (!response.ok) {
     const errorText = await response.text();
-    logToFileAsync(`❌ HTTP error! Status: ${response.status}`, errorText);
+    logMessage (`❌ HTTP error! Status: ${response.status}`, errorText);
     return false;
   }
 

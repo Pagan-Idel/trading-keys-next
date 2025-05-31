@@ -1,6 +1,6 @@
-import { logToFileAsync } from "../../logger";
-import { TradeManager } from "../../trade-manager";
-import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
+import { logToFileAsync } from "../../logger.js";
+import { TradeManager } from "../../trade-managerMT.js";
+import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions.js";
 
 export interface ClosePositionResponseMT {
   status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';

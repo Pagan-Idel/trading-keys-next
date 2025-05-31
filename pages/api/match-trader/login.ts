@@ -1,6 +1,6 @@
 // pages/api/login.ts
 import { NextApiRequest, NextApiResponse } from 'next';
-import redisClient from '../../../redisClient';
+import redisClient from '../../../redisClient.js';
 
 export interface LoginRequest {
   username: string;

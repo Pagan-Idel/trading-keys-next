@@ -1,9 +1,9 @@
-import { logToFileAsync } from "../../logger";
-import { ACTION } from "../../oanda/api";
-import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared";
-import { TradeManager } from "../../trade-manager";
-import { editPositionMT, EditPositionRequestMT } from "./edit-position";
-import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
+import { logToFileAsync } from "../../logger.js";
+import { ACTION } from "../../oanda/api/order.js";
+import { calculateSLTPMT, calculateVolumeMT, SLTPMT } from "../../shared.js";
+import { TradeManager } from "../../trade-managerMT.js";
+import { editPositionMT, EditPositionRequestMT } from "./edit-position.js";
+import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions.js";
 
 export interface OpenPositionResponseMT {
   status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';

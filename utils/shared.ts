@@ -1,32 +1,40 @@
 // src/utils/shared.ts
+import { ACTION, TYPE } from '../utils/oanda/api/order.js';
+import { OpenTrade, Trade } from './oanda/api/openNow.js';
+import { logMessage } from './logger';
+import { handleOandaLogin } from './oanda/api/login.js';
+import { currentPrice } from './oanda/api/currentPrice.js';
+import {  openNow } from './oanda/api/openNow.js';
+import { balanceMT } from './match-trader/api/balance.js';
+import { pipMap, instrumentPrecision, contractSize } from './constants.js';
 
-import { OrderParameters } from '../components/Keyboard';
-import { logToFileAsync } from './logger';
-import { balanceMT } from './match-trader/api/balance';
-import { marketWatchMT } from './match-trader/api/market-watch';
-import { ACTION, OpenTrade, Trade, handleOandaLogin, currentPrice, openNow } from './oanda/api';
+export interface OrderParameters {
+  orderType?: TYPE;
+  price?: string;
+  action?: ACTION;
+  action2?: ACTION;
+  risk?: number;
+  orderId?: string;
+  priceId?: string;
+  pair: string;
+  stopLoss?: string; // Optional SL override
+  takeProfit?: string; // Optional TP override
+}
 
-export const contractSize = 100000;
-export const commissionPerLot = 7;
+export function isForexMarketOpen(): boolean {
+  const now = new Date();
 
-export const forexPairs = [
-  'EUR/USD', 'USD/JPY', 'GBP/USD', 'AUD/USD', 'USD/CAD',
-  'USD/CHF', 'NZD/USD', 'EUR/JPY', 'GBP/JPY', 'EUR/GBP',
-  'AUD/JPY', 'GBP/CAD', 'EUR/CHF', 'NZD/JPY', 'USD/SGD'
-];
+  // Convert to UTC for simplicity (Forex opens Sunday 22:00 UTC and closes Friday 22:00 UTC)
+  const utcDay = now.getUTCDay(); // Sunday = 0, Monday = 1, ..., Saturday = 6
+  const utcHour = now.getUTCHours();
 
-export const intervals = ['1day', '4h', '1h', '15m', '5m'];
-export const pipMap: Record<string, number> = {
-  EURUSD: 0.0001, GBPUSD: 0.0001, AUDUSD: 0.0001,
-  USDCAD: 0.0001, USDCHF: 0.0001, NZDUSD: 0.0001,
-  USDJPY: 0.01, EURJPY: 0.01, GBPJPY: 0.01, CHFJPY: 0.01
-};
+  // Market is closed from Friday 22:00 UTC to Sunday 22:00 UTC
+  if (utcDay === 5 && utcHour >= 22) return false; // Friday after 22:00 UTC
+  if (utcDay === 6) return false;                  // Saturday all day
+  if (utcDay === 0 && utcHour < 22) return false;  // Sunday before 22:00 UTC
 
-export const instrumentPrecision: Record<string, number> = {
-  EURUSD: 5, GBPUSD: 5, AUDUSD: 5, NZDUSD: 5,
-  USDCAD: 5, USDCHF: 5, EURJPY: 3, USDJPY: 3,
-  GBPJPY: 3, CHFJPY: 3
-};
+  return true;
+}
 
 const normalizePairKey = (pair: string): string => {
   return pair.replace(/[^A-Z]/gi, '').toUpperCase(); // e.g., "usd_jpy" → "USDJPY"
@@ -91,24 +99,6 @@ export const calculateSLTPMT = (
   return { slPrice, tpPrice };
 };
 
-export const calculateVolumeMT = async (
-  risk: number,
-  pair: string
-): Promise<number | string> => {
-  const pip = getPipIncrement(pair);
-  const stopLoss = parseFloat(getLocalStorageItem('stopLoss') || '0');
-  const balanceResponse = await balanceMT();
-
-  if ('balance' in balanceResponse) {
-    const balance = balanceResponse.balance;
-    const pipValue = stopLoss * pip;
-    const riskAmount = parseFloat(balance) * (risk / 100);
-    return parseFloat((riskAmount / pipValue / contractSize).toFixed(1));
-  }
-
-  return "No Volume!";
-};
-
 export const calculalateRisk = async (
   orderType: OrderParameters,
   pair: string
@@ -146,13 +136,22 @@ export const calculalateRisk = async (
   }
 };
 
-export const getBidAndAsk = async (currency: string = "EURUSD") => {
-  const response = await marketWatchMT(currency);
-  if (Array.isArray(response) && response.length > 0) {
-    const { bid, ask } = response[0];
-    return { bid, ask };
+export const calculateVolumeMT = async (
+  risk: number,
+  pair: string
+): Promise<number | string> => {
+  const pip = getPipIncrement(pair);
+  const stopLoss = parseFloat(getLocalStorageItem('stopLoss') || '0');
+  const balanceResponse = await balanceMT();
+
+  if ('balance' in balanceResponse) {
+    const balance = balanceResponse.balance;
+    const pipValue = stopLoss * pip;
+    const riskAmount = parseFloat(balance) * (risk / 100);
+    return parseFloat((riskAmount / pipValue / contractSize).toFixed(1));
   }
-  return { bid: null, ask: null };
+
+  return "No Volume!";
 };
 
 export const recentTrade = async (

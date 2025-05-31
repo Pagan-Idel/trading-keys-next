@@ -1,8 +1,16 @@
 import { ACTION, order, Trade } from ".";
-import { OrderParameters } from "../../../components/Keyboard";
-import { logToFileAsync } from "../../logger";
-import credentials from "../../../credentials.json";
-import { recentTrade } from "../../shared";
+import { OrderParameters } from "../../shared.js";
+import { logMessage  } from "../../logger.js";
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
+const credentials = JSON.parse(credentialsRaw);
+
+import { recentTrade } from "../../shared.js";
+import { loginMode } from '../../../runner/startRunner.js'
 
 export interface TradeCloseResponse {
   lastTransactionID?: TransactionID;
@@ -77,7 +85,7 @@ export const closeTrade = async (
   let hostname = '';
 
   if (typeof window !== 'undefined') {
-    accountType = localStorage.getItem('accountType') || '';
+    accountType = localStorage.getItem('accountType') || loginMode; 
     hostname = accountType === 'live'
       ? 'https://api-fxtrade.oanda.com'
       : 'https://api-fxpractice.oanda.com';
@@ -90,13 +98,13 @@ export const closeTrade = async (
   }
 
   if (!accountId || !token) {
-    logToFileAsync("❌ Token or AccountId is not set.");
+    logMessage ("❌ Token or AccountId is not set.");
     return false;
   }
 
   const mostRecentTrade: Trade | undefined = await recentTrade(pair);
   if (!mostRecentTrade) {
-    logToFileAsync(`⚠️ No recent trade found${pair ? ` for ${pair}` : ""}.`);
+    logMessage (`⚠️ No recent trade found${pair ? ` for ${pair}` : ""}.`);
     return false;
   }
 
@@ -129,15 +137,15 @@ export const closeTrade = async (
     const responseData: TradeCloseResponse = await response.json();
 
     if (!response.ok) {
-      logToFileAsync(`❌ HTTP error! Status: ${response.status}`);
+      logMessage (`❌ HTTP error! Status: ${response.status}`);
       return false;
     }
 
-    logToFileAsync(`✅ Trade closed${pair ? ` for ${pair}` : ''}`, responseData);
+    logMessage (`✅ Trade closed${pair ? ` for ${pair}` : ''}`, responseData);
     return responseData;
 
   } catch (error) {
-    logToFileAsync(`❌ Exception closing trade${pair ? ` for ${pair}` : ''}:`, error);
+    logMessage (`❌ Exception closing trade${pair ? ` for ${pair}` : ''}:`, error);
     return false;
   }
 };

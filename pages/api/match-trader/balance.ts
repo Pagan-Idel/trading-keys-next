@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import redisClient from '../../../redisClient';
-import { BalanceResponseMT } from '../../../utils/match-trader/api/balance';
+import redisClient from '../../../redisClient.js';
+import { BalanceResponseMT } from '../../../utils/match-trader/api/balance.js';
 
 export interface ErrorResponse {
   errorMessage: string;

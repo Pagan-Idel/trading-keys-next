@@ -1,11 +1,19 @@
 // src/utils/oanda/api/modifyTrade.ts
 
-import { OrderParameters } from "../../../components/Keyboard";
-import { logToFileAsync } from "../../logger";
-import credentials from "../../../credentials.json";
-import { getPipIncrement, getPrecision, recentTrade } from "../../shared";
-import { Trade, TradeById } from "./openNow";
-import { ACTION } from "./order";
+import { OrderParameters } from "../../shared.js";
+import { logMessage  } from "../../logger.js";
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
+const credentials = JSON.parse(credentialsRaw);
+
+import { getPipIncrement, getPrecision, recentTrade } from "../../shared.js";
+import { Trade, TradeById } from "./openNow.js";
+import { ACTION } from "./order.js";
+import { loginMode } from '../../../runner/startRunner.js'
 
 interface ModifyRequest {
   takeProfit?: OrderDetails;
@@ -28,7 +36,7 @@ export const modifyTrade = async (
   orderType: OrderParameters,
   pair?: string
 ): Promise<boolean> => {
-  const accountType = getLocalStorageItem("accountType");
+  const accountType = getLocalStorageItem("accountType") || loginMode;
   const hostname =
     accountType === "live"
       ? "https://api-fxtrade.oanda.com"
@@ -45,13 +53,13 @@ export const modifyTrade = async (
       : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
   if (!accountId || !token) {
-    logToFileAsync("❌ Token or AccountId is not set.");
+    logMessage ("❌ Token or AccountId is not set.");
     return false;
   }
 
   const mostRecentTrade: Trade | undefined = await recentTrade(pair);
   if (!mostRecentTrade) {
-    logToFileAsync(`❌ No recent trade found${pair ? ` for ${pair}` : ""}`);
+    logMessage (`❌ No recent trade found${pair ? ` for ${pair}` : ""}`);
     return false;
   }
 
@@ -81,7 +89,7 @@ export const modifyTrade = async (
     });
 
     if (!response.ok) {
-      logToFileAsync(`❌ SL at Entry failed. HTTP ${response.status}`);
+      logMessage (`❌ SL at Entry failed. HTTP ${response.status}`);
       return false;
     }
 
@@ -99,7 +107,7 @@ export const modifyTrade = async (
     });
 
     if (!tradeResponse.ok) {
-      logToFileAsync(`❌ Failed to fetch trade details. HTTP ${tradeResponse.status}`);
+      logMessage (`❌ Failed to fetch trade details. HTTP ${tradeResponse.status}`);
       return false;
     }
 
@@ -109,7 +117,7 @@ export const modifyTrade = async (
     if (orderType.action === ACTION.MoveSL) {
       const oldSL = parseFloat(response1Object.trade.stopLossOrder?.price || "0");
       if (!oldSL) {
-        logToFileAsync(`⚠️ No Stop Loss Detected.`);
+        logMessage (`⚠️ No Stop Loss Detected.`);
         return false;
       }
 
@@ -124,7 +132,7 @@ export const modifyTrade = async (
     } else if (orderType.action === ACTION.MoveTP) {
       const oldTP = parseFloat(response1Object.trade.takeProfitOrder?.price || "0");
       if (!oldTP) {
-        logToFileAsync(`⚠️ No Take Profit Detected.`);
+        logMessage (`⚠️ No Take Profit Detected.`);
         return false;
       }
 
@@ -150,7 +158,7 @@ export const modifyTrade = async (
     });
 
     if (!updateResponse.ok) {
-      logToFileAsync(`❌ Failed to modify trade. HTTP ${updateResponse.status}`);
+      logMessage (`❌ Failed to modify trade. HTTP ${updateResponse.status}`);
       return false;
     }
 

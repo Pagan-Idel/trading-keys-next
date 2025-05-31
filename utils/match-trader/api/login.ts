@@ -1,6 +1,7 @@
-import { logToFileAsync } from "../../logger";
-import credentials from "../../../credentials.json";  // Import credentials.json at the top
-import { storeTokensInRedis } from "../../shared";
+import { logToFileAsync } from "../../logger.js";
+import credentials from "../../../credentials.json" assert { type: "json"};  // Import credentials.json at the top
+import { storeTokensInRedis } from "../../shared.js";
+import { json } from "stream/consumers";
 
 export interface LoginRequestBodyMT {
   email: string;

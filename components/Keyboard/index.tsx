@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
-import { ACTION, TYPE, order, modifyTrade, closeTrade } from '../../utils/oanda/api';
-import { openPostionMT } from '../../utils/match-trader/api/open';
-import { closePositionMT } from '../../utils/match-trader/api/close-position';
-import { closePartiallyMT } from '../../utils/match-trader/api/close-partially';
-import { moveTPSLMT } from '../../utils/match-trader/api/move-TPSL';
-import { stopAtEntryMT } from '../../utils/match-trader/api/stop-at-entry';
-import { logToFileAsync } from '../../utils/logger';
-import { forexPairs } from '../../utils/shared';
+import { modifyTrade } from '../../utils/oanda/api/modifyTrade.js';
+import { ACTION, TYPE, order} from '../../utils/oanda/api/order.js';
+import { closeTrade } from '../../utils/oanda/api/closeTrade.js';
+import { openPostionMT } from '../../utils/match-trader/api/open.js';
+import { closePositionMT } from '../../utils/match-trader/api/close-position.js';
+import { closePartiallyMT } from '../../utils/match-trader/api/close-partially.js';
+import { moveTPSLMT } from '../../utils/match-trader/api/move-TPSL.js';
+import { stopAtEntryMT } from '../../utils/match-trader/api/stop-at-entry.js';
+import { logToFileAsync } from '../../utils/logger.js';
+import { forexPairs } from '../../utils/shared.js';
 
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
 const functionNames = [
@@ -18,17 +20,6 @@ const functionNames = [
 
 interface KeyboardProps {
   platform: string;
-}
-
-export interface OrderParameters {
-  orderType?: TYPE;
-  price?: string;
-  action?: ACTION;
-  action2?: ACTION;
-  risk?: number;
-  orderId?: string;
-  priceId?: string;
-  pair: string;
 }
 
 const Button = styled.button`

@@ -2,6 +2,7 @@
   "name": "trading-keys",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "dependencies": {
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
@@ -26,7 +27,11 @@
     "redis-windows": "redis-server C:/Documents/trading-keys-next/redis.windows.conf",
     "redis-ubuntu": "redis-server /etc/redis/redis.conf",
     "build": "next build",
-    "start": "next start -p 4000"
+    "start": "next start -p 4000",
+    "build:threads": "tsc -p tsconfig.worker.json",
+    "run:live": "npm run build:threads && node dist/runner/startRunner.js -- --mode=live",
+    "run:demo": "npm run build:threads && node dist/runner/startRunner.js -- --mode=demo",
+    "start:prod": "node dist/runner/startRunner.js"
   },
   "eslintConfig": {
     "extends": [

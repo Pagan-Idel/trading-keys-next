@@ -1,46 +1,52 @@
-// src/utils/api/checkNews.ts
+import { logMessage  } from "../../logger.js";
 
-import { logToFileAsync } from "../../logger";
-import credentials from "../../../credentials.json";
-import { forexPairs } from "../../shared";
+const ACCESS_KEY = "eCIPqCm9VjTuagvDqHa9CeWSqev0kE";
+const FCS_URL = "https://fcsapi.com/api-v3/forex/economy_cal";
 
-// 🔁 Extract and dedupe currency codes (e.g. EUR, USD, JPY)
-const getUniqueCurrencyCodes = (): string => {
-  const codes = new Set<string>();
-  forexPairs.forEach(pair => {
-    const base = pair.slice(0, 3).toUpperCase();
-    const quote = pair.slice(3).toUpperCase();
-    codes.add(base);
-    codes.add(quote);
-  });
-  return Array.from(codes).join(",");
-};
+const currencyCodes = [
+  "USD", "JPY", "EUR", "GBP", "CHF", "CAD", "AUD", "NZD"
+];
 
-// 🔑 FCS API Access Key
-const FCS_API_KEY = credentials.FCS_API_KEY || process.env.FCS_API_KEY;
-
-// 🧠 Main Function
-export const checkNews = async (): Promise<any> => {
-  const symbols = getUniqueCurrencyCodes(); // e.g., "EUR,USD,JPY,GBP,CHF,CAD,NZD,AUD"
-  const url = `https://fcsapi.com/api-v3/forex/economy_cal?symbol=${symbols}&access_key=${FCS_API_KEY}`;
+/**
+ * Returns true if there is red folder news for this pair’s currency(s)
+ * releasing within the next hour from the given timestamp.
+ */
+export const checkNews = async (pair: string, timestamp: string): Promise<boolean> => {
+  const relevantCurrencies = currencyCodes.filter(code => pair.includes(code));
+  const symbolsParam = relevantCurrencies.join(",");
 
   try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`FCS API error: ${response.statusText}`);
+    const res = await fetch(`${FCS_URL}?symbol=${symbolsParam}&access_key=${ACCESS_KEY}`);
+    const data = await res.json();
+
+    if (!data || !data.response) {
+      await logMessage ("⚠️ Invalid news response from FCS API");
+      return false;
     }
 
-    const json = await response.json();
+    const now = new Date(timestamp);
+    const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
 
-    if (!json || !json.response) {
-      throw new Error("Invalid response structure from FCS API");
+    const redNewsEvents = data.response.filter((event: any) => {
+      if (!event || !event.country || !event.time || !event.impact) return false;
+
+      const eventTime = new Date(`${event.date} ${event.time} UTC`);
+      return (
+        event.impact === "High" &&
+        eventTime >= now &&
+        eventTime <= oneHourLater &&
+        relevantCurrencies.includes(event.country)
+      );
+    });
+
+    if (redNewsEvents.length > 0) {
+      await logMessage (`⚠️ Red folder news upcoming for ${pair} within 1 hour`);
+      return true;
     }
 
-    await logToFileAsync("✅ FCS Calendar Fetched", json.response);
-    return json.response;
-
+    return false;
   } catch (error: any) {
-    await logToFileAsync("❌ Error fetching economic calendar", error.message || error);
-    return { error: true, message: error.message || "Unknown error" };
+    await logMessage ("❌ Error fetching news:", error.message);
+    return false;
   }
 };

@@ -1,7 +1,15 @@
 // src/utils/api/currentPrice.ts
-import { logToFileAsync } from "../../logger";
-import credentials from "../../../credentials.json";
-import { normalizeOandaSymbol } from "../../shared";
+import { logMessage  } from "../../logger.js";
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
+const credentials = JSON.parse(credentialsRaw);
+
+import { normalizeOandaSymbol } from "../../shared.js";
+import { loginMode } from "../../../runner/startRunner.js";
 
 interface PriceTick {
   liquidity: number;
@@ -25,7 +33,7 @@ export const currentPrice = async (symbol: string): Promise<{ bid: string; ask: 
   let token = '';
 
   if (typeof window !== 'undefined') {
-    accountType = localStorage.getItem('accountType') || '';
+    accountType = localStorage.getItem('accountType') || loginMode;
     hostname = accountType === 'live'
       ? 'https://api-fxtrade.oanda.com'
       : 'https://api-fxpractice.oanda.com';
@@ -40,7 +48,7 @@ export const currentPrice = async (symbol: string): Promise<{ bid: string; ask: 
   }
 
   if (!accountId || !token || !hostname) {
-    logToFileAsync("❌ Token, AccountId, or Hostname is not set.");
+    logMessage ("❌ Token, AccountId, or Hostname is not set.");
     throw new Error("Missing credentials.");
   }
 
@@ -80,8 +88,8 @@ export const currentPrice = async (symbol: string): Promise<{ bid: string; ask: 
         if (priceData && priceData.asks && priceData.bids) {
           const mostRecentAsk = priceData.asks.at(-1)?.price || '';
           const mostRecentBid = priceData.bids.at(-1)?.price || '';
-          logToFileAsync("mostRecentBid", mostRecentBid);
-          logToFileAsync("mostRecentAsk", mostRecentAsk);
+          logMessage ("mostRecentBid", mostRecentBid);
+          logMessage ("mostRecentAsk", mostRecentAsk);
           return { bid: mostRecentBid, ask: mostRecentAsk };
         }
       } catch (error) {

@@ -1,8 +1,15 @@
-import { logToFileAsync } from "../../logger";
-import credentials from "../../../credentials.json";
-import { Candle } from "../../swingLabeler";
-import { normalizeOandaSymbol } from "../../shared";
+import { logMessage  } from "../../logger.js";
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
+const credentials = JSON.parse(credentialsRaw);
+
+import { Candle } from "../../swingLabeler.js";
+import { normalizeOandaSymbol } from "../../shared.js";
+import { loginMode } from "../../../runner/startRunner.js";
 export const fetchCandles = async (
   symbol: string,
   interval: string,
@@ -15,7 +22,7 @@ export const fetchCandles = async (
     let token = '';
 
     if (typeof window !== "undefined") {
-      accountType = localStorage.getItem("accountType") || "";
+      accountType = localStorage.getItem("accountType") || loginMode;
       hostname =
         accountType === "live"
           ? "https://api-fxtrade.oanda.com"
@@ -48,14 +55,14 @@ export const fetchCandles = async (
 
     if (!response.ok) {
       const errorText = await response.text();
-      logToFileAsync("❌ Failed to fetch candles", errorText);
+      logMessage ("❌ Failed to fetch candles", errorText);
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
     return data.candles;
   } catch (error) {
-    logToFileAsync("🚫 fetchCandles failed:", (error as Error).message);
+    logMessage ("🚫 fetchCandles failed:", (error as Error).message);
     throw error;
   }
 };

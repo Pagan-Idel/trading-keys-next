@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { OpenPositionResponseMT } from '../../../utils/match-trader/api/open';
-import redisClient from '../../../redisClient';
+import { OpenPositionResponseMT } from '../../../utils/match-trader/api/open.js';
+import redisClient from '../../../redisClient.js';
 
 export interface ErrorResponse {
   errorMessage: string;

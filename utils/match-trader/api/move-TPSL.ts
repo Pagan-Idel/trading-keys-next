@@ -1,7 +1,7 @@
-import { logToFileAsync } from "../../logger";
-import { ACTION } from "../../oanda/api";
-import { getPipIncrement } from "../../shared";
-import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions";
+import { logToFileAsync } from "../../logger.js";
+import { ACTION } from "../../oanda/api/order.js";
+import { getPipIncrement } from "../../shared.js";
+import { openedPositionsMT, OpenedPositionsResponseMT } from "./opened-positions.js";
 
 export interface EditPositionResponseMT {
   status: 'OK' | 'REJECTED' | 'PARTIAL_SUCCESS';

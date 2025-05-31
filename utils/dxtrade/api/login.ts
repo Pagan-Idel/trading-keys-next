@@ -1,5 +1,12 @@
-import { logToFileAsync } from "../../logger";
-import credentials from "../../../credentials.json";  // Import credentials from credentials.json
+import { logMessage } from "../../logger.js";
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
+const credentials = JSON.parse(credentialsRaw);
+  // Import credentials from credentials.json
 
 export interface LoginRequest {
   username: string;
@@ -54,7 +61,7 @@ export const handleDXLogin = async (accountType: string): Promise<void> => {
     }
 
     const data = await response.json();
-    logToFileAsync('Login successful', data);
+    logMessage('Login successful', data);
   } catch (error) {
     console.error('An error occurred during login:', error);
   }

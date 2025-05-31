@@ -1,4 +1,4 @@
-import { logToFileAsync } from "../../logger";
+import { logToFileAsync } from "../../logger.js";
 
 export interface BalanceResponseMT {
   balance: string;

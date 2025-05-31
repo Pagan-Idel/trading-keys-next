@@ -1,6 +1,14 @@
-import { logToFileAsync } from "../../logger";
-import credentials from "../../../credentials.json";
+import { logMessage  } from "../../logger.js";
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
+const credentials = JSON.parse(credentialsRaw);
+
+import { loginMode } from '../../../runner/startRunner.js';
+ 
 export interface Price {
   priceValue: string;
 }
@@ -51,7 +59,7 @@ const getLocalStorageItem = (key: string): string | null => {
 export const openNow = async (
   pair?: string
 ): Promise<OpenTrade | undefined> => {
-  const accountType = getLocalStorageItem("accountType");
+  const accountType = getLocalStorageItem("accountType") || loginMode;
   const hostname =
     accountType === "live"
       ? "https://api-fxtrade.oanda.com"
@@ -68,7 +76,7 @@ export const openNow = async (
       : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
   if (!accountId || !token || !hostname) {
-    logToFileAsync("❌ Token or AccountId is not set.");
+    logMessage ("❌ Token or AccountId is not set.");
     return undefined;
   }
 

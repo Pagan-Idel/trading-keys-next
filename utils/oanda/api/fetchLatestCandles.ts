@@ -6,23 +6,22 @@ import { getLoginMode } from "../../loginState";
 
 export const fetchLatestCandles = async (
   symbol: string,
-  interval: string
+  interval: string,
+  mode: 'live' | 'demo' = 'demo'
 ): Promise<Candle[]> => {
   try {
-    const accountType = getLoginMode(); // ✅ Dynamic login mode
-
     const hostname =
-      accountType === "live"
+      mode === "live"
         ? "https://api-fxtrade.oanda.com"
         : "https://api-fxpractice.oanda.com";
 
     const accountId =
-      accountType === "live"
+      mode === "live"
         ? credentials.OANDA_LIVE_ACCOUNT_ID
         : credentials.OANDA_DEMO_ACCOUNT_ID;
 
     const token =
-      accountType === "live"
+      mode === "live"
         ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
         : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 

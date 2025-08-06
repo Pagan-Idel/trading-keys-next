@@ -1,7 +1,6 @@
 import credentials from "../../../credentials.json";
 import { getPrecision, normalizePairKeyUnderscore, tfToMs } from "../../shared";
 import { logMessage } from "../../logger";
-import { getLoginMode } from "../../loginState";
 
 type Price = { bid: string; ask: string; updatedAt: number };
 const priceCache: Record<string, Price> = {};
@@ -16,8 +15,8 @@ const getLocalStorageItem = (key: string): string | null => {
   return null;
 };
 
-const getAccountDetails = () => {
-  const accountType = getLoginMode(); // ✅ use dynamic backend-safe login mode
+const getAccountDetails = (mode: 'live' | 'demo' = 'demo') => {
+  const accountType = mode;
   const hostname =
     accountType === "live"
       ? "https://stream-fxtrade.oanda.com"
@@ -38,9 +37,9 @@ const getAccountDetails = () => {
   return { hostname, restHost, accountId, token };
 };
 
-export const fetchPriceOnce = async (symbol: string): Promise<{ bid: string; ask: string } | null> => {
+export const fetchPriceOnce = async (symbol: string, mode: 'live' | 'demo' = 'demo'): Promise<{ bid: string; ask: string } | null> => {
   const norm = normalizePairKeyUnderscore(symbol);
-  const { restHost, accountId, token } = getAccountDetails();
+  const { restHost, accountId, token } = getAccountDetails(mode);
   const url = `${restHost}/v3/accounts/${accountId}/pricing?instruments=${norm}`;
 
   try {
@@ -67,7 +66,7 @@ export const fetchPriceOnce = async (symbol: string): Promise<{ bid: string; ask
   }
 };
 
-const monitorStaleStream = (symbol: string) => {
+const monitorStaleStream = (symbol: string, mode: 'live' | 'demo' = 'demo') => {
   const norm = normalizePairKeyUnderscore(symbol);
   if (staleCheckIntervals[norm]) return;
 
@@ -79,12 +78,12 @@ const monitorStaleStream = (symbol: string) => {
       logMessage(`🔁 Detected stale price for ${norm} (${ageSec.toFixed(1)}s old). Restarting stream.`, undefined, { fileName: "priceStream" });
       await stopPriceStream(symbol);
       await new Promise((res) => setTimeout(res, 1000));
-      setupStream(symbol);
+      setupStream(symbol, mode);
     }
   }, 5000);
 };
 
-const setupStream = async (symbol: string) => {
+const setupStream = async (symbol: string, mode: 'live' | 'demo' = 'demo') => {
   const norm = normalizePairKeyUnderscore(symbol);
   if (streamInitialized.has(norm)) {
     logMessage(`⏩ Stream already initialized for ${norm}`, undefined, { fileName: "priceStream" });
@@ -92,7 +91,7 @@ const setupStream = async (symbol: string) => {
   }
 
   streamInitialized.add(norm);
-  const { hostname, accountId, token } = getAccountDetails();
+  const { hostname, accountId, token } = getAccountDetails(mode);
   const url = `${hostname}/v3/accounts/${accountId}/pricing/stream?instruments=${norm}`;
 
   logMessage(`📡 Opening price stream for ${norm}`, undefined, { fileName: "priceStream" });
@@ -107,10 +106,10 @@ const setupStream = async (symbol: string) => {
     if (!reader) throw new Error("Stream reader not available");
 
     streamControllers[norm] = reader;
-    monitorStaleStream(symbol);
+    monitorStaleStream(symbol, mode);
 
     const decoder = new TextDecoder();
-
+    // @ts-ignore
     (async () => {
       while (true) {
         const { value, done } = await reader.read();
@@ -162,17 +161,17 @@ const setupStream = async (symbol: string) => {
     delete streamControllers[norm];
     clearInterval(staleCheckIntervals[norm]);
     delete staleCheckIntervals[norm];
-    setTimeout(() => setupStream(symbol), 5000);
+    setTimeout(() => setupStream(symbol, mode), 5000);
   }
 };
 
-export const initializePriceStreams = async (symbols: string[]) => {
+export const initializePriceStreams = async (symbols: string[], mode: 'live' | 'demo' = 'demo') => {
   logMessage(`🧠 Initializing price streams for: ${symbols.join(", ")}`, undefined, { fileName: "priceStream" });
-  symbols.forEach(startPriceStream);
+  symbols.forEach(symbol => startPriceStream(symbol, mode));
 };
 
-export const startPriceStream = (symbol: string) => {
-  setupStream(symbol); // non-blocking
+export const startPriceStream = (symbol: string, mode: 'live' | 'demo' = 'demo') => {
+  setupStream(symbol, mode); // non-blocking
 };
 
 export const isStreamInitialized = (symbol: string): boolean => {

@@ -176,16 +176,16 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     switch (platform) {
       case 'oanda':
         switch (functionName) {
-          case '0 - CLOSE': closeTrade({ action: ACTION.CLOSE, pair }, pair); break;
+          case '0 - CLOSE': closeTrade({ action: ACTION.CLOSE, pair }, pair, undefined, accountType as 'live' | 'demo'); break;
           case '1 - BUY': rateLimitedBuyOanda(); break;
           case '2 - SELL': rateLimitedSellOanda(); break;
-          case '3 - SL AT ENTRY': modifyTrade({ action: ACTION.SLatEntry, pair }, pair); break;
-          case '4 - SL DOWN': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.DOWN, pair }, pair); break;
-          case '5 - TP DOWN': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.DOWN, pair }, pair); break;
-          case '6 - 25% CLOSE': closeTrade({ action: ACTION.PartialClose25, pair }, pair); break;
-          case '7 - SL UP': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.UP, pair }, pair); break;
-          case '8 - TP UP': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.UP, pair }, pair); break;
-          case '9 - 50% CLOSE': closeTrade({ action: ACTION.PartialClose50, pair }, pair); break;
+          case '3 - SL AT ENTRY': modifyTrade({ action: ACTION.SLatEntry, pair }, pair, accountType as 'live' | 'demo'); break;
+          case '4 - SL DOWN': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.DOWN, pair }, pair, accountType as 'live' | 'demo'); break;
+          case '5 - TP DOWN': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.DOWN, pair }, pair, accountType as 'live' | 'demo'); break;
+          case '6 - 25% CLOSE': closeTrade({ action: ACTION.PartialClose25, pair }, pair, undefined, accountType as 'live' | 'demo'); break;
+          case '7 - SL UP': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.UP, pair }, pair, accountType as 'live' | 'demo'); break;
+          case '8 - TP UP': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.UP, pair }, pair, accountType as 'live' | 'demo'); break;
+          case '9 - 50% CLOSE': closeTrade({ action: ACTION.PartialClose50, pair }, pair, undefined, accountType as 'live' | 'demo'); break;
         }
         break;
 

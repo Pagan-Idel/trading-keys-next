@@ -7,12 +7,12 @@ import type { TradeCloseResponse } from "./closeTrade";
 export interface ErrorOandaResponse {
   errorMessage: string;
 }
-
 export const closeTradePartial = async (
   tradeId: string,
-  unitsToClose: number
+  unitsToClose: number,
+  mode: 'live' | 'demo' = 'demo'
 ): Promise<TradeCloseResponse | ErrorOandaResponse> => {
-  const openTrades = await openNow();
+  const openTrades = await openNow(undefined, mode);
   if (!openTrades || openTrades.trades.length === 0) {
     return { errorMessage: `No open trades available.` };
   }
@@ -37,7 +37,7 @@ export const closeTradePartial = async (
     return { errorMessage: `Invalid unitsToClose: ${unitsToClose}` };
   }
 
-  const result = await closeTrade({ action: "PartialClose", pair }, pair, unitsToClose);
+  const result = await closeTrade({ action: "PartialClose50", pair }, pair, unitsToClose, mode);
   if (!result || typeof result === "boolean") {
     logMessage(`❌ Failed to close partial trade for ${pair} (Trade ID: ${tradeId})`, undefined, {
       level: "error",

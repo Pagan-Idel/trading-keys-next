@@ -4,7 +4,6 @@ import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
 import credentials from "../../../credentials.json";
 import { type RISK, calculateRisk, getPrecision, normalizeOandaSymbol } from "../../shared";
-import { getLoginMode } from "../../loginState";
 
 export const TYPE = {
   MARKET: 'MARKET',
@@ -53,7 +52,7 @@ export interface OrderRequest {
   order: MarketOrderRequest;
 }
 
-export const order = async (orderType: OrderParameters): Promise<boolean> => {
+export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 'demo'): Promise<boolean> => {
   const fileName = "order";
 
   logMessage("Placing order", orderType, { fileName });
@@ -67,7 +66,7 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
   const normalizedPair = normalizeOandaSymbol(pair);
   const precision = getPrecision(pair);
 
-  const accountType = getLoginMode(); // ✅ use dynamic mode
+  const accountType = mode;
   const hostname =
     accountType === "live"
       ? "https://api-fxtrade.oanda.com"

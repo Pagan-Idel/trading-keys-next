@@ -3,17 +3,17 @@ import { logMessage } from "../../logger";
 import { OANDA_GRANULARITIES, INTERVAL_TO_GRANULARITY } from "../../constants";
 import type { Candle } from "../../swingLabeler";
 import { normalizePairKeyUnderscore } from "../../shared";
-import { getLoginMode } from "../../loginState";
 
 export const fetchCandles = async (
   symbol: string,
   interval: string,
   count: number = 5000,
   from?: string,
-  to?: string
+  to?: string,
+  mode: 'live' | 'demo' = 'demo'
 ): Promise<Candle[]> => {
   try {
-    const accountType = getLoginMode(); // ✅ dynamic login mode
+    const accountType = mode;
     const hostname =
       accountType === "live"
         ? "https://api-fxtrade.oanda.com"
@@ -59,7 +59,7 @@ export const fetchCandles = async (
     url.searchParams.set("alignmentTimezone", timezone);
     if (from) url.searchParams.set("from", from);
     if (to) url.searchParams.set("to", to);
-    logMessage("🔐 fetchCandles using account type", getLoginMode(), {
+    logMessage("🔐 fetchCandles using account type", accountType, {
       fileName: "fetchCandles",
     });
     logMessage("🔑 Token and Account ID check", {

@@ -26,11 +26,11 @@ const RISK_PERCENT = .25; // Default risk percentage
  * Executes a trade using a predefined strategy signal.
  * Returns trade info to start TradeManager externally if successful.
  */
-export const placeTrade = async (signal: TradeSignal): Promise<TradeStartInfo | null> => {
+
+export const placeTrade = async (signal: TradeSignal, mode: 'live' | 'demo' = 'demo'): Promise<TradeStartInfo | null> => {
   const { pair, action, stopLoss, takeProfit } = signal;
 
   const precision = getPrecision(pair);
-
   const formattedSL = stopLoss.toFixed(precision);
   const formattedTP = takeProfit.toFixed(precision);
 
@@ -43,7 +43,7 @@ export const placeTrade = async (signal: TradeSignal): Promise<TradeStartInfo | 
     orderType: TYPE.MARKET,
     stopLoss: formattedSL,
     takeProfit: formattedTP,
-  });
+  }, mode);
 
   if (!success) {
     logMessage(`❌ Trade failed for ${pair}`, undefined, { fileName: "placeTrade", pair });
@@ -54,7 +54,7 @@ export const placeTrade = async (signal: TradeSignal): Promise<TradeStartInfo | 
 
   let trade;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const tradeInfo = await openNow(pair);
+    const tradeInfo = await openNow(pair, mode);
 
     logMessage(`🔄 Retry #${attempt + 1} — openNow result:`, tradeInfo, {
       fileName: "placeTrade",

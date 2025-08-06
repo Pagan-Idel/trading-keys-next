@@ -48,21 +48,21 @@ export interface AccountResponse {
 }
 
 export const handleOandaLogin = async (
-  pair?: string
+  pair?: string,
+  mode: 'live' | 'demo' = 'demo'
 ): Promise<AccountResponse> => {
-  const accountType = getLoginMode(); // ✅ use dynamic login mode
   const hostname =
-    accountType === 'live'
+    mode === 'live'
       ? 'https://api-fxtrade.oanda.com'
       : 'https://api-fxpractice.oanda.com';
 
   const accountId =
-    accountType === 'live'
+    mode === 'live'
       ? credentials.OANDA_LIVE_ACCOUNT_ID
       : credentials.OANDA_DEMO_ACCOUNT_ID;
 
   const token =
-    accountType === 'live'
+    mode === 'live'
       ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
       : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 

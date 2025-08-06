@@ -215,7 +215,8 @@ export const getQuoteRateSymbol = (quote: string): string => {
 
 export const calculateRisk = async (
   orderType: OrderParameters,
-  pair: string
+  pair: string,
+  mode: 'live' | 'demo' = 'demo'
 ): Promise<RISK | undefined> => {
   const pip = getPipIncrement(pair);
   const precision = getPrecision(pair);
@@ -227,10 +228,10 @@ export const calculateRisk = async (
       throw new Error("❌ Invalid risk % provided.");
     }
 
-    const { account } = await handleOandaLogin();
+    const { account } = await handleOandaLogin(undefined, mode);
     if (!account) throw new Error("❌ Account not loaded");
 
-    const { ask, bid } = (await fetchPriceOnce(pair)) ?? {};
+    const { ask, bid } = (await fetchPriceOnce(pair, mode)) ?? {};
     if (!ask || !bid) throw new Error("❌ No price available in stream");
 
     const entryPrice = orderType.action === ACTION.BUY ? parseFloat(ask) : parseFloat(bid);
@@ -320,9 +321,10 @@ export const calculateRisk = async (
 
 
 export const recentTrade = async (
-  pair?: string
+  pair?: string,
+  mode: 'live' | 'demo' = 'demo'
 ): Promise<Trade | undefined> => {
-  const openTrades = await openNow(pair);
+  const openTrades = await openNow(pair, mode);
   if (!openTrades?.trades?.length) return undefined;
 
   return openTrades.trades.reduce((prev, curr) => {

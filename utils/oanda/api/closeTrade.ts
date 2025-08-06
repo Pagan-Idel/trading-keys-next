@@ -6,7 +6,7 @@ import { ACTION } from "./order";
 import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
 import { recentTrade } from "../../shared";
-import { getLoginMode } from "../../loginState";
+// import { getLoginMode } from "../../loginState";
 
 export interface TradeCloseResponse {
   lastTransactionID?: TransactionID;
@@ -49,9 +49,10 @@ export interface CloseRequestBody {
 export const closeTrade = async (
   orderType: OrderParameters,
   pair?: string,
-  unitsOverride?: number
+  unitsOverride?: number,
+  mode: 'live' | 'demo' = 'demo'
 ): Promise<TradeCloseResponse | boolean> => {
-  const accountType = getLoginMode(); // 👈 use dynamic loginMode
+  const accountType = mode;
   let accountId = '';
   let token = '';
   let hostname = '';

@@ -20,19 +20,18 @@ interface TradeDetailsResponse {
 const JOURNAL_PATH = path.resolve("data", "trade-journal.json");
 
 export const getTradeDetailsById = async (
-  tradeId: string
+  tradeId: string,
+  mode: 'live' | 'demo' = 'demo'
 ): Promise<TradeDetail | null> => {
-  const accountType = getLoginMode(); // ✅ use proper login mode
-
-  const hostname = accountType === "live"
+  const hostname = mode === "live"
     ? "https://api-fxtrade.oanda.com"
     : "https://api-fxpractice.oanda.com";
 
-  const accountId = accountType === "live"
+  const accountId = mode === "live"
     ? credentials.OANDA_LIVE_ACCOUNT_ID
     : credentials.OANDA_DEMO_ACCOUNT_ID;
 
-  const token = accountType === "live"
+  const token = mode === "live"
     ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
     : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 

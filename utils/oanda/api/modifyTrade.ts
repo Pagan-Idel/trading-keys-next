@@ -21,22 +21,21 @@ interface OrderDetails {
 
 export const modifyTrade = async (
   orderType: OrderParameters,
-  pairOrTradeId: string
+  pairOrTradeId: string,
+  mode: 'live' | 'demo' = 'demo'
 ): Promise<boolean> => {
-  const accountType = getLoginMode(); // ✅ dynamic backend mode
-
   const hostname =
-    accountType === "live"
+    mode === "live"
       ? "https://api-fxtrade.oanda.com"
       : "https://api-fxpractice.oanda.com";
 
   const accountId =
-    accountType === "live"
+    mode === "live"
       ? credentials.OANDA_LIVE_ACCOUNT_ID
       : credentials.OANDA_DEMO_ACCOUNT_ID;
 
   const token =
-    accountType === "live"
+    mode === "live"
       ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
       : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
@@ -45,7 +44,7 @@ export const modifyTrade = async (
     return false;
   }
 
-  const openTrades = await openNow(pairOrTradeId);
+  const openTrades = await openNow(pairOrTradeId, mode);
   const trade = openTrades?.trades.find(
     t =>
       t.id === pairOrTradeId ||

@@ -80,7 +80,7 @@ const Account: React.FC<AccountProps> = ({ onLoginSuccess }) => {
     }
 
     if (platform === 'oanda' && accountType !== '') {
-      handleOandaLogin().then((data) => {
+      handleOandaLogin(undefined, accountType as 'live' | 'demo').then((data) => {
         handleLoginResponse(data);
       });
     }

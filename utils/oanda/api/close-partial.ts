@@ -12,7 +12,9 @@ export const closeTradePartial = async (
   unitsToClose: number,
   mode: 'live' | 'demo' = 'demo'
 ): Promise<TradeCloseResponse | ErrorOandaResponse> => {
+  console.log('[closeTradePartial] mode:', mode, 'tradeId:', tradeId);
   const openTrades = await openNow(undefined, mode);
+  console.log('[closeTradePartial] openNow endpoint:', mode === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com');
   if (!openTrades || openTrades.trades.length === 0) {
     return { errorMessage: `No open trades available.` };
   }

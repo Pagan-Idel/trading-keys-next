@@ -51,6 +51,8 @@ export const handleOandaLogin = async (
   pair?: string,
   mode: 'live' | 'demo' = 'demo'
 ): Promise<AccountResponse> => {
+  console.log('[handleOandaLogin] mode:', mode, 'accountId:', mode === 'live' ? credentials.OANDA_LIVE_ACCOUNT_ID : credentials.OANDA_DEMO_ACCOUNT_ID);
+  console.log('[handleOandaLogin] endpoint:', mode === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com');
   const hostname =
     mode === 'live'
       ? 'https://api-fxtrade.oanda.com'

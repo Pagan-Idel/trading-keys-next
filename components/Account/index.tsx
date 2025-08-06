@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { handleOandaLogin } from '../../utils/oanda/api/login';
+
 
 // Dark mode color variables
 const darkBackgroundColor = '#333333';
@@ -80,9 +80,13 @@ const Account: React.FC<AccountProps> = ({ onLoginSuccess }) => {
     }
 
     if (platform === 'oanda' && accountType !== '') {
-      handleOandaLogin(undefined, accountType as 'live' | 'demo').then((data) => {
-        handleLoginResponse(data);
-      });
+      fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pair: undefined, mode: accountType })
+      })
+        .then(res => res.json())
+        .then(data => handleLoginResponse(data));
     }
   };
 

@@ -59,16 +59,7 @@ export const fetchCandles = async (
     url.searchParams.set("alignmentTimezone", timezone);
     if (from) url.searchParams.set("from", from);
     if (to) url.searchParams.set("to", to);
-    logMessage("🔐 fetchCandles using account type", accountType, {
-      fileName: "fetchCandles",
-    });
-    logMessage("🔑 Token and Account ID check", {
-      token: token?.slice(0, 8) + '...', // partial token for safety
-      accountId,
-      url: url.toString(),
-    }, {
-      fileName: "fetchCandles",
-    });
+    // Removed noisy info-level logs for cleaner output
 
     const response = await fetch(url.toString(), {
       headers: {

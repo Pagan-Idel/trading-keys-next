@@ -53,6 +53,8 @@ export interface OrderRequest {
 }
 
 export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 'demo'): Promise<boolean> => {
+  console.log('[order] mode:', mode, 'accountId:', mode === 'live' ? credentials.OANDA_LIVE_ACCOUNT_ID : credentials.OANDA_DEMO_ACCOUNT_ID);
+  console.log('[order] endpoint:', mode === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com');
   const fileName = "order";
 
   logMessage("Placing order", orderType, { fileName });

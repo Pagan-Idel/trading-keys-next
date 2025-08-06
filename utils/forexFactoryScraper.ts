@@ -56,8 +56,7 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
   const expectedDate = localDate.toLocaleDateString('en-CA'); // 'YYYY-MM-DD'
   const url = `${BASE_URL}${urlDateParam}`;
 
-  console.log(`🔗 Building URL for calendar: ${url}`);
-  console.log(`📌 Expected calendar date: ${expectedDate}`);
+  // Removed noisy logs for calendar URL and expected date
 
   const browser = await puppeteer.launch({
     headless: 'new',
@@ -96,7 +95,7 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
     const impactSpan = row.find('.calendar__impact span');
 
     if (!currency || !title || impactSpan.length === 0) {
-      console.log('⚠️ Skipping invalid event row:', { time, currency, title });
+      // Removed noisy log for skipping invalid event row
       return;
     }
 
@@ -111,6 +110,6 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
     });
   });
 
-  console.log(`✅ Parsed ${events.length} events for ${expectedDate}:`);
+  // Removed noisy log for parsed events
   return events;
 };

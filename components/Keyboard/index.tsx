@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
-import { modifyTrade } from '../../utils/oanda/api/modifyTrade';
-import { ACTION, TYPE, order } from '../../utils/oanda/api/order';
-import { closeTrade } from '../../utils/oanda/api/closeTrade';
+import { ACTION, TYPE } from '../../utils/oanda/api/order';
 import { forexPairs } from '../../utils/constants'
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
 const functionNames = [
@@ -164,11 +162,38 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     };
   };
 
+
+  // --- API CALL HELPERS ---
+  const callOrderApi = async (orderType: any, mode: string) => {
+    const res = await fetch('/api/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderType, mode })
+    });
+    return res.json();
+  };
+  const callCloseTradeApi = async (orderType: any, pair: string, unitsOverride: any, mode: string) => {
+    const res = await fetch('/api/closeTrade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderType, pair, unitsOverride, mode })
+    });
+    return res.json();
+  };
+  const callModifyTradeApi = async (orderType: any, pairOrTradeId: string, mode: string) => {
+    const res = await fetch('/api/modifyTrade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderType, pairOrTradeId, mode })
+    });
+    return res.json();
+  };
+
   const rateLimitedBuyOanda = createRateLimitedFunction(() =>
-    order({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.BUY, pair })
+    callOrderApi({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.BUY, pair }, accountType)
   );
   const rateLimitedSellOanda = createRateLimitedFunction(() =>
-    order({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.SELL, pair })
+    callOrderApi({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.SELL, pair }, accountType)
   );
 
   const handleButtonClick = (functionName: string) => {
@@ -176,19 +201,18 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     switch (platform) {
       case 'oanda':
         switch (functionName) {
-          case '0 - CLOSE': closeTrade({ action: ACTION.CLOSE, pair }, pair, undefined, accountType as 'live' | 'demo'); break;
+          case '0 - CLOSE': callCloseTradeApi({ action: ACTION.CLOSE, pair }, pair, undefined, accountType); break;
           case '1 - BUY': rateLimitedBuyOanda(); break;
           case '2 - SELL': rateLimitedSellOanda(); break;
-          case '3 - SL AT ENTRY': modifyTrade({ action: ACTION.SLatEntry, pair }, pair, accountType as 'live' | 'demo'); break;
-          case '4 - SL DOWN': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.DOWN, pair }, pair, accountType as 'live' | 'demo'); break;
-          case '5 - TP DOWN': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.DOWN, pair }, pair, accountType as 'live' | 'demo'); break;
-          case '6 - 25% CLOSE': closeTrade({ action: ACTION.PartialClose25, pair }, pair, undefined, accountType as 'live' | 'demo'); break;
-          case '7 - SL UP': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.UP, pair }, pair, accountType as 'live' | 'demo'); break;
-          case '8 - TP UP': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.UP, pair }, pair, accountType as 'live' | 'demo'); break;
-          case '9 - 50% CLOSE': closeTrade({ action: ACTION.PartialClose50, pair }, pair, undefined, accountType as 'live' | 'demo'); break;
+          case '3 - SL AT ENTRY': callModifyTradeApi({ action: ACTION.SLatEntry, pair }, pair, accountType); break;
+          case '4 - SL DOWN': callModifyTradeApi({ action: ACTION.MoveSL, action2: ACTION.DOWN, pair }, pair, accountType); break;
+          case '5 - TP DOWN': callModifyTradeApi({ action: ACTION.MoveTP, action2: ACTION.DOWN, pair }, pair, accountType); break;
+          case '6 - 25% CLOSE': callCloseTradeApi({ action: ACTION.PartialClose25, pair }, pair, undefined, accountType); break;
+          case '7 - SL UP': callModifyTradeApi({ action: ACTION.MoveSL, action2: ACTION.UP, pair }, pair, accountType); break;
+          case '8 - TP UP': callModifyTradeApi({ action: ACTION.MoveTP, action2: ACTION.UP, pair }, pair, accountType); break;
+          case '9 - 50% CLOSE': callCloseTradeApi({ action: ACTION.PartialClose50, pair }, pair, undefined, accountType); break;
         }
         break;
-
     }
   };
 

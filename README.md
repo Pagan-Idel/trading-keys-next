@@ -25,14 +25,23 @@ Navigate to the project directory and install the required dependencies:
 
 ```bash
 cd trading-keys-next
+
+## Installation & Setup (All Platforms)
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/your-username/trading-keys-next.git
+cd trading-keys-next
+```
+
+### 2. Install Dependencies
+```bash
 npm install
 ```
-Set up environment variables:
 
-The app requires API credentials for both Match-Trader and Oanda. These should be provided in a credentials.json file located at the root of the project.
 
-Example credentials.json:
-
+### 3. Set Up Credentials
+Create a `credentials.json` file in the project root with your API credentials:
 ```json
 {
   "MTR_DEMO_EMAIL": "your-demo-email",
@@ -45,44 +54,57 @@ Example credentials.json:
   "OANDA_DEMO_ACCOUNT_TOKEN": "your-demo-account-token"
 }
 ```
-Run the application:
 
-You can run the app in development mode with the following command:
-
+### 5. Run the Application
 ```bash
 npm run dev
 ```
-Start Redis (If Applicable):
 
-If Redis is required for session or trade management, make sure to start Redis using the appropriate command for your environment.
+---
 
-On Ubuntu:
+## Running as a Background/Minimized Service (Windows)
+
+1. **Use the Provided Batch and VBScript:**
+   - `trading-keys.bat` starts the app.
+   - `run_service_minimized.vbs` launches the batch file completely hidden (no window or taskbar icon).
+
+2. **Create a Desktop Shortcut:**
+   - Right-click `run_service_minimized.vbs` → Send to → Desktop (create shortcut).
+   - Optionally, rename the shortcut (e.g., "Trading Keys Service").
+   - Double-click the shortcut to start the app in the background.
+
+---
+
+## Running as a Background Service (macOS/Linux)
+
+**macOS/Linux:**
+You can use `nohup` or `screen` to run the app in the background:
 
 ```bash
-npm run redis-ubuntu
+nohup npm run dev &
+# or
+screen -dmS trading-keys npm run dev
 ```
 
-On Windows:
+---
 
-```bash
-npm run redis-windows
-```
+## Stopping the Service
 
-Usage
-Match-Trader Integration
-The app provides full integration with Match-Trader for executing and managing trades. The app will automatically fetch your account data, including positions, orders, and balances, and allows you to interact with the platform seamlessly.
+**Windows:**
+ - Open Task Manager, find `node.exe` or `trading-keys.bat`, and end the process.
 
-Oanda API
-The Oanda integration allows for automated risk management, ensuring that trades are executed with predefined stop-loss and take-profit levels. This helps to minimize risk while maximizing potential returns.
+**macOS/Linux:**
+ - Use `ps aux | grep node` to find the process and `kill <pid>` to stop it.
 
-Risk Management
-Risk management features include:
+---
 
-Stop-Loss: Automatically set based on your risk tolerance.
-Take-Profit: Configurable to lock in gains at a predetermined level.
-Leverage Management: The app calculates risk according to your leverage settings.
-Currently, only the EUR/USD currency pair is supported. Future updates may include support for additional pairs.
 
+## Notes
+- Make sure your credentials are correct in `credentials.json`.
+- For production, consider using a process manager like PM2 (Node.js) or systemd (Linux) for reliability.
+- Redis is **not required** for this project. All Redis-related code and setup have been removed.
+
+---
 Personal Use Disclaimer
 This application is intended strictly for personal use only. Unauthorized copying, sharing, or distribution of this codebase is prohibited. By using this application, you agree to the following conditions:
 

@@ -1,16 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
-import { modifyTrade } from '../../utils/oanda/api/modifyTrade.js';
-import { ACTION, TYPE, order} from '../../utils/oanda/api/order.js';
-import { closeTrade } from '../../utils/oanda/api/closeTrade.js';
-import { openPostionMT } from '../../utils/match-trader/api/open.js';
-import { closePositionMT } from '../../utils/match-trader/api/close-position.js';
-import { closePartiallyMT } from '../../utils/match-trader/api/close-partially.js';
-import { moveTPSLMT } from '../../utils/match-trader/api/move-TPSL.js';
-import { stopAtEntryMT } from '../../utils/match-trader/api/stop-at-entry.js';
-import { logToFileAsync } from '../../utils/logger.js';
-import { forexPairs } from '../../utils/shared.js';
-
+import { modifyTrade } from '../../utils/oanda/api/modifyTrade';
+import { ACTION, TYPE, order} from '../../utils/oanda/api/order';
+import { closeTrade } from '../../utils/oanda/api/closeTrade';
+import { forexPairs } from '../../utils/constants'
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
 const functionNames = [
   '7 - SL UP', '8 - TP UP', '9 - 50% CLOSE',
@@ -20,6 +13,10 @@ const functionNames = [
 
 interface KeyboardProps {
   platform: string;
+  pair: string;
+  setPair: (pair: string) => void;
+  accountType: string;
+  setAccountType: (type: string) => void;
 }
 
 const Button = styled.button`
@@ -86,6 +83,7 @@ const PipStopLoss = styled.input.attrs({ type: 'range', min: 1, max: 20, step: 1
   width: 100%;
 `;
 
+
 const Dropdown = styled.select`
   margin: 10px 0;
   padding: 6px;
@@ -94,13 +92,36 @@ const Dropdown = styled.select`
   color: white;
   border: none;
   border-radius: 4px;
+  min-width: 160px;
+  height: 38px;
 `;
 
-const Keyboard = ({ platform }: KeyboardProps) => {
+const SwitchButton = styled.button`
+  margin-left: 10px;
+  padding: 6px;
+  font-size: 16px;
+  background-color: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  min-width: 160px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  &:hover {
+    background-color: #2980b9;
+  }
+`;
+
+
+
+const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: KeyboardProps) => {
   const [riskPercentage, setRiskPercentage] = useState('1.0');
   const [pipStopLoss, setPipStopLoss] = useState<number>(6);
   const [buttonPressed, setButtonPressed] = useState<string | null>(null);
-  const [pair, setPair] = useState<string>('EURUSD');
   const lastExecutionTimeRef = useRef<number>(0);
 
   useEffect(() => {
@@ -138,7 +159,7 @@ const Keyboard = ({ platform }: KeyboardProps) => {
         lastExecutionTimeRef.current = currentTime;
         callback();
       } else {
-        logToFileAsync('Function is rate-limited. Try again later.');
+        console.log('Function is rate-limited. Try again later.');
       }
     };
   };
@@ -149,45 +170,25 @@ const Keyboard = ({ platform }: KeyboardProps) => {
   const rateLimitedSellOanda = createRateLimitedFunction(() =>
     order({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.SELL, pair })
   );
-  const rateLimitedBuyMT = createRateLimitedFunction(() =>
-    openPostionMT(Number(riskPercentage), ACTION.BUY, pair)
-  );
-  const rateLimitedSellMT = createRateLimitedFunction(() =>
-    openPostionMT(Number(riskPercentage), ACTION.SELL, pair)
-  );
 
   const handleButtonClick = (functionName: string) => {
     setButtonPressed(functionName);
     switch (platform) {
       case 'oanda':
         switch (functionName) {
-          case '0 - CLOSE': closeTrade({ action: ACTION.CLOSE, pair }); break;
+          case '0 - CLOSE': closeTrade({ action: ACTION.CLOSE, pair }, pair); break;
           case '1 - BUY': rateLimitedBuyOanda(); break;
           case '2 - SELL': rateLimitedSellOanda(); break;
-          case '3 - SL AT ENTRY': modifyTrade({ action: ACTION.SLatEntry, pair }); break;
-          case '4 - SL DOWN': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.DOWN, pair }); break;
-          case '5 - TP DOWN': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.DOWN, pair }); break;
-          case '6 - 25% CLOSE': closeTrade({ action: ACTION.PartialClose25, pair }); break;
-          case '7 - SL UP': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.UP, pair }); break;
-          case '8 - TP UP': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.UP, pair }); break;
-          case '9 - 50% CLOSE': closeTrade({ action: ACTION.PartialClose50, pair }); break;
+          case '3 - SL AT ENTRY': modifyTrade({ action: ACTION.SLatEntry, pair }, pair); break;
+          case '4 - SL DOWN': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.DOWN, pair }, pair); break;
+          case '5 - TP DOWN': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.DOWN, pair }, pair); break;
+          case '6 - 25% CLOSE': closeTrade({ action: ACTION.PartialClose25, pair }, pair); break;
+          case '7 - SL UP': modifyTrade({ action: ACTION.MoveSL, action2: ACTION.UP, pair }, pair); break;
+          case '8 - TP UP': modifyTrade({ action: ACTION.MoveTP, action2: ACTION.UP, pair }, pair); break;
+          case '9 - 50% CLOSE': closeTrade({ action: ACTION.PartialClose50, pair }, pair); break;
         }
         break;
 
-      case 'match-trader':
-        switch (functionName) {
-          case '0 - CLOSE': closePositionMT(pair); break;
-          case '1 - BUY': rateLimitedBuyMT(); break;
-          case '2 - SELL': rateLimitedSellMT(); break;
-          case '3 - SL AT ENTRY': stopAtEntryMT(pair); break;
-          case '4 - SL DOWN': moveTPSLMT(ACTION.MoveSL, ACTION.DOWN, pair); break;
-          case '5 - TP DOWN': moveTPSLMT(ACTION.MoveTP, ACTION.DOWN, pair); break;
-          case '6 - 25% CLOSE': closePartiallyMT(0.25, pair); break;
-          case '7 - SL UP': moveTPSLMT(ACTION.MoveSL, ACTION.UP, pair); break;
-          case '8 - TP UP': moveTPSLMT(ACTION.MoveTP, ACTION.UP, pair); break;
-          case '9 - 50% CLOSE': closePartiallyMT(0.5, pair); break;
-        }
-        break;
     }
   };
 
@@ -195,12 +196,28 @@ const Keyboard = ({ platform }: KeyboardProps) => {
     <>
       <div style={{ borderTop: '1px solid #ccc', margin: '10px 0' }} />
 
-      <h2 style={{ color: 'white' }}>Forex Pair</h2>
-      <Dropdown value={pair} onChange={(e) => setPair(e.target.value)}>
-        {forexPairs.map((p) => (
-          <option key={p} value={p}>{p}</option>
-        ))}
-      </Dropdown>
+
+      <h2 style={{ color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>
+        OANDA Keyboard ({accountType.toUpperCase()})
+      </h2>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <Dropdown value={pair} onChange={(e) => setPair(e.target.value)}>
+          {(Array.isArray(forexPairs) ? forexPairs : []).map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </Dropdown>
+        <SwitchButton
+          onClick={() => {
+            const newType = accountType === 'live' ? 'demo' : 'live';
+            setAccountType(newType);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('accountType', newType);
+            }
+          }}
+        >
+          Switch to {accountType === 'live' ? 'Demo' : 'Live'}
+        </SwitchButton>
+      </div>
 
       <h2 style={{ color: 'white' }}>Risk Percent</h2>
       <NumberPadContainer>

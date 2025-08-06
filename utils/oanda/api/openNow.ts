@@ -1,14 +1,9 @@
-import { logMessage  } from "../../logger.js";
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { logMessage } from "../../logger";
+import credentials from "../../../credentials.json" with { type: "json"};
+import { loginMode } from '../../../utils/loginMode';
+import { log } from "console";
+import { normalizePairKeyUnderscore } from "../../shared";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
-const credentials = JSON.parse(credentialsRaw);
-
-import { loginMode } from '../../../runner/startRunner.js';
- 
 export interface Price {
   priceValue: string;
 }
@@ -59,6 +54,7 @@ const getLocalStorageItem = (key: string): string | null => {
 export const openNow = async (
   pair?: string
 ): Promise<OpenTrade | undefined> => {
+  // logMessage("🔍 openNow.ts file loaded", undefined, { fileName: "openNow", pair });
   const accountType = getLocalStorageItem("accountType") || loginMode;
   const hostname =
     accountType === "live"
@@ -76,7 +72,7 @@ export const openNow = async (
       : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
   if (!accountId || !token || !hostname) {
-    logMessage ("❌ Token or AccountId is not set.");
+    logMessage("❌ Token or AccountId is not set.", undefined, { fileName: "openNow", pair });
     return undefined;
   }
 
@@ -91,17 +87,30 @@ export const openNow = async (
     });
 
     if (!response.ok) {
-      console.error(`❌ Error: ${response.status} - ${response.statusText}`);
+      logMessage(`❌ Error fetching open trades: ${response.status} - ${response.statusText}`, undefined, { fileName: "openNow", pair });
       return undefined;
     }
 
     const responseData: OpenTrade = await response.json();
 
-    // ✅ If pair specified, filter the trades array
+    // ✅ If input is specified, determine if it's a tradeId or pair
     if (pair) {
-      const filteredTrades = responseData.trades.filter(
-        (t) => t.instrument === pair
+      
+      const isTradeId = /^\d+$/.test(pair); // simple check: all digits = trade ID
+      const filteredTrades = responseData.trades.filter((t) =>
+        //@ts-ignore
+        isTradeId ? t.id === String(pair) : normalizePairKeyUnderscore(t.instrument) === normalizePairKeyUnderscore(pair)
       );
+
+      const matchLabel = isTradeId ? `for tradeId ${pair}` : `for ${pair}`;
+
+      // logMessage(
+      //   `🔍 Found ${filteredTrades.length} open trades ${matchLabel}` +
+      //   (filteredTrades.length > 0 ? ` - latest tradeId: ${filteredTrades[0].id}` : ''),
+      //   undefined,
+      //   { fileName: "openNow", pair }
+      // );
+
       return {
         lastTransactionID: responseData.lastTransactionID,
         trades: filteredTrades,
@@ -110,7 +119,7 @@ export const openNow = async (
 
     return responseData;
   } catch (error) {
-    console.error("❌ Error fetching open trades:", error);
+    logMessage("❌ Error fetching open trades", undefined, { fileName: "openNow", pair });
     return undefined;
   }
 };

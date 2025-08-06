@@ -1,13 +1,10 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "lib": [
-      "DOM",
-      "ESNext"
-    ],
-    "module": "ESNext",
-    "moduleResolution": "Node",
-    "jsx": "preserve", // Ensures compatibility with React 17+
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "esnext",
+    "moduleResolution": "node",
+    "jsx": "preserve",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -16,7 +13,14 @@
     "noEmit": true,
     "incremental": true,
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "types": ["node", "react", "next"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"],
+      "*": ["*", "*.ts", "*.tsx"]
+    },
+    "allowSyntheticDefaultImports": true
   },
   "include": [
     "next-env.d.ts",
@@ -24,6 +28,10 @@
     "**/*.tsx"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    ".next",
+    "dist",
+    "**/*.test.ts",
+    "**/*.spec.ts"
   ]
 }

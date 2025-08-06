@@ -1,60 +1,55 @@
 // src/utils/oanda/api/close-partial.ts
-import { logMessage } from "../../logger.js";
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
-const credentials = JSON.parse(credentialsRaw);
-
-import { loginMode } from "../../../runner/startRunner.js";
-import { openNow } from "./openNow.js";
-import { closeTrade, TradeCloseResponse } from "./closeTrade.js";
-import { OrderParameters } from "../../shared.js";
-import { ACTION } from "./order.js";
+import { logMessage } from "../../logger";
+import { openNow } from "./openNow";
+import { closeTrade } from "./closeTrade";
+import type { TradeCloseResponse } from "./closeTrade";
 
 export interface ErrorOandaResponse {
   errorMessage: string;
 }
 
 export const closeTradePartial = async (
-  partialAmount: number,
-  pair: string
+  tradeId: string,
+  unitsToClose: number
 ): Promise<TradeCloseResponse | ErrorOandaResponse> => {
-  if (typeof window === "undefined") {
-    return { errorMessage: "localStorage is not available in the current environment." };
-  }
-
-  const openTrades = await openNow(pair);
+  const openTrades = await openNow();
   if (!openTrades || openTrades.trades.length === 0) {
-    return { errorMessage: `No open trade found for ${pair}` };
+    return { errorMessage: `No open trades available.` };
   }
 
-  const trade = openTrades.trades[0]; // Assuming one open trade per pair
-  const unitsStr = trade.currentUnits ?? trade.initialUnits;
-  if (!unitsStr) {
-    return { errorMessage: "Trade has no units defined." };
+  const trade = openTrades.trades.find(t => t.id === tradeId || t.clientExtensions?.id === tradeId);
+  if (!trade) {
+    return { errorMessage: `No trade found with ID ${tradeId}` };
   }
 
-  const direction = parseFloat(unitsStr) > 0 ? "BUY" : "SELL";
-  const absUnits = Math.abs(parseFloat(unitsStr));
-  const partialUnits = Math.floor(absUnits * partialAmount);
-
-  if (partialUnits <= 0) {
-    return { errorMessage: "Calculated partial units to close is zero." };
+  const absUnits = Math.abs(parseFloat(trade.currentUnits || trade.initialUnits || "0"));
+  if (absUnits <= 0) {
+    return { errorMessage: "Trade has zero units." };
   }
 
-  const action: OrderParameters = {
-    action: partialAmount >= 0.5 ? ACTION.PartialClose50 : ACTION.PartialClose25,
-    pair
-  };
+  const direction = parseFloat(trade.currentUnits || "0") > 0 ? "BUY" : "SELL";
+  const pair = trade.instrument;
+  if (!pair) {
+    return { errorMessage: "Trade instrument (pair) is undefined." };
+  }
 
-  const result = await closeTrade(action, action.pair);
+  if (unitsToClose <= 0 || unitsToClose > absUnits) {
+    return { errorMessage: `Invalid unitsToClose: ${unitsToClose}` };
+  }
+
+  const result = await closeTrade({ action: "PartialClose", pair }, pair, unitsToClose);
   if (!result || typeof result === "boolean") {
+    logMessage(`❌ Failed to close partial trade for ${pair} (Trade ID: ${tradeId})`, undefined, {
+      level: "error",
+      fileName: "close-partial"
+    });
     return { errorMessage: "Failed to close partial trade." };
   }
 
-  logMessage(`✅ Partial close (${partialAmount * 100}%) successful for ${pair}`);
+  logMessage(`✅ Partial close of ${unitsToClose} units successful for ${pair} (Trade ID: ${tradeId})`, result, {
+    level: "info",
+    fileName: "close-partial"
+  });
+
   return result;
 };

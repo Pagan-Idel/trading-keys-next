@@ -1,16 +1,11 @@
-import { ACTION, order, Trade } from ".";
-import { OrderParameters } from "../../shared.js";
-import { logMessage  } from "../../logger.js";
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
-const credentials = JSON.parse(credentialsRaw);
-
-import { recentTrade } from "../../shared.js";
-import { loginMode } from '../../../runner/startRunner.js'
+// src/utils/oanda/api/closeTrade.ts
+import type { Trade } from "./openNow";
+import { ACTION } from "./order";
+import type { OrderParameters } from "../../shared";
+import { logMessage } from "../../logger";
+import credentials from "../../../credentials.json" with { type: "json" };
+import { recentTrade } from "../../shared";
+import { loginMode } from '../../../utils/loginMode';
 
 export interface TradeCloseResponse {
   lastTransactionID?: TransactionID;
@@ -21,46 +16,20 @@ export interface TradeCloseResponse {
 }
 
 export interface MarketOrderTransaction {
-  accountID?: string;
-  batchID?: string;
-  id?: string;
-  instrument?: string;
-  positionFill?: string;
-  reason?: string;
-  time?: string;
-  timeInForce?: string;
   tradeClose?: {
-    clientTradeID?: string;
     tradeID?: string;
     units?: string;
   };
-  type?: string;
-  units?: string;
-  userID?: string;
+  [key: string]: any;
 }
 
 export interface OrderFillTransaction {
-  accountBalance?: string;
-  accountID?: string;
-  batchID?: string;
-  financing?: string;
-  id?: string;
-  instrument?: string;
-  orderID?: string;
-  pl?: string;
-  price?: string;
-  reason?: string;
-  time?: string;
   tradeReduced?: {
-    clientTradeID?: string;
-    financing?: string;
-    realizedPL?: string;
     tradeID?: string;
     units?: string;
+    realizedPL?: string;
   };
-  type?: string;
-  units?: string;
-  userID?: string;
+  [key: string]: any;
 }
 
 export interface OrderCancelTransaction {
@@ -75,52 +44,62 @@ export interface CloseRequestBody {
   units?: string;
 }
 
+// 🆕 unitsOverride = new optional param
 export const closeTrade = async (
   orderType: OrderParameters,
-  pair?: string
+  pair?: string,
+  unitsOverride?: number
 ): Promise<TradeCloseResponse | boolean> => {
   let accountType = '';
   let accountId = '';
   let token = '';
   let hostname = '';
 
-  if (typeof window !== 'undefined') {
-    accountType = localStorage.getItem('accountType') || loginMode; 
-    hostname = accountType === 'live'
-      ? 'https://api-fxtrade.oanda.com'
-      : 'https://api-fxpractice.oanda.com';
-    accountId = accountType === 'live'
-      ? credentials.OANDA_LIVE_ACCOUNT_ID
-      : credentials.OANDA_DEMO_ACCOUNT_ID;
-    token = accountType === 'live'
-      ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
-      : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
+  if (typeof window !== "undefined") {
+    accountType = localStorage.getItem("accountType") || loginMode;
+  } else {
+    accountType = loginMode;
   }
 
+  hostname = accountType === "live"
+    ? "https://api-fxtrade.oanda.com"
+    : "https://api-fxpractice.oanda.com";
+
+  accountId = accountType === "live"
+    ? credentials.OANDA_LIVE_ACCOUNT_ID
+    : credentials.OANDA_DEMO_ACCOUNT_ID;
+
+  token = accountType === "live"
+    ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
+    : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
+
   if (!accountId || !token) {
-    logMessage ("❌ Token or AccountId is not set.");
+    logMessage("❌ Token or AccountId is not set.");
     return false;
   }
 
   const mostRecentTrade: Trade | undefined = await recentTrade(pair);
   if (!mostRecentTrade) {
-    logMessage (`⚠️ No recent trade found${pair ? ` for ${pair}` : ""}.`);
+    logMessage(`⚠️ No recent trade found${pair ? ` for ${pair}` : ""}.`);
     return false;
   }
 
-  const partialClose =
-    orderType.action === ACTION.PartialClose25 ? 0.24999999999 :
-    orderType.action === ACTION.PartialClose50 ? 0.4999999999 :
-    1;
+  let requestBody: CloseRequestBody = {};
 
-  const initialUnitsString = mostRecentTrade.initialUnits!;
-  const initialUnitsWithoutNegative = initialUnitsString.replace('-', '');
-  const partialUnits = (parseFloat(initialUnitsWithoutNegative) * partialClose).toFixed(0);
+  // ✅ Use exact units if provided
+  if (unitsOverride !== undefined) {
+    requestBody.units = Math.floor(unitsOverride).toString();
+  } else if (
+    orderType.action === ACTION.PartialClose25 ||
+    orderType.action === ACTION.PartialClose50
+  ) {
+    const initialUnits = Math.abs(parseFloat(mostRecentTrade.initialUnits ?? "0"));
+    const partialClose =
+      orderType.action === ACTION.PartialClose25 ? 0.25 :
+      orderType.action === ACTION.PartialClose50 ? 0.5 : 1;
 
-  const requestBody: CloseRequestBody =
-    orderType.action === ACTION.PartialClose25 || orderType.action === ACTION.PartialClose50
-      ? { units: partialUnits }
-      : {};
+    requestBody.units = Math.floor(initialUnits * partialClose).toString();
+  }
 
   const api = `${hostname}/v3/accounts/${accountId}/trades/${mostRecentTrade.id}/close`;
 
@@ -137,15 +116,15 @@ export const closeTrade = async (
     const responseData: TradeCloseResponse = await response.json();
 
     if (!response.ok) {
-      logMessage (`❌ HTTP error! Status: ${response.status}`);
+      logMessage(`❌ HTTP error! Status: ${response.status}`);
       return false;
     }
 
-    logMessage (`✅ Trade closed${pair ? ` for ${pair}` : ''}`, responseData);
+    logMessage(`✅ Trade closed${pair ? ` for ${pair}` : ''}`, responseData);
     return responseData;
 
   } catch (error) {
-    logMessage (`❌ Exception closing trade${pair ? ` for ${pair}` : ''}:`, error);
+    logMessage(`❌ Exception closing trade${pair ? ` for ${pair}` : ''}:`, error);
     return false;
   }
 };

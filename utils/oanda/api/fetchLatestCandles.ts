@@ -1,16 +1,12 @@
 import { logMessage } from "../../logger";
-import { OANDA_GRANULARITIES, INTERVAL_TO_GRANULARITY } from "../../constants";
 import credentials from "../../../credentials.json" with { type: "json" };
 import type { Candle } from "../../swingLabeler";
 import { normalizePairKeyUnderscore } from "../../shared";
 import { loginMode } from "../../../utils/loginMode";
 
-export const fetchCandles = async (
+export const fetchLatestCandles = async (
   symbol: string,
-  interval: string,
-  count: number = 5000,
-  from?: string,
-  to?: string
+  interval: string
 ): Promise<Candle[]> => {
   try {
     let accountType = '';
@@ -42,38 +38,22 @@ export const fetchCandles = async (
     if (!accountId || !hostname || !token) {
       logMessage("❌ Missing OANDA credentials or hostname.", undefined, {
         level: "error",
-        fileName: "fetchCandles",
+        fileName: "fetchLatestCandles",
       });
       throw new Error("❌ Missing OANDA credentials or hostname.");
     }
 
     const instrument = normalizePairKeyUnderscore(symbol);
-    // Map UI/logic interval to OANDA granularity
-    const granularity = INTERVAL_TO_GRANULARITY[interval] || interval.toUpperCase();
-    if (!OANDA_GRANULARITIES.includes(granularity)) {
-      logMessage("❌ Invalid granularity value", { granularity, interval }, {
-        level: "error",
-        fileName: "fetchCandles"
-      });
-      throw new Error(`Invalid granularity: ${granularity}`);
-    }
+    const granularity = interval.toUpperCase();
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
 
-    const url = new URL(`${hostname}/v3/instruments/${instrument}/candles`);
-    url.searchParams.set("granularity", granularity);
-    if (!from && !to) {
-      url.searchParams.set("count", count.toString());
-    }
-    url.searchParams.set("dailyAlignment", "17");
+    const url = new URL(`${hostname}/v3/accounts/${accountId}/candles/latest`);
+
+    // ✅ Correct candleSpecification format: InstrumentName:Granularity:PriceComponent
+    const spec = `${instrument}:${granularity}:BM`;
+    url.searchParams.set("candleSpecifications", spec);
     url.searchParams.set("alignmentTimezone", timezone);
-
-    if (from) url.searchParams.set("from", from);
-    if (to) url.searchParams.set("to", to);
-
-    // logMessage(`📡 Requesting candles from OANDA: ${url.toString()}`, undefined, {
-    //   level: "debug",
-    //   fileName: "fetchCandles"
-    // });
+    url.searchParams.set("dailyAlignment", "17");
 
     const response = await fetch(url.toString(), {
       headers: {
@@ -84,16 +64,18 @@ export const fetchCandles = async (
 
     if (!response.ok) {
       const errorText = await response.text();
-      logMessage("❌ Failed to fetch candles", errorText, {
+      logMessage("❌ Failed to fetch latest candles", errorText, {
         level: "error",
-        fileName: "fetchCandles"
+        fileName: "fetchLatestCandles"
       });
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
 
-    const candles: Candle[] = data.candles
+    const rawCandles = data.latestCandles?.[0]?.candles ?? [];
+
+    const candles: Candle[] = rawCandles
       .filter((c: any) => c.complete && c.mid)
       .map((c: any, i: number) => ({
         time: c.time,
@@ -104,16 +86,11 @@ export const fetchCandles = async (
         close: parseFloat(c.mid.c),
       }));
 
-    // logMessage(`🕯️ Candle data:\n${JSON.stringify(candles, null, 2)}`, undefined, {
-    //   level: "debug",
-    //   fileName: "fetchCandles"
-    // });
-
     return candles;
   } catch (error) {
-    logMessage("🚫 fetchCandles failed:", (error as Error).message, {
+    logMessage("🚫 fetchLatestCandles failed:", (error as Error).message, {
       level: "error",
-      fileName: "fetchCandles"
+      fileName: "fetchLatestCandles"
     });
     throw error;
   }

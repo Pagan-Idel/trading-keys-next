@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import redisClient from '../../redisClient.js';
+import redisClient from '../../redisClient';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {

@@ -1,49 +1,46 @@
 // src/utils/oanda/api/order.ts
 
-import { OrderParameters } from "../../shared.js";
-import { logMessage  } from "../../logger.js";
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
+// src/utils/oanda/api/order.ts
+import type { OrderParameters } from "../../shared";
+import { logMessage } from "../../logger";
+import credentials from "../../../credentials.json" with { type: "json" };
+import { type RISK, calculateRisk, getPrecision, normalizeOandaSymbol } from "../../shared";
+import { loginMode } from "../../../utils/loginMode";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
-const credentials = JSON.parse(credentialsRaw);
+export const TYPE = {
+  MARKET: 'MARKET',
+  LIMIT: 'LIMIT',
+  STOP: 'STOP',
+  MARKET_IF_TOUCHED: 'MARKET_IF_TOUCHED',
+  TAKE_PROFIT: 'TAKE_PROFIT',
+  STOP_LOSS: 'STOP_LOSS',
+  GUARANTEED_STOP_LOSS: 'GUARANTEED_STOP_LOSS',
+  TRAILING_STOP_LOSS: 'TRAILING_STOP_LOSS',
+  FIXED_PRICE: 'FIXED_PRICE'
+} as const;
 
-import { RISK, calculalateRisk, getPrecision, normalizeOandaSymbol } from "../../shared.js";
-import { loginMode } from '../../../runner/startRunner.js';
+export const ACTION = {
+  SELL: 'SELL',
+  BUY: 'BUY',
+  SLatEntry: 'SLatEntry',
+  MoveSL: 'MoveSL',
+  MoveTP: 'MoveTP',
+  PartialClose50: 'PartialClose50',
+  PartialClose25: 'PartialClose25',
+  PartialClose: 'PartialClose',
+  CLOSE: 'Close',
+  UP: 'Up',
+  DOWN: 'Down'
+} as const;
 
-export enum TYPE {
-  MARKET = 'MARKET',
-  LIMIT = 'LIMIT',
-  STOP = 'STOP',
-  MARKET_IF_TOUCHED = 'MARKET_IF_TOUCHED',
-  TAKE_PROFIT = 'TAKE_PROFIT',
-  STOP_LOSS = 'STOP_LOSS',
-  GUARANTEED_STOP_LOSS = 'GUARANTEED_STOP_LOSS',
-  TRAILING_STOP_LOSS = 'TRAILING_STOP_LOSS',
-  FIXED_PRICE = 'FIXED_PRICE'
-}
-
-export enum ACTION {
-  SELL = 'SELL',
-  BUY = 'BUY',
-  SLatEntry = 'SLatEntry',
-  MoveSL = 'MoveSL',
-  MoveTP = 'MoveTP',
-  PartialClose50 = 'PartialClose50',
-  PartialClose25 = 'PartialClose25',
-  CLOSE = 'Close',
-  UP = 'Up',
-  DOWN = 'Down'
-}
+export type ACTION = typeof ACTION[keyof typeof ACTION];
 
 export interface ActionOnFill {
   price: string;
 }
 
 export interface MarketOrderRequest {
-  type?: TYPE;
+  type?: keyof typeof TYPE;
   instrument?: string;
   units?: string;
   price?: string;
@@ -65,9 +62,13 @@ const getLocalStorageItem = (key: string): string | null => {
 };
 
 export const order = async (orderType: OrderParameters): Promise<boolean> => {
+  const fileName = "order";
+
+  logMessage("Placing order", orderType, { fileName });
+
   const pair = orderType.pair;
   if (!pair) {
-    logMessage ("❌ Pair is not specified in orderType.");
+    logMessage("❌ Pair is not specified in orderType", orderType, { level: "error", fileName });
     return false;
   }
 
@@ -91,7 +92,7 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
       : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
   if (!accountId || !hostname || !token) {
-    logMessage ("❌ Token or AccountId is not set.");
+    logMessage("❌ Missing accountId, token, or hostname", { accountType, accountId, token, hostname }, { level: "error", fileName });
     return false;
   }
 
@@ -100,29 +101,39 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
   let takeProfit = orderType.takeProfit;
 
   if (!stopLoss || !takeProfit) {
-    const riskData: RISK | undefined = await calculalateRisk(orderType, pair);
+    logMessage("No SL or TP passed, calculating full risk", undefined, { level: "debug", fileName });
+    const riskData: RISK | undefined = await calculateRisk(orderType, pair);
+    logMessage("Risk data from full calc", riskData, { level: "debug", fileName });
+
     if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
-      logMessage ("❌ Error Calculating Risk. No data found");
+      logMessage("❌ Error Calculating Risk — incomplete data", riskData, { level: "error", fileName });
       return false;
     }
+
     units = riskData.units;
     stopLoss = stopLoss ?? riskData.stopLoss;
     takeProfit = takeProfit ?? riskData.takeProfit;
   } else {
-    const conservative: OrderParameters = { ...orderType, risk: 0.25 };
-    const riskData = await calculalateRisk(conservative, pair);
+    logMessage("SL and TP passed manually — calculating units", { stopLoss, takeProfit }, { level: "debug", fileName });
+    const riskData = await calculateRisk(orderType, pair);
+    logMessage("Risk data with user SL/TP", riskData, { level: "debug", fileName });
+
     if (!riskData?.units) {
-      logMessage ("❌ Error calculating units");
+      logMessage("❌ Error calculating units with user SL/TP", riskData, { level: "error", fileName });
       return false;
     }
+
     units = riskData.units;
   }
+
+  const signedUnits = `${orderType.action === ACTION.SELL ? '-' : ''}${units}`;
+  logMessage("Creating order request", { pair, signedUnits, stopLoss, takeProfit }, { level: "info", fileName });
 
   const requestBody: OrderRequest = {
     order: {
       type: TYPE.MARKET,
       instrument: normalizedPair,
-      units: `${orderType.action === ACTION.SELL ? '-' : ''}${units}`,
+      units: signedUnits,
       stopLossOnFill: {
         price: parseFloat(stopLoss).toFixed(precision)
       },
@@ -135,21 +146,29 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
 
   const apiUrl = `${hostname}/v3/accounts/${accountId}/orders`;
 
-  const response = await fetch(apiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-      "Accept-Datetime-Format": "RFC3339"
-    },
-    body: JSON.stringify(requestBody)
-  });
+  try {
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "Accept-Datetime-Format": "RFC3339"
+      },
+      body: JSON.stringify(requestBody)
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    logMessage (`❌ HTTP error! Status: ${response.status}`, errorText);
+    const text = await response.text();
+
+    if (!response.ok) {
+      logMessage("❌ HTTP error placing order", { status: response.status, errorText: text }, { level: "error", fileName });
+      return false;
+    }
+
+    logMessage("✅ Order placed successfully", text, { level: "info", fileName });
+    return true;
+
+  } catch (err) {
+    logMessage("❌ Fetch threw an error", err, { level: "error", fileName });
     return false;
   }
-
-  return true;
 };

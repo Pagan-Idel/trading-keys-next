@@ -14,7 +14,6 @@ const MyApp = ({ Component, pageProps }: AppProps) => {
   return (
     <Container>
       <h1>Trading Keys</h1>
-      <Account />
       <Component {...pageProps} />
     </Container>
   );

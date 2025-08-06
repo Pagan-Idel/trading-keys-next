@@ -1,13 +1,7 @@
-import { logMessage  } from "../../logger.js";
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const credentialsRaw = await fs.readFile(path.join(__dirname, '../../../credentials.json'), 'utf-8');
-const credentials = JSON.parse(credentialsRaw);
+import { logMessage  } from "../../logger";
+import credentials from "../../../credentials.json" with { type: "json"};
  // Import credentials.json at the top
-import { loginMode } from "../../../runner/startRunner.js";
+import { loginMode } from "../../../utils/loginMode";
 
 export interface Account {
   guaranteedStopLossOrderMode: string;
@@ -93,7 +87,7 @@ export const handleOandaLogin = async (
     }
   });
   const responseData2: AccountResponse = await response2.json();
-  logMessage ("✅ /accounts list response", responseData2);
+  // logMessage ("✅ /accounts list response", responseData2);
 
   const accountDetailsUrl = `${hostname}/v3/accounts/${accountId}`;
   const response: Response = await fetch(accountDetailsUrl, {
@@ -109,6 +103,6 @@ export const handleOandaLogin = async (
   }
 
   const responseData: AccountResponse = await response.json();
-  logMessage (`✅ Account details${pair ? ` for ${pair}` : ""}`, responseData);
+  // logMessage (`✅ Account details${pair ? ` for ${pair}` : ""}`, responseData);
   return responseData;
 };

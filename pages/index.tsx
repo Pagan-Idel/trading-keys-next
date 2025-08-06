@@ -3,7 +3,7 @@
 import Keyboard from '../components/Keyboard';
 import TrendStatus from '../components/TrendStatus';
 import ForexFactoryEvents from '../components/ForexFactoryEvents';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 
 export default function Home() {

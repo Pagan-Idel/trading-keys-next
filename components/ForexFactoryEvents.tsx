@@ -47,17 +47,6 @@ const Impact = styled.span`
   margin-left: 10px;
 `;
 
-const PairSelect = styled.select`
-  margin-bottom: 18px;
-  padding: 8px 16px;
-  font-size: 18px;
-  border-radius: 8px;
-  border: none;
-  background: #23284a;
-  color: #fff;
-  font-weight: 600;
-  box-shadow: 0 1px 4px 0 rgba(0,0,0,0.10);
-`;
 
 interface ForexEvent {
   title: string;

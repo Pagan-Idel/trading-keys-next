@@ -1,20 +1,27 @@
 // pages/_app.tsx
-import styled from 'styled-components';
 import type { AppProps } from 'next/app';
+import { createGlobalStyle } from 'styled-components';
 
-const Container = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background-color: black;
+const GlobalStyle = createGlobalStyle`
+  html, body, #__next {
+    background: #000 !important;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    width: 100vw;
+    box-sizing: border-box;
+  }
 `;
 
 const MyApp = ({ Component, pageProps }: AppProps) => {
   return (
-    <Container>
-      <h1>Trading Keys</h1>
-      <Component {...pageProps} />
-    </Container>
+    <>
+      <GlobalStyle />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <h1 style={{ color: '#fff' }}>Trading Keys</h1>
+        <Component {...pageProps} />
+      </div>
+    </>
   );
 };
 

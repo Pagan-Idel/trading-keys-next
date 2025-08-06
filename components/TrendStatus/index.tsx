@@ -17,47 +17,40 @@ function formatTime(iso?: string) {
 const Card = styled.div`
   background: #18181b;
   color: #fff;
-  border-radius: 10px;
-  padding: 0.9rem 1.1rem;
-  min-width: 180px;
-  max-width: 260px;
+  border-radius: 18px;
+  padding: 32px 0 24px 0;
+  min-width: 400px;
+  max-width: 600px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.13);
   display: flex;
   flex-direction: column;
   align-items: center;
-  font-size: 0.98rem;
+  font-size: 1.25rem;
 `;
 
 const Status = styled.div<{ up?: boolean }>`
-  font-size: 1.1rem;
+  font-size: 1.45rem;
   font-weight: bold;
   color: ${({ up }) => (up ? '#22c55e' : '#ef4444')};
   margin-bottom: 0.2rem;
+  text-align: center;
 `;
 
 
-const PercentNumber = styled.span<{ percent: number; trend: 'up' | 'down' }>`
-  font-size: 1.1rem;
+const AboveBelow = styled.span<{ green: boolean }>`
+  font-size: 1.25rem;
   font-weight: bold;
-  color: ${({ percent, trend }) => {
-    // For uptrend: high percent is green, low is red. For downtrend: low percent is green, high is red.
-    if (trend === 'up') {
-      if (percent > 66) return '#22c55e'; // green
-      if (percent > 33) return '#facc15'; // yellow
-      return '#ef4444'; // red
-    } else {
-      if (percent < 33) return '#22c55e'; // green
-      if (percent < 66) return '#facc15'; // yellow
-      return '#ef4444'; // red
-    }
-  }};
-  margin-left: 0.3rem;
+  color: ${({ green }) => (green ? '#22c55e' : '#ef4444')};
+  margin-left: 0.5rem;
+  text-align: center;
 `;
 
 const StructurePoints = styled.div`
   margin-top: 0.2rem;
   display: flex;
   gap: 0.7rem;
+  justify-content: center;
+  width: 100%;
 `;
 
 const StructurePoint = styled.div<{ type: string }>`
@@ -68,13 +61,15 @@ const StructurePoint = styled.div<{ type: string }>`
     type === 'LH' ? '#facc15' : '#a1a1aa'};
   background: #23232b;
   border-radius: 6px;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.98rem;
+  padding: 0.25rem 0.8rem;
+  font-size: 1.15rem;
+  text-align: center;
 `;
 
 const Label = styled.div`
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   color: #a1a1aa;
+  text-align: center;
 `;
 
 interface TrendStatusProps {
@@ -146,7 +141,7 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
 
     fetchTrend();
 
-    // Set up interval to update percent every minute
+    // Set up interval to update percent every 15 minutes
     intervalId = setInterval(async () => {
       if (lastTwoPoints.length === 2) {
         try {
@@ -167,7 +162,7 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
           }
         } catch {}
       }
-    }, 60000);
+    }, 900000);
 
     return () => clearInterval(intervalId);
   }, [symbol, interval]);
@@ -180,13 +175,27 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
         <Label>{error}</Label>
       ) : trend && percent !== null && lastPoints.length === 2 ? (
         <>
-          <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div style={{ display: 'flex', width: '100%', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
             <Status up={trend === 'up'}>{trend === 'up' ? 'Uptrend' : 'Downtrend'}</Status>
-            <span style={{ color: '#a1a1aa', fontSize: '0.95rem' }}>{interval.toUpperCase()}</span>
+            <span style={{ color: '#a1a1aa', fontSize: '1.1rem', marginLeft: 16 }}>{interval.toUpperCase()}</span>
           </div>
-          <div style={{ marginBottom: 6 }}>
-            <span style={{ color: '#a1a1aa', fontSize: '0.95rem' }}>Current Price:</span>
-            <PercentNumber percent={percent!} trend={trend!}>{percent!.toFixed(1)}%</PercentNumber>
+          <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+            <span style={{ color: '#a1a1aa', fontSize: '1.1rem' }}>Current Price:</span>
+            {/* Above/below 50% logic and color */}
+            {(() => {
+              const isAbove = percent! >= 50;
+              let green = false;
+              if (trend === 'up') {
+                green = !isAbove;
+              } else {
+                green = isAbove;
+              }
+              return (
+                <AboveBelow green={green}>
+                  {isAbove ? 'Above 50%' : 'Below 50%'}
+                </AboveBelow>
+              );
+            })()}
           </div>
           <StructurePoints>
             {lastPoints.length === 2 && (

@@ -1,23 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 
-const Container = styled.div`
-  background: transparent;
+const Card = styled.div`
+  background: #18181b;
+  color: #fff;
   border-radius: 18px;
   padding: 32px 0 24px 0;
-  margin-top: 32px;
   min-width: 400px;
-  color: #fff;
   max-width: 600px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.13);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 `;
 
 const Title = styled.h2`
-  color: #ff4d4f;
+  color: #fff;
   margin-bottom: 18px;
-  font-size: 2rem;
+  font-size: 1.45rem;
   font-weight: 700;
   letter-spacing: 1px;
-  text-shadow: 0 2px 8px rgba(255,77,79,0.12);
+  text-shadow: 0 2px 8px rgba(0,0,0,0.12);
 `;
 
 const EventRow = styled.div`
@@ -94,14 +97,16 @@ const ForexFactoryEvents: React.FC<ForexFactoryEventsProps> = ({ pair }) => {
       e.date === todayStr
   );
 
+  // Format today's date for the title
+  const todayFormatted = today.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   return (
-    <Container>
-      <Title>High Impact News (Today)</Title>
+    <Card>
+      <Title>High Impact News for {todayFormatted}</Title>
       {/* Pair input removed, pair comes from props */}
       {loading && <div>Loading events...</div>}
       {error && <div style={{ color: 'red' }}>{error}</div>}
       {!loading && !error && filteredEvents.length === 0 && (
-        <div style={{ color: '#aaa', padding: '18px 0', textAlign: 'center', fontWeight: 500 }}>
+        <div style={{ color: '#aaa', padding: '18px 0', textAlign: 'center', fontWeight: 500, fontSize: '1.35rem' }}>
           No high impact news for this pair today.
         </div>
       )}
@@ -116,7 +121,7 @@ const ForexFactoryEvents: React.FC<ForexFactoryEventsProps> = ({ pair }) => {
           </span>
         </EventRow>
       ))}
-    </Container>
+    </Card>
   );
 };
 

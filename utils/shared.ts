@@ -256,15 +256,15 @@ export const calculateRisk = async (
         takeProfitPips = Math.abs(tpPrice - entryPrice) / pip;
         console.log(`📊 Price-based TP: ${tpPrice}, Pips: ${takeProfitPips}`, undefined, { fileName: "shared", pair });
       } else {
-        takeProfitPips = stopLossPips * 2;
+        takeProfitPips = stopLossPips * 3;
         tpPrice = orderType.action === ACTION.BUY
           ? entryPrice + takeProfitPips * pip
           : entryPrice - takeProfitPips * pip;
-        console.log(`📊 Default TP: ${tpPrice}, Pips: ${takeProfitPips}`, undefined, { fileName: "shared", pair });
+        console.log(`📊 Default TP (3x SL): ${tpPrice}, Pips: ${takeProfitPips}`, undefined, { fileName: "shared", pair });
       }
     } else {
       stopLossPips = parseFloat(rawSL);
-      takeProfitPips = rawTP ? parseFloat(rawTP) : stopLossPips * 2;
+      takeProfitPips = rawTP ? parseFloat(rawTP) : stopLossPips * 3;
 
       slPrice = orderType.action === ACTION.BUY
         ? entryPrice - stopLossPips * pip
@@ -300,12 +300,12 @@ export const calculateRisk = async (
     const riskAmount = parseFloat(account.balance) * (orderType.risk / 100);
     const units = riskAmount / (stopLossPips * pipValuePerUnit);
 
-    console.log(`💰 Risk Amount: ${riskAmount}`, undefined, { fileName: "shared", pair });
-    console.log(`🔢 pipValuePerUnit: ${pipValuePerUnit}`, undefined, { fileName: "shared", pair });
-    console.log(`📐 Units to trade: ${units}`, undefined, { fileName: "shared", pair });
-    console.log(`📉 Entry=${entryPrice}, SL=${slPrice}, TP=${tpPrice}`, undefined, { fileName: "shared", pair });
-    console.log(`📊 SL Pips=${stopLossPips.toFixed(2)}, TP Pips=${takeProfitPips.toFixed(2)}`, undefined, { fileName: "shared", pair });
-    console.log(`📈 Account Balance: ${account.balance}`, undefined, { fileName: "shared", pair });
+    // console.log(`💰 Risk Amount: ${riskAmount}`, undefined, { fileName: "shared", pair });
+    // console.log(`🔢 pipValuePerUnit: ${pipValuePerUnit}`, undefined, { fileName: "shared", pair });
+    // console.log(`📐 Units to trade: ${units}`, undefined, { fileName: "shared", pair });
+    // console.log(`📉 Entry=${entryPrice}, SL=${slPrice}, TP=${tpPrice}`, undefined, { fileName: "shared", pair });
+    // console.log(`📊 SL Pips=${stopLossPips.toFixed(2)}, TP Pips=${takeProfitPips.toFixed(2)}`, undefined, { fileName: "shared", pair });
+    // console.log(`📈 Account Balance: ${account.balance}`, undefined, { fileName: "shared", pair });
 
     return {
       units: units.toFixed(0),

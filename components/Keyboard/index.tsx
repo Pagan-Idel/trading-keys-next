@@ -18,14 +18,29 @@ interface KeyboardProps {
 }
 
 const Button = styled.button`
-  width: 80px;
-  height: 80px;
-  color: #ffffff;
+  width: 90px;
+  height: 90px;
+  color: #fff;
+  background: linear-gradient(145deg, #23272f 60%, #1a1d22 100%);
   border: none;
-  font-size: 18px;
+  border-radius: 18px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  box-shadow: 0 4px 18px 0 rgba(0,0,0,0.25), 0 1.5px 0 #2d2f36 inset;
   cursor: pointer;
-  transition: background-color 0.3s ease, filter 0.1s ease;
+  transition: background 0.18s, box-shadow 0.18s, transform 0.08s;
   position: relative;
+  outline: none;
+  letter-spacing: 0.5px;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  &:active {
+    background: linear-gradient(145deg, #181a1f 60%, #23272f 100%);
+    box-shadow: 0 2px 8px 0 rgba(0,0,0,0.18), 0 1.5px 0 #23272f inset;
+    transform: scale(0.97);
+  }
 `;
 
 const NumberPadContainer = styled.div`
@@ -34,35 +49,52 @@ const NumberPadContainer = styled.div`
   gap: 10px;
 `;
 
-const NumberButton = styled(Button) <{ pressed: boolean }>`
-  background-color: ${(props) => (props.pressed ? '#e74c3c' : '#3498db')};
+const NumberButton = styled(Button)<{ pressed: boolean }>`
+  background: ${(props) =>
+    props.pressed
+      ? 'linear-gradient(145deg, #ff4d4f 60%, #b71c1c 100%)'
+      : 'linear-gradient(145deg, #23272f 60%, #1a1d22 100%)'};
+  box-shadow: ${(props) =>
+    props.pressed
+      ? '0 4px 18px 0 rgba(255,77,79,0.18), 0 1.5px 0 #b71c1c inset'
+      : '0 4px 18px 0 rgba(0,0,0,0.25), 0 1.5px 0 #2d2f36 inset'};
+  border: ${(props) => (props.pressed ? '2px solid #ff4d4f' : '2px solid transparent')};
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-
+  position: relative;
   &:hover {
-    background-color: #2980b9;
+    background: linear-gradient(145deg, #31343b 60%, #23272f 100%);
+    box-shadow: 0 6px 24px 0 rgba(0,0,0,0.32), 0 1.5px 0 #23272f inset;
   }
-
   &:after {
     content: attr(data-function-name);
     font-size: 12px;
-    color: #ffffff;
+    color: #bdbdbd;
     position: absolute;
-    bottom: 5px;
+    bottom: 7px;
     left: 50%;
     transform: translateX(-50%);
+    pointer-events: none;
   }
 `;
 
-const PercentageButton = styled(Button) <{ selected: boolean }>`
-  background-color: ${(props) => (props.selected ? '#2ecc71' : '#3498db')};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
+const PercentageButton = styled(Button)<{ selected: boolean }>`
+  background: ${(props) =>
+    props.selected
+      ? 'linear-gradient(145deg, #00c853 60%, #009624 100%)'
+      : 'linear-gradient(145deg, #23272f 60%, #1a1d22 100%)'};
+  color: #fff;
+  border: ${(props) => (props.selected ? '2px solid #00c853' : '2px solid transparent')};
+  box-shadow: ${(props) =>
+    props.selected
+      ? '0 4px 18px 0 rgba(0,200,83,0.18), 0 1.5px 0 #009624 inset'
+      : '0 4px 18px 0 rgba(0,0,0,0.25), 0 1.5px 0 #2d2f36 inset'};
+  font-weight: 700;
   &:hover {
-    background-color: ${(props) => (props.selected ? '#27ae60' : '#2980b9')};
+    background: linear-gradient(145deg, #009624 60%, #00c853 100%);
+    box-shadow: 0 6px 24px 0 rgba(0,200,83,0.22), 0 1.5px 0 #009624 inset;
   }
 `;
 
@@ -127,7 +159,7 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     if (storedStopLoss) {
       setPipStopLoss(Number(storedStopLoss));
     } else {
-      localStorage.setItem('stopLoss', '6');
+      localStorage.setItem('stopLoss', '10');
     }
   }, []);
 
@@ -190,10 +222,10 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
   };
 
   const rateLimitedBuyOanda = createRateLimitedFunction(() =>
-    callOrderApi({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.BUY, pair }, accountType)
+    callOrderApi({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.BUY, pair, stopLoss: pipStopLoss.toString() }, accountType)
   );
   const rateLimitedSellOanda = createRateLimitedFunction(() =>
-    callOrderApi({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.SELL, pair }, accountType)
+    callOrderApi({ risk: Number(riskPercentage), orderType: TYPE.MARKET, action: ACTION.SELL, pair, stopLoss: pipStopLoss.toString() }, accountType)
   );
 
   const handleButtonClick = (functionName: string) => {
@@ -219,7 +251,6 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
   return (
     <>
       <div style={{ borderTop: '1px solid #ccc', margin: '10px 0' }} />
-
 
       <h2 style={{ color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>
         OANDA Keyboard ({accountType.toUpperCase()})

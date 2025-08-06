@@ -53,10 +53,7 @@ export interface OrderRequest {
 }
 
 export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 'demo'): Promise<boolean> => {
-  console.log('[order] mode:', mode, 'accountId:', mode === 'live' ? credentials.OANDA_LIVE_ACCOUNT_ID : credentials.OANDA_DEMO_ACCOUNT_ID);
-  console.log('[order] endpoint:', mode === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com');
   const fileName = "order";
-
   logMessage("Placing order", orderType, { fileName });
 
   const pair = orderType.pair;
@@ -90,34 +87,21 @@ export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 
   }
 
   let units: string;
-  let stopLoss = orderType.stopLoss;
-  let takeProfit = orderType.takeProfit;
+  let stopLoss: string;
+  let takeProfit: string;
 
-  if (!stopLoss || !takeProfit) {
-    logMessage("No SL or TP passed, calculating full risk", undefined, { level: "debug", fileName });
-    const riskData: RISK | undefined = await calculateRisk(orderType, pair);
-    logMessage("Risk data from full calc", riskData, { level: "debug", fileName });
+  // Always use calculated SL/TP prices from calculateRisk
+  const riskData: RISK | undefined = await calculateRisk(orderType, pair, mode);
+  // logMessage("Risk data from full calc", riskData, { level: "debug", fileName });
 
-    if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
-      logMessage("❌ Error Calculating Risk — incomplete data", riskData, { level: "error", fileName });
-      return false;
-    }
-
-    units = riskData.units;
-    stopLoss = stopLoss ?? riskData.stopLoss;
-    takeProfit = takeProfit ?? riskData.takeProfit;
-  } else {
-    logMessage("SL and TP passed manually — calculating units", { stopLoss, takeProfit }, { level: "debug", fileName });
-    const riskData = await calculateRisk(orderType, pair);
-    logMessage("Risk data with user SL/TP", riskData, { level: "debug", fileName });
-
-    if (!riskData?.units) {
-      logMessage("❌ Error calculating units with user SL/TP", riskData, { level: "error", fileName });
-      return false;
-    }
-
-    units = riskData.units;
+  if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
+    logMessage("❌ Error Calculating Risk — incomplete data", riskData, { level: "error", fileName });
+    return false;
   }
+
+  units = riskData.units;
+  stopLoss = riskData.stopLoss;
+  takeProfit = riskData.takeProfit;
 
   const signedUnits = `${orderType.action === ACTION.SELL ? '-' : ''}${units}`;
   logMessage("Creating order request", { pair, signedUnits, stopLoss, takeProfit }, { level: "info", fileName });
@@ -128,10 +112,10 @@ export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 
       instrument: normalizedPair,
       units: signedUnits,
       stopLossOnFill: {
-        price: parseFloat(stopLoss).toFixed(precision)
+        price: stopLoss
       },
       takeProfitOnFill: {
-        price: parseFloat(takeProfit).toFixed(precision)
+        price: takeProfit
       },
       timeInForce: "FOK"
     }
@@ -151,13 +135,20 @@ export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 
     });
 
     const text = await response.text();
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      json = text;
+    }
+    // console.log('[OANDA ORDER RESPONSE]', json);
 
     if (!response.ok) {
-      logMessage("❌ HTTP error placing order", { status: response.status, errorText: text }, { level: "error", fileName });
+      logMessage("❌ HTTP error placing order", { status: response.status, errorText: json }, { level: "error", fileName });
       return false;
     }
 
-    logMessage("✅ Order placed successfully", text, { level: "info", fileName });
+    logMessage("✅ Order placed successfully", json, { level: "info", fileName });
     return true;
 
   } catch (err) {

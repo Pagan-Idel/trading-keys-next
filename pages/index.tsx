@@ -33,15 +33,15 @@ export default function Home() {
             setAccountType={setAccountType}
           />
         </div>
-        <div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            {intervals.map(({ label, value }) => (
-              <TrendStatus key={value} symbol={pair} interval={value} />
-            ))}
-          </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Trend cards on top */}
+          {intervals.map(({ label, value }) => (
+            <TrendStatus key={value} symbol={pair} interval={value} />
+          ))}
+          {/* News card below trend cards */}
+          <ForexFactoryEvents pair={pair} />
         </div>
       </div>
-      <ForexFactoryEvents pair={pair} />
     </div>
   );
 }

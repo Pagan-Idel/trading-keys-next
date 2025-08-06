@@ -8,7 +8,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: 'Invalid params' });
   }
   try {
-    const candles = await fetchCandles(symbol, interval, 100);
+    const candles = await fetchCandles(symbol, interval, 5000);
     if (!candles || candles.length < 2) {
       return res.status(200).json({ swingPoints: [] });
     }

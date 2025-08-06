@@ -47,7 +47,6 @@ const Impact = styled.span`
   margin-left: 10px;
 `;
 
-
 interface ForexEvent {
   title: string;
   time: string;

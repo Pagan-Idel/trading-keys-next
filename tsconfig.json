@@ -18,20 +18,20 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
-      "*": ["*", "*.ts", "*.tsx"]
+      "*": ["*", "*", "*.tsx"]
     },
     "allowSyntheticDefaultImports": true
   },
   "include": [
-    "next-env.d.ts",
-    "**/*.ts",
+    "next-env.d",
+    "**/*",
     "**/*.tsx"
   ],
   "exclude": [
     "node_modules",
     ".next",
     "dist",
-    "**/*.test.ts",
-    "**/*.spec.ts"
+    "**/*.test",
+    "**/*.spec"
   ]
 }

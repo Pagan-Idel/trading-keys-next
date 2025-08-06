@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { modifyTrade } from '../../utils/oanda/api/modifyTrade';
-import { ACTION, TYPE, order} from '../../utils/oanda/api/order';
+import { ACTION, TYPE, order } from '../../utils/oanda/api/order';
 import { closeTrade } from '../../utils/oanda/api/closeTrade';
 import { forexPairs } from '../../utils/constants'
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
@@ -36,7 +36,7 @@ const NumberPadContainer = styled.div`
   gap: 10px;
 `;
 
-const NumberButton = styled(Button)<{ pressed: boolean }>`
+const NumberButton = styled(Button) <{ pressed: boolean }>`
   background-color: ${(props) => (props.pressed ? '#e74c3c' : '#3498db')};
   display: flex;
   align-items: center;
@@ -57,7 +57,7 @@ const NumberButton = styled(Button)<{ pressed: boolean }>`
   }
 `;
 
-const PercentageButton = styled(Button)<{ selected: boolean }>`
+const PercentageButton = styled(Button) <{ selected: boolean }>`
   background-color: ${(props) => (props.selected ? '#2ecc71' : '#3498db')};
   display: flex;
   align-items: center;
@@ -207,11 +207,26 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
           ))}
         </Dropdown>
         <SwitchButton
-          onClick={() => {
+          onClick={async () => {
             const newType = accountType === 'live' ? 'demo' : 'live';
             setAccountType(newType);
+
             if (typeof window !== 'undefined') {
               localStorage.setItem('accountType', newType);
+            }
+
+            try {
+              const res = await fetch('/api/set-login-mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: newType }),
+              });
+
+              const result = await res.json();
+              if (!res.ok) throw new Error(result.error || 'Unknown error');
+              console.log(`✅ Login mode updated to ${newType}`);
+            } catch (err) {
+              console.error('❌ Failed to update login mode on server:', err);
             }
           }}
         >

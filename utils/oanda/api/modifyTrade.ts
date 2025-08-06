@@ -1,12 +1,13 @@
 // src/utils/oanda/api/modifyTrade.ts
+
 import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
-import credentials from "../../../credentials.json" with { type: "json" };
+import credentials from "../../../credentials.json";
 import { getPipIncrement, getPrecision, normalizePairKeyUnderscore } from "../../shared";
 import type { Trade, TradeById } from "./openNow";
 import { openNow } from "./openNow";
 import { ACTION } from "./order";
-import { loginMode } from "../../../utils/loginMode";
+import { getLoginMode } from "../../loginState";
 
 interface ModifyRequest {
   takeProfit?: OrderDetails;
@@ -18,18 +19,12 @@ interface OrderDetails {
   price: string;
 }
 
-const getLocalStorageItem = (key: string): string | null => {
-  if (typeof window !== "undefined") {
-    return localStorage.getItem(key);
-  }
-  return null;
-};
-
 export const modifyTrade = async (
   orderType: OrderParameters,
   pairOrTradeId: string
 ): Promise<boolean> => {
-  const accountType = getLocalStorageItem("accountType") || loginMode;
+  const accountType = getLoginMode(); // ✅ dynamic backend mode
+
   const hostname =
     accountType === "live"
       ? "https://api-fxtrade.oanda.com"
@@ -55,8 +50,7 @@ export const modifyTrade = async (
     t =>
       t.id === pairOrTradeId ||
       t.clientExtensions?.id === pairOrTradeId ||
-      //@ts-ignore
-      normalizePairKeyUnderscore(t.instrument) === normalizePairKeyUnderscore(pairOrTradeId)
+      normalizePairKeyUnderscore(t.instrument!) === normalizePairKeyUnderscore(pairOrTradeId)
   );
 
   if (!trade) {

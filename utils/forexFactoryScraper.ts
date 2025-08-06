@@ -36,9 +36,9 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
   const localDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  console.log('🕒 System date now:', now.toString());
-  console.log('📅 Local date (forced 00:00):', localDate.toString());
-  console.log('🌍 Timezone detected:', timeZone);
+  // console.log('🕒 System date now:', now.toString());
+  // console.log('📅 Local date (forced 00:00):', localDate.toString());
+  // console.log('🌍 Timezone detected:', timeZone);
 
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone,

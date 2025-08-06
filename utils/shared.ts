@@ -5,7 +5,7 @@ import { handleOandaLogin } from './oanda/api/login';
 import { fetchPriceOnce } from "./oanda/api/priceStreamManager";
 import { openNow } from './oanda/api/openNow';
 import { pipMap, instrumentPrecision, contractSize } from './constants';
-import type { SwingResult } from './swingLabeler.ts';
+import type { SwingResult } from './swingLabeler';
 // import { logMessage } from './logger';
 
 export interface OrderParameters {

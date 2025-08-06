@@ -1,6 +1,6 @@
 // import { log } from "console";
-// import { logMessage } from "./logger.ts";
-// import { wait } from "./shared.ts";
+// import { logMessage } from "./logger";
+// import { wait } from "./shared";
 
 export type Candle = {
     time: string; // ISO 8601 format

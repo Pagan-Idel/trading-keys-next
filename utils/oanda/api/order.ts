@@ -1,11 +1,10 @@
 // src/utils/oanda/api/order.ts
 
-// src/utils/oanda/api/order.ts
 import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
-import credentials from "../../../credentials.json" with { type: "json" };
+import credentials from "../../../credentials.json";
 import { type RISK, calculateRisk, getPrecision, normalizeOandaSymbol } from "../../shared";
-import { loginMode } from "../../../utils/loginMode";
+import { getLoginMode } from "../../loginState";
 
 export const TYPE = {
   MARKET: 'MARKET',
@@ -54,13 +53,6 @@ export interface OrderRequest {
   order: MarketOrderRequest;
 }
 
-const getLocalStorageItem = (key: string): string | null => {
-  if (typeof window !== "undefined") {
-    return localStorage.getItem(key);
-  }
-  return null;
-};
-
 export const order = async (orderType: OrderParameters): Promise<boolean> => {
   const fileName = "order";
 
@@ -75,7 +67,7 @@ export const order = async (orderType: OrderParameters): Promise<boolean> => {
   const normalizedPair = normalizeOandaSymbol(pair);
   const precision = getPrecision(pair);
 
-  const accountType = getLocalStorageItem("accountType") || loginMode;
+  const accountType = getLoginMode(); // ✅ use dynamic mode
   const hostname =
     accountType === "live"
       ? "https://api-fxtrade.oanda.com"

@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
-import credentials from "../../../credentials.json" with { type: "json" };
+import credentials from "../../../credentials.json";
 import { logMessage } from "../../logger";
-import { loginMode } from "../../loginMode";
+import { getLoginMode } from "../../loginState";
 
 export interface TradeDetail {
   id: string;
@@ -22,9 +22,7 @@ const JOURNAL_PATH = path.resolve("data", "trade-journal.json");
 export const getTradeDetailsById = async (
   tradeId: string
 ): Promise<TradeDetail | null> => {
-  let accountType = typeof window === "undefined"
-    ? loginMode
-    : localStorage.getItem("accountType") || loginMode;
+  const accountType = getLoginMode(); // ✅ use proper login mode
 
   const hostname = accountType === "live"
     ? "https://api-fxtrade.oanda.com"
@@ -74,7 +72,6 @@ export const getTradeDetailsById = async (
     }
 
     // 📝 Update any missing realizedPL in local journal
-    // 📝 Update any missing realizedPL in local journal
     try {
       if (fs.existsSync(JOURNAL_PATH)) {
         const content = fs.readFileSync(JOURNAL_PATH, "utf-8").trim();
@@ -108,7 +105,6 @@ export const getTradeDetailsById = async (
     } catch (e) {
       console.error("⚠️ Failed to update local trade journal:", e);
     }
-
 
     return trade ?? null;
   } catch (err) {

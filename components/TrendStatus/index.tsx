@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import styled from 'styled-components';
+
 // Helper to format ISO time to readable string
 function formatTime(iso?: string) {
   if (!iso) return '';
@@ -11,7 +13,6 @@ function formatTime(iso?: string) {
     hour12: true
   });
 }
-import styled from 'styled-components';
 
 const Card = styled.div`
   background: #18181b;
@@ -59,8 +60,7 @@ const StructurePoints = styled.div`
   gap: 0.7rem;
 `;
 
-const StructurePoint = styled.span<{ type: string }>`
-  font-weight: bold;
+const StructurePoint = styled.div<{ type: string }>`
   color: ${({ type }) =>
     type === 'HH' ? '#22c55e' :
     type === 'LL' ? '#ef4444' :
@@ -128,8 +128,12 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
           min = Math.min(last.price, prev.price);
           max = Math.max(last.price, prev.price);
           lastCurrentPrice = data.currentPrice;
-          const pct = ((lastCurrentPrice - min) / (max - min)) * 100;
-          setPercent(pct);
+          if (lastCurrentPrice !== null) {
+            const pct = ((lastCurrentPrice - min) / (max - min)) * 100;
+            setPercent(pct);
+          } else {
+            setPercent(null);
+          }
         } else {
           setTrend(null);
           setPercent(null);
@@ -154,8 +158,12 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
             const [prev, last] = lastTwoPoints;
             min = Math.min(last.price, prev.price);
             max = Math.max(last.price, prev.price);
-            const pct = ((lastCurrentPrice - min) / (max - min)) * 100;
-            setPercent(pct);
+            if (lastCurrentPrice !== null) {
+              const pct = ((lastCurrentPrice - min) / (max - min)) * 100;
+              setPercent(pct);
+            } else {
+              setPercent(null);
+            }
           }
         } catch {}
       }

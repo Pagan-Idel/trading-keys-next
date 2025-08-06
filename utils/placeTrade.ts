@@ -1,7 +1,7 @@
-import { ACTION, order, TYPE } from "./oanda/api/order.ts";
-import { logMessage } from "./logger.ts";
-import { openNow } from "./oanda/api/openNow.ts";
-import { wait, getPrecision } from "./shared.ts";
+import { ACTION, order, TYPE } from "./oanda/api/order";
+import { logMessage } from "./logger";
+import { openNow } from "./oanda/api/openNow";
+import { wait, getPrecision } from "./shared";
 
 export interface TradeSignal {
   pair: string;
@@ -93,11 +93,11 @@ export const placeTrade = async (signal: TradeSignal): Promise<TradeStartInfo | 
 
   // ✅ Final return after successful trade match
   return {
-    tradeId: trade.id,
+    tradeId: trade.id!,
     slPrice: parseFloat(trade.stopLossOrder?.price ?? "0"),
     tpPrice: parseFloat(trade.takeProfitOrder?.price ?? "0"),
     orderSide: parseFloat(trade.currentUnits || "0") > 0 ? "BUY" : "SELL",
-    openPrice: parseFloat(trade.price),
+    openPrice: parseFloat(trade.price!),
     pair,
   };
 };

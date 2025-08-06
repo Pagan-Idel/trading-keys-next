@@ -56,7 +56,7 @@ interface AccountProps {
   onLoginSuccess?: (platform: string, accountType: string) => void;
 }
 
-const Account = ({ onLoginSuccess }: AccountProps) => {
+const Account: React.FC<AccountProps> = ({ onLoginSuccess }) => {
   const [platform, setPlatform] = useState<string | null>(null);
   const [accountType, setAccountType] = useState<string>('');
   const [isLoginSuccessful, setIsLoginSuccessful] = useState<boolean>(false);

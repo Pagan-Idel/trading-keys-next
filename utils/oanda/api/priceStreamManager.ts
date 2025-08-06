@@ -1,7 +1,7 @@
-import credentials from "../../../credentials.json" with { type: "json" };
+import credentials from "../../../credentials.json";
 import { getPrecision, normalizePairKeyUnderscore, tfToMs } from "../../shared";
 import { logMessage } from "../../logger";
-import { loginMode } from "../../../utils/loginMode";
+import { getLoginMode } from "../../loginState";
 
 type Price = { bid: string; ask: string; updatedAt: number };
 const priceCache: Record<string, Price> = {};
@@ -17,7 +17,7 @@ const getLocalStorageItem = (key: string): string | null => {
 };
 
 const getAccountDetails = () => {
-  const accountType = getLocalStorageItem("accountType") || loginMode;
+  const accountType = getLoginMode(); // ✅ use dynamic backend-safe login mode
   const hostname =
     accountType === "live"
       ? "https://stream-fxtrade.oanda.com"
@@ -26,12 +26,10 @@ const getAccountDetails = () => {
     accountType === "live"
       ? "https://api-fxtrade.oanda.com"
       : "https://api-fxpractice.oanda.com";
-
   const accountId =
     accountType === "live"
       ? credentials.OANDA_LIVE_ACCOUNT_ID
       : credentials.OANDA_DEMO_ACCOUNT_ID;
-
   const token =
     accountType === "live"
       ? credentials.OANDA_LIVE_ACCOUNT_TOKEN

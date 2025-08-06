@@ -1,9 +1,9 @@
+import credentials from "../../../credentials.json";
 import { logMessage } from "../../logger";
 import { OANDA_GRANULARITIES, INTERVAL_TO_GRANULARITY } from "../../constants";
-import credentials from "../../../credentials.json" with { type: "json" };
 import type { Candle } from "../../swingLabeler";
 import { normalizePairKeyUnderscore } from "../../shared";
-import { loginMode } from "../../../utils/loginMode";
+import { getLoginMode } from "../../loginState";
 
 export const fetchCandles = async (
   symbol: string,
@@ -13,28 +13,18 @@ export const fetchCandles = async (
   to?: string
 ): Promise<Candle[]> => {
   try {
-    let accountType = '';
-    let hostname = '';
-    let accountId = '';
-    let token = '';
-
-    if (typeof window !== "undefined") {
-      accountType = localStorage.getItem("accountType") || loginMode;
-    } else {
-      accountType = loginMode;
-    }
-
-    hostname =
+    const accountType = getLoginMode(); // ✅ dynamic login mode
+    const hostname =
       accountType === "live"
         ? "https://api-fxtrade.oanda.com"
         : "https://api-fxpractice.oanda.com";
 
-    accountId =
+    const accountId =
       accountType === "live"
         ? credentials.OANDA_LIVE_ACCOUNT_ID
         : credentials.OANDA_DEMO_ACCOUNT_ID;
 
-    token =
+    const token =
       accountType === "live"
         ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
         : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
@@ -48,8 +38,8 @@ export const fetchCandles = async (
     }
 
     const instrument = normalizePairKeyUnderscore(symbol);
-    // Map UI/logic interval to OANDA granularity
     const granularity = INTERVAL_TO_GRANULARITY[interval] || interval.toUpperCase();
+
     if (!OANDA_GRANULARITIES.includes(granularity)) {
       logMessage("❌ Invalid granularity value", { granularity, interval }, {
         level: "error",
@@ -57,6 +47,7 @@ export const fetchCandles = async (
       });
       throw new Error(`Invalid granularity: ${granularity}`);
     }
+
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
 
     const url = new URL(`${hostname}/v3/instruments/${instrument}/candles`);
@@ -66,14 +57,18 @@ export const fetchCandles = async (
     }
     url.searchParams.set("dailyAlignment", "17");
     url.searchParams.set("alignmentTimezone", timezone);
-
     if (from) url.searchParams.set("from", from);
     if (to) url.searchParams.set("to", to);
-
-    // logMessage(`📡 Requesting candles from OANDA: ${url.toString()}`, undefined, {
-    //   level: "debug",
-    //   fileName: "fetchCandles"
-    // });
+    logMessage("🔐 fetchCandles using account type", getLoginMode(), {
+      fileName: "fetchCandles",
+    });
+    logMessage("🔑 Token and Account ID check", {
+      token: token?.slice(0, 8) + '...', // partial token for safety
+      accountId,
+      url: url.toString(),
+    }, {
+      fileName: "fetchCandles",
+    });
 
     const response = await fetch(url.toString(), {
       headers: {
@@ -103,11 +98,6 @@ export const fetchCandles = async (
         low: parseFloat(c.mid.l),
         close: parseFloat(c.mid.c),
       }));
-
-    // logMessage(`🕯️ Candle data:\n${JSON.stringify(candles, null, 2)}`, undefined, {
-    //   level: "debug",
-    //   fileName: "fetchCandles"
-    // });
 
     return candles;
   } catch (error) {

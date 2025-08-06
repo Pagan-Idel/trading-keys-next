@@ -1,7 +1,6 @@
-import { logMessage  } from "../../logger";
-import credentials from "../../../credentials.json" with { type: "json"};
- // Import credentials.json at the top
-import { loginMode } from "../../../utils/loginMode";
+import { logMessage } from "../../logger";
+import credentials from "../../../credentials.json";
+import { getLoginMode } from "../../loginState";
 
 export interface Account {
   guaranteedStopLossOrderMode: string;
@@ -48,17 +47,10 @@ export interface AccountResponse {
   errorMessage: string;
 }
 
-const getLocalStorageItem = (key: string): string | null => {
-  if (typeof window !== "undefined") {
-    return localStorage.getItem(key);
-  }
-  return null;
-};
-
 export const handleOandaLogin = async (
   pair?: string
 ): Promise<AccountResponse> => {
-  const accountType = getLocalStorageItem('accountType') || loginMode || 'demo';
+  const accountType = getLoginMode(); // ✅ use dynamic login mode
   const hostname =
     accountType === 'live'
       ? 'https://api-fxtrade.oanda.com'
@@ -75,10 +67,11 @@ export const handleOandaLogin = async (
       : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
   if (!token || !accountId) {
-    logMessage ("❌ Token or AccountId is not set.");
+    logMessage("❌ Token or AccountId is not set.");
     throw new Error("Token or AccountId is not set.");
   }
 
+  // Optional: Can remove if unused
   const accountListUrl = `${hostname}/v3/accounts`;
   const response2: Response = await fetch(accountListUrl, {
     headers: {
@@ -87,7 +80,7 @@ export const handleOandaLogin = async (
     }
   });
   const responseData2: AccountResponse = await response2.json();
-  // logMessage ("✅ /accounts list response", responseData2);
+  // logMessage("✅ /accounts list response", responseData2);
 
   const accountDetailsUrl = `${hostname}/v3/accounts/${accountId}`;
   const response: Response = await fetch(accountDetailsUrl, {
@@ -98,11 +91,11 @@ export const handleOandaLogin = async (
   });
 
   if (!response.ok) {
-    logMessage (`❌ HTTP error! Status: ${response.status}`);
+    logMessage(`❌ HTTP error! Status: ${response.status}`);
     throw new Error(`HTTP error! Status: ${response.status}`);
   }
 
   const responseData: AccountResponse = await response.json();
-  // logMessage (`✅ Account details${pair ? ` for ${pair}` : ""}`, responseData);
+  // logMessage(`✅ Account details${pair ? ` for ${pair}` : ""}`, responseData);
   return responseData;
 };

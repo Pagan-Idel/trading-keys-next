@@ -39,10 +39,10 @@ Example credentials.json:
   "MTR_DEMO_PASSWORD": "your-demo-password",
   "MTR_LIVE_EMAIL": "your-live-email",
   "MTR_LIVE_PASSWORD": "your-live-password",
-  "NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_ID": "your-live-account-id",
-  "NEXT_PUBLIC_OANDA_LIVE_ACCOUNT_TOKEN": "your-live-account-token",
-  "NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_ID": "your-demo-account-id",
-  "NEXT_PUBLIC_OANDA_DEMO_ACCOUNT_TOKEN": "your-demo-account-token"
+  "OANDA_LIVE_ACCOUNT_ID": "your-live-account-id",
+  "OANDA_LIVE_ACCOUNT_TOKEN": "your-live-account-token",
+  "OANDA_DEMO_ACCOUNT_ID": "your-demo-account-id",
+  "OANDA_DEMO_ACCOUNT_TOKEN": "your-demo-account-token"
 }
 ```
 Run the application:

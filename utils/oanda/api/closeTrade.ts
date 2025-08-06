@@ -1,11 +1,12 @@
 // src/utils/oanda/api/closeTrade.ts
+
+import credentials from "../../../credentials.json";
 import type { Trade } from "./openNow";
 import { ACTION } from "./order";
 import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
-import credentials from "../../../credentials.json" with { type: "json" };
 import { recentTrade } from "../../shared";
-import { loginMode } from '../../../utils/loginMode';
+import { getLoginMode } from "../../loginState";
 
 export interface TradeCloseResponse {
   lastTransactionID?: TransactionID;
@@ -50,16 +51,10 @@ export const closeTrade = async (
   pair?: string,
   unitsOverride?: number
 ): Promise<TradeCloseResponse | boolean> => {
-  let accountType = '';
+  const accountType = getLoginMode(); // 👈 use dynamic loginMode
   let accountId = '';
   let token = '';
   let hostname = '';
-
-  if (typeof window !== "undefined") {
-    accountType = localStorage.getItem("accountType") || loginMode;
-  } else {
-    accountType = loginMode;
-  }
 
   hostname = accountType === "live"
     ? "https://api-fxtrade.oanda.com"
@@ -116,15 +111,23 @@ export const closeTrade = async (
     const responseData: TradeCloseResponse = await response.json();
 
     if (!response.ok) {
-      logMessage(`❌ HTTP error! Status: ${response.status}`);
+      logMessage(`❌ HTTP error! Status: ${response.status}`, responseData, {
+        level: 'error',
+        fileName: 'closeTrade'
+      });
       return false;
     }
 
-    logMessage(`✅ Trade closed${pair ? ` for ${pair}` : ''}`, responseData);
+    logMessage(`✅ Trade closed${pair ? ` for ${pair}` : ''}`, responseData, {
+      fileName: 'closeTrade'
+    });
     return responseData;
 
   } catch (error) {
-    logMessage(`❌ Exception closing trade${pair ? ` for ${pair}` : ''}:`, error);
+    logMessage(`❌ Exception closing trade${pair ? ` for ${pair}` : ''}:`, error, {
+      level: 'error',
+      fileName: 'closeTrade'
+    });
     return false;
   }
 };

@@ -70,13 +70,11 @@ export const closeTrade = async (
     : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
   if (!accountId || !token) {
-    logMessage("❌ Token or AccountId is not set.");
     return false;
   }
 
-  const mostRecentTrade: Trade | undefined = await recentTrade(pair);
+  const mostRecentTrade: Trade | undefined = await recentTrade(pair, mode);
   if (!mostRecentTrade) {
-    logMessage(`⚠️ No recent trade found${pair ? ` for ${pair}` : ""}.`);
     return false;
   }
 
@@ -112,23 +110,12 @@ export const closeTrade = async (
     const responseData: TradeCloseResponse = await response.json();
 
     if (!response.ok) {
-      logMessage(`❌ HTTP error! Status: ${response.status}`, responseData, {
-        level: 'error',
-        fileName: 'closeTrade'
-      });
       return false;
     }
 
-    logMessage(`✅ Trade closed${pair ? ` for ${pair}` : ''}`, responseData, {
-      fileName: 'closeTrade'
-    });
     return responseData;
 
   } catch (error) {
-    logMessage(`❌ Exception closing trade${pair ? ` for ${pair}` : ''}:`, error, {
-      level: 'error',
-      fileName: 'closeTrade'
-    });
     return false;
   }
 };

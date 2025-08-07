@@ -6,7 +6,6 @@ import { fetchPriceOnce } from "./oanda/api/priceStreamManager";
 import { openNow } from './oanda/api/openNow';
 import { pipMap, instrumentPrecision, contractSize } from './constants';
 import type { SwingResult } from './swingLabeler';
-// import { logMessage } from './logger';
 
 export interface OrderParameters {
   orderType?: (typeof TYPE)[keyof typeof TYPE];
@@ -324,14 +323,18 @@ export const recentTrade = async (
   pair?: string,
   mode: 'live' | 'demo' = 'demo'
 ): Promise<Trade | undefined> => {
+ // logMessage(`🔎 recentTrade called for pair: ${pair}, mode: ${mode}`, undefined, { fileName: "shared", pair });
   const openTrades = await openNow(pair, mode);
+  // logMessage(`🔎 openNow result: ${openTrades?.trades?.length ?? 0} trades found`, undefined, { fileName: "shared", pair });
   if (!openTrades?.trades?.length) return undefined;
 
-  return openTrades.trades.reduce((prev, curr) => {
+  const mostRecent = openTrades.trades.reduce((prev, curr) => {
     const prevTime = new Date(prev.openTime || 0).getTime();
     const currTime = new Date(curr.openTime || 0).getTime();
     return currTime > prevTime ? curr : prev;
   });
+  // logMessage(`🔎 mostRecent trade: ${JSON.stringify(mostRecent)}`, undefined, { fileName: "shared", pair });
+  return mostRecent;
 };
 
 

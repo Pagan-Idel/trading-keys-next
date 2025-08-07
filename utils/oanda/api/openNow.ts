@@ -62,6 +62,8 @@ export const openNow = async (
       ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
       : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
+  // logMessage(`🔎 openNow using accountId: ${accountId}, token: ${token?.slice(0,8)}..., hostname: ${hostname}, mode: ${mode}`, undefined, { fileName: "openNow", pair });
+
   if (!accountId || !token || !hostname) {
     logMessage("❌ Token or AccountId is not set.", undefined, { fileName: "openNow", pair });
     return undefined;
@@ -82,16 +84,23 @@ export const openNow = async (
       return undefined;
     }
 
-    const responseData: OpenTrade = await response.json();
+    const rawText = await response.text();
+    let responseData: OpenTrade;
+    try {
+      responseData = JSON.parse(rawText);
+    } catch (e) {
+      logMessage(`❌ Failed to parse open trades response`, e, { fileName: "openNow", pair });
+      return undefined;
+    }
 
     if (pair) {
       const isTradeId = /^\d+$/.test(pair);
+      const normalizedPair = normalizePairKeyUnderscore(pair);
       const filteredTrades = responseData.trades.filter((t) =>
         isTradeId
           ? t.id === String(pair)
-          : normalizePairKeyUnderscore(t.instrument!) === normalizePairKeyUnderscore(pair)
+          : normalizePairKeyUnderscore(t.instrument!) === normalizedPair
       );
-
       return {
         lastTransactionID: responseData.lastTransactionID,
         trades: filteredTrades,

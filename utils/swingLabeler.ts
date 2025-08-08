@@ -1,3 +1,22 @@
+// --- ATR Calculation ---
+export function getATR(candles: Candle[], period: number = 14): number {
+    if (candles.length < 2) return 0;
+    const trueRanges: number[] = [];
+    for (let i = 1; i < candles.length; i++) {
+        const prev = candles[i - 1];
+        const curr = candles[i];
+        const highLow = curr.high - curr.low;
+        const highPrevClose = Math.abs(curr.high - prev.close);
+        const lowPrevClose = Math.abs(curr.low - prev.close);
+        const tr = Math.max(highLow, highPrevClose, lowPrevClose);
+        trueRanges.push(tr);
+    }
+    // Use last `period` true ranges
+    const slice = trueRanges.slice(-period);
+    if (slice.length === 0) return 0;
+    const sum = slice.reduce((acc, r) => acc + r, 0);
+    return sum / slice.length;
+}
 // import { log } from "console";
 // import { logMessage } from "./logger";
 // import { wait } from "./shared";
@@ -163,20 +182,13 @@ export function getAverageRange(candles: Candle[]): number {
     return sum / candles.length;
 }
 
-export function isStrongBody(candle: Candle, averageRange: number): boolean {
+export function isStrongBody(candle: Candle, prevCandles: Candle[]): boolean {
     const bodySize = Math.abs(candle.close - candle.open);
     const range = candle.high - candle.low;
-    const minRange = 0.50 * averageRange;
+    // ATR uses previous candles plus current
+    const atr = getATR([...prevCandles, candle], 14);
+    const minRange = 0.50 * atr;
     const isStrong = range >= minRange && bodySize >= 0.50 * range;
-
-    // logMessage(
-    //     `🟨 Checking strong body: index=${candle.candleIndex} (${toLocalTime(candle.time)}), range=${range.toFixed(
-    //         5
-    //     )}, bodySize=${bodySize.toFixed(5)}, isStrong=${isStrong}`,
-    //     undefined,
-    //     { fileName: "swingLabeler" }
-    // );
-
     return isStrong;
 }
 
@@ -312,7 +324,7 @@ export function isPullback(
             return true;
         }
 
-        const strong = isStrongBody(prev, averageRange);
+        const strong = isStrongBody(prev, candles.slice(0, i));
 
         if (!candle1Found && strong) {
             candle1Found = true;

@@ -2,15 +2,18 @@ import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 
 // Helper to format ISO time to readable string
-function formatTime(iso?: string) {
+function formatTime(iso?: string, options?: { showTime?: boolean }) {
   if (!iso) return '';
   const d = new Date(iso);
   return d.toLocaleString('en-US', {
+    year: 'numeric',
     month: 'short',
     day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true
+    ...(options && options.showTime ? {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    } : {})
   });
 }
 
@@ -202,12 +205,16 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
               <>
                 <StructurePoint type={lastPoints[0].swing}>
                   {lastPoints[0].swing} {lastPoints[0].price}
-                  <span style={{ display: 'block', color: '#a1a1aa', fontWeight: 400, fontSize: '0.85em' }}>{formatTime(lastPoints[0].time)}</span>
+                  <span style={{ display: 'block', color: '#a1a1aa', fontWeight: 400, fontSize: '0.85em' }}>
+                    {formatTime(lastPoints[0].time, { showTime: interval === 'H4' })}
+                  </span>
                 </StructurePoint>
                 <span style={{ color: '#a1a1aa', fontSize: '1.2rem', margin: '0 0.3rem' }}>→</span>
                 <StructurePoint type={lastPoints[1].swing}>
                   {lastPoints[1].swing} {lastPoints[1].price}
-                  <span style={{ display: 'block', color: '#a1a1aa', fontWeight: 400, fontSize: '0.85em' }}>{formatTime(lastPoints[1].time)}</span>
+                  <span style={{ display: 'block', color: '#a1a1aa', fontWeight: 400, fontSize: '0.85em' }}>
+                    {formatTime(lastPoints[1].time, { showTime: interval === 'H4' })}
+                  </span>
                 </StructurePoint>
               </>
             )}

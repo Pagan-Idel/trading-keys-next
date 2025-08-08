@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
+
 import styled from 'styled-components';
 
 const Card = styled.div`
   background: #18181b;
   color: #fff;
   border-radius: 18px;
-  padding: 32px 0 24px 0;
-  min-width: 400px;
-  max-width: 600px;
+  padding: 36px 36px 32px 36px;
+  min-width: 340px;
+  max-width: 400px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.13);
   display: flex;
   flex-direction: column;
@@ -23,31 +24,41 @@ const Title = styled.h2`
   text-shadow: 0 2px 8px rgba(0,0,0,0.12);
 `;
 
-const EventRow = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 0 12px 0;
-  border-bottom: 1px solid #2a2d3e;
-  font-weight: 600;
-  background: rgba(255, 77, 79, 0.13);
-  border-radius: 8px;
-  margin-bottom: 8px;
-  box-shadow: 0 2px 8px 0 rgba(255,77,79,0.08);
+const Table = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+`;
+
+const Th = styled.th`
+  background: #23232b;
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.1em;
+  padding: 12px 0;
+  border-bottom: 2px solid #23232b;
+  text-align: left;
+`;
+
+const Td = styled.td`
+  padding: 14px 0 10px 0;
+  border-bottom: 1px solid #23232b;
+  font-size: 1.08em;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 `;
 
 const Currency = styled.span`
   font-weight: bold;
   color: #ffb300;
-  font-size: 1.1em;
-  margin: 0 10px;
 `;
 
 const Impact = styled.span`
-  font-weight: bold;
+  font-weight: 600;
   color: #ff4d4f;
-  font-size: 1.1em;
-  margin-left: 10px;
 `;
 
 interface ForexEvent {
@@ -101,8 +112,7 @@ const ForexFactoryEvents: React.FC<ForexFactoryEventsProps> = ({ pair }) => {
   const todayFormatted = today.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   return (
     <Card>
-      <Title>High Impact News for {todayFormatted}</Title>
-      {/* Pair input removed, pair comes from props */}
+      <Title><span style={{ color: '#ff4d4f' }}>High</span> Impact News for {todayFormatted}</Title>
       {loading && <div>Loading events...</div>}
       {error && <div style={{ color: 'red' }}>{error}</div>}
       {!loading && !error && filteredEvents.length === 0 && (
@@ -110,17 +120,28 @@ const ForexFactoryEvents: React.FC<ForexFactoryEventsProps> = ({ pair }) => {
           No high impact news for this pair today.
         </div>
       )}
-      {!loading && !error && filteredEvents.map((event, idx) => (
-        <EventRow key={idx}>
-          <span style={{ minWidth: 70, fontWeight: 700, color: '#fff' }}>{event.time}</span>
-          <Currency>{event.currency}</Currency>
-          <span style={{ flex: 1, margin: '0 12px', color: '#fff' }}>{event.title}</span>
-          <Impact>{event.impact}</Impact>
-          <span style={{ marginLeft: 16, color: '#bdbdbd', fontSize: '0.95em', minWidth: 110 }}>
-            {new Date(event.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
-          </span>
-        </EventRow>
-      ))}
+      {!loading && !error && filteredEvents.length > 0 && (
+        <Table>
+          <thead>
+            <tr>
+              <Th style={{ width: '90px' }}>Time</Th>
+              <Th style={{ width: '60px' }}>Currency</Th>
+              <Th style={{ width: '140px', textAlign: 'center' }}>Title</Th>
+              <Th style={{ width: '60px', color: '#ff4d4f' }}>Impact</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredEvents.map((event, idx) => (
+              <tr key={idx}>
+                <Td style={{ width: '90px', fontWeight: 700, color: '#fff' }}>{event.time}</Td>
+                <Td style={{ width: '60px' }}><Currency>{event.currency}</Currency></Td>
+                <Td style={{ width: '140px', maxWidth: '140px', textAlign: 'center' }} title={event.title}>{event.title}</Td>
+                <Td style={{ width: '60px' }}><Impact>{event.impact}</Impact></Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
     </Card>
   );
 };

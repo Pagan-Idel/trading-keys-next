@@ -13,10 +13,9 @@ export default function Home() {
   // No login/account selection, always default to demo, allow switching to live
 
   const intervals = [
-    { label: '1D', value: '1d' },
-    { label: '4H', value: '4h' },
-    { label: '1H', value: '1h' },
-    { label: '30M', value: '30m' },
+    { label: 'Weekly', value: 'W' },
+    { label: 'Daily', value: 'D' },
+    { label: '4H', value: 'H4' },
   ];
 
   // Always show trading UI

@@ -12,8 +12,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!orderType) {
       return res.status(400).json({ error: 'Missing orderType' });
     }
-    const result = await order(orderType, mode);
-    res.status(200).json({ success: result });
+  const result = await order(orderType, mode);
+  res.status(200).json(result);
   } catch (error: any) {
     console.error('[API][order] Error:', error);
     res.status(500).json({ error: error.message || 'Order failed' });

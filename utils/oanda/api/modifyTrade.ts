@@ -23,7 +23,7 @@ export const modifyTrade = async (
   orderType: OrderParameters,
   pairOrTradeId: string,
   mode: 'live' | 'demo' = 'demo'
-): Promise<boolean> => {
+): Promise<{ success: boolean; reason: string; raw: any }> => {
   const hostname =
     mode === "live"
       ? "https://api-fxtrade.oanda.com"
@@ -41,7 +41,7 @@ export const modifyTrade = async (
 
   if (!accountId || !token) {
     logMessage("❌ Token or AccountId is not set.", undefined, { fileName: "modifyTrade" });
-    return false;
+      return { success: false, reason: 'Token or AccountId is not set.', raw: undefined };
   }
 
   const openTrades = await openNow(pairOrTradeId, mode);
@@ -54,7 +54,7 @@ export const modifyTrade = async (
 
   if (!trade) {
     logMessage(`❌ Trade not found for ${pairOrTradeId}`, undefined, { fileName: "modifyTrade" });
-    return false;
+      return { success: false, reason: `Trade not found for ${pairOrTradeId}`, raw: undefined };
   }
 
   const instrument = trade.instrument!;
@@ -81,20 +81,27 @@ export const modifyTrade = async (
       body: JSON.stringify(requestBody)
     });
 
+    const text = await response.text();
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      json = text;
+    }
+
     if (!response.ok) {
-      logMessage(`❌ SL at Entry failed. HTTP ${response.status}`, undefined, {
+      logMessage(`❌ SL at Entry failed. HTTP ${response.status}`, json, {
         fileName: "modifyTrade",
         pair: instrument
       });
-      return false;
+      return { success: false, reason: json?.errorMessage || 'SL at Entry failed', raw: json };
     }
 
     logMessage(`✅ SL at Entry set to ${requestBody.stopLoss?.price}`, requestBody, {
       fileName: "modifyTrade",
       pair: instrument
     });
-
-    return true;
+    return { success: true, reason: 'SL at Entry set', raw: json };
   }
 
   // === MOVE SL/TP ===
@@ -112,7 +119,7 @@ export const modifyTrade = async (
         fileName: "modifyTrade",
         pair: instrument
       });
-      return false;
+        return { success: false, reason: `Failed to fetch trade details. HTTP ${tradeResponse.status}`, raw: undefined };
     }
 
     const response1Object: TradeById = await tradeResponse.json();
@@ -125,7 +132,7 @@ export const modifyTrade = async (
           fileName: "modifyTrade",
           pair: instrument
         });
-        return false;
+          return { success: false, reason: 'No Stop Loss Detected.', raw: response1Object };
       }
 
       const newSL =
@@ -146,7 +153,7 @@ export const modifyTrade = async (
           fileName: "modifyTrade",
           pair: instrument
         });
-        return false;
+          return { success: false, reason: 'No Take Profit Detected.', raw: response1Object };
       }
 
       const newTP =
@@ -173,21 +180,28 @@ export const modifyTrade = async (
       body: JSON.stringify(requestBody)
     });
 
+    const text = await updateResponse.text();
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      json = text;
+    }
+
     if (!updateResponse.ok) {
-      logMessage(`❌ Failed to modify trade. HTTP ${updateResponse.status}`, requestBody, {
+      logMessage(`❌ Failed to modify trade. HTTP ${updateResponse.status}`, json, {
         fileName: "modifyTrade",
         pair: instrument
       });
-      return false;
+      return { success: false, reason: json?.errorMessage || 'Modify trade failed', raw: json };
     }
 
     logMessage(`✅ Successfully modified trade ${trade.id}`, requestBody, {
       fileName: "modifyTrade",
       pair: instrument
     });
-
-    return true;
+    return { success: true, reason: 'Trade modified', raw: json };
   }
 
-  return false;
+  return { success: false, reason: 'Unknown error', raw: null };
 };

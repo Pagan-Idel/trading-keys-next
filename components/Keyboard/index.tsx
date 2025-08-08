@@ -222,9 +222,9 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     });
     const data = await res.json();
     if (data.success) {
-      showNotification('Order placed successfully', 'success');
+      showNotification(`Order placed: ${data.reason}`, 'success');
     } else {
-      showNotification(data.error || 'Order failed', 'error');
+      showNotification(`Order failed: ${data.reason}`, 'error');
     }
     return data;
   };
@@ -250,9 +250,9 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     });
     const data = await res.json();
     if (data.success) {
-      showNotification('Trade modified successfully', 'success');
+      showNotification(`Trade modified: ${data.reason}`, 'success');
     } else {
-      showNotification(data.error || 'Modify trade failed', 'error');
+      showNotification(`Modify trade failed: ${data.reason}`, 'error');
     }
     return data;
   };

@@ -52,57 +52,43 @@ export interface OrderRequest {
   order: MarketOrderRequest;
 }
 
-export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 'demo'): Promise<boolean> => {
+export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 'demo'): Promise<{ success: boolean; reason: string; raw: any }> => {
   const fileName = "order";
   logMessage("Placing order", orderType, { fileName });
 
   const pair = orderType.pair;
   if (!pair) {
     logMessage("❌ Pair is not specified in orderType", orderType, { level: "error", fileName });
-    return false;
+    return { success: false, reason: 'Pair not specified', raw: orderType };
   }
 
   const normalizedPair = normalizeOandaSymbol(pair);
-  const precision = getPrecision(pair);
-
   const accountType = mode;
-  const hostname =
-    accountType === "live"
-      ? "https://api-fxtrade.oanda.com"
-      : "https://api-fxpractice.oanda.com";
-
-  const accountId =
-    accountType === "live"
-      ? credentials.OANDA_LIVE_ACCOUNT_ID
-      : credentials.OANDA_DEMO_ACCOUNT_ID;
-
-  const token =
-    accountType === "live"
-      ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
-      : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
+  const hostname = accountType === "live"
+    ? "https://api-fxtrade.oanda.com"
+    : "https://api-fxpractice.oanda.com";
+  const accountId = accountType === "live"
+    ? credentials.OANDA_LIVE_ACCOUNT_ID
+    : credentials.OANDA_DEMO_ACCOUNT_ID;
+  const token = accountType === "live"
+    ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
+    : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
 
   if (!accountId || !hostname || !token) {
     logMessage("❌ Missing accountId, token, or hostname", { accountType, accountId, token, hostname }, { level: "error", fileName });
-    return false;
+    return { success: false, reason: 'Missing accountId, token, or hostname', raw: { accountType, accountId, token, hostname } };
   }
-
-  let units: string;
-  let stopLoss: string;
-  let takeProfit: string;
 
   // Always use calculated SL/TP prices from calculateRisk
   const riskData: RISK | undefined = await calculateRisk(orderType, pair, mode);
-  // logMessage("Risk data from full calc", riskData, { level: "debug", fileName });
-
   if (!riskData?.units || !riskData?.stopLoss || !riskData?.takeProfit) {
     logMessage("❌ Error Calculating Risk — incomplete data", riskData, { level: "error", fileName });
-    return false;
+    return { success: false, reason: 'Error Calculating Risk — incomplete data', raw: riskData };
   }
 
-  units = riskData.units;
-  stopLoss = riskData.stopLoss;
-  takeProfit = riskData.takeProfit;
-
+  const units = riskData.units;
+  const stopLoss = riskData.stopLoss;
+  const takeProfit = riskData.takeProfit;
   const signedUnits = `${orderType.action === ACTION.SELL ? '-' : ''}${units}`;
   logMessage("Creating order request", { pair, signedUnits, stopLoss, takeProfit }, { level: "info", fileName });
 
@@ -141,18 +127,28 @@ export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 
     } catch (e) {
       json = text;
     }
-    // console.log('[OANDA ORDER RESPONSE]', json);
 
     if (!response.ok) {
       logMessage("❌ HTTP error placing order", { status: response.status, errorText: json }, { level: "error", fileName });
-      return false;
+      return { success: false, reason: json?.orderCancelTransaction?.reason || json?.errorMessage || 'HTTP error', raw: json };
     }
 
-    logMessage("✅ Order placed successfully", json, { level: "info", fileName });
-    return true;
+    // Extract reason from OANDA response
+    let reason = 'UNKNOWN';
+    if (json?.orderFillTransaction?.reason) {
+      reason = json.orderFillTransaction.reason;
+    } else if (json?.orderCancelTransaction?.reason) {
+      reason = json.orderCancelTransaction.reason;
+    } else if (json?.orderCreateTransaction?.reason) {
+      reason = json.orderCreateTransaction.reason;
+    }
 
-  } catch (err) {
+    logMessage("✅ Order placed response", json, { level: "info", fileName });
+    return { success: !!json?.orderFillTransaction, reason, raw: json };
+
+  } catch (err: any) {
     logMessage("❌ Fetch threw an error", err, { level: "error", fileName });
-    return false;
+    return { success: false, reason: err?.message || 'Fetch error', raw: err };
   }
-};
+}
+// ...existing code up to the correct order function implementation...

@@ -21,26 +21,37 @@ export default function Home() {
   // Always show trading UI
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '2rem' }}>
-      <div style={{ display: 'flex', gap: '2rem', justifyContent: 'center', alignItems: 'flex-start' }}>
-        <div>
-          <Keyboard
-            platform="oanda"
-            pair={pair}
-            setPair={setPair}
-            accountType={accountType}
-            setAccountType={setAccountType}
-          />
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Trend cards on top */}
-          {intervals.map(({ label, value }) => (
-            <TrendStatus key={value} symbol={pair} interval={value} />
-          ))}
-          {/* News card below trend cards */}
-          <ForexFactoryEvents pair={pair} />
+    <>
+      <style>{`
+        @media (max-width: 600px) {
+          .main-flex {
+            flex-direction: column !important;
+            gap: 1rem !important;
+            align-items: stretch !important;
+          }
+        }
+      `}</style>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: '2rem' }}>
+        <div className="main-flex" style={{ display: 'flex', gap: '2rem', justifyContent: 'center', alignItems: 'flex-start' }}>
+          <div>
+            <Keyboard
+              platform="oanda"
+              pair={pair}
+              setPair={setPair}
+              accountType={accountType}
+              setAccountType={setAccountType}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Trend cards below keyboard on mobile */}
+            {intervals.map(({ label, value }) => (
+              <TrendStatus key={value} symbol={pair} interval={value} />
+            ))}
+            {/* News card below trend cards */}
+            <ForexFactoryEvents pair={pair} />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

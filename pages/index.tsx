@@ -4,11 +4,13 @@ import Keyboard from '../components/Keyboard';
 import TrendStatus from '../components/TrendStatus';
 import ForexFactoryEvents from '../components/ForexFactoryEvents';
 import { useState } from 'react';
+import Notification from '../components/Notification';
 
 
 export default function Home() {
   const [pair, setPair] = useState('EUR/USD');
   const [accountType, setAccountType] = useState('demo');
+  const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'warning' } | null>(null);
 
   // No login/account selection, always default to demo, allow switching to live
 
@@ -22,6 +24,13 @@ export default function Home() {
 
   return (
     <>
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+        />
+      )}
       <style>{`
         @media (max-width: 600px) {
           .main-flex {
@@ -52,6 +61,12 @@ export default function Home() {
           </div>
         </div>
       </div>
+      {/* Example: trigger notification on mount (remove or customize as needed) */}
+      {/*
+      useEffect(() => {
+        setNotification({ message: 'Welcome!', type: 'success' });
+      }, []);
+      */}
     </>
   );
 }

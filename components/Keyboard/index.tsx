@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { ACTION, TYPE } from '../../utils/oanda/api/order';
 import { forexPairs } from '../../utils/constants'
+import Notification from '../Notification';
+
 const riskPercentages = ['0.25', '0.5', '1.0', '1.5', '2.0', '3.0'];
 const functionNames = [
   '7 - SL UP', '8 - TP UP', '9 - 50% CLOSE',
@@ -148,11 +150,19 @@ const SwitchButton = styled.button`
 
 
 
+type NotificationType = 'success' | 'error' | 'warning';
+interface NotificationState {
+  message: string;
+  type: NotificationType;
+}
+
 const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: KeyboardProps) => {
   const [riskPercentage, setRiskPercentage] = useState('1.0');
   const [pipStopLoss, setPipStopLoss] = useState<number>(6);
   const [buttonPressed, setButtonPressed] = useState<string | null>(null);
+  const [notification, setNotification] = useState<NotificationState | null>(null);
   const lastExecutionTimeRef = useRef<number>(0);
+  const notificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const storedStopLoss = localStorage.getItem('stopLoss');
@@ -194,6 +204,14 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     };
   };
 
+  // --- Notification Helper ---
+  const showNotification = (message: string, type: NotificationType) => {
+    setNotification({ message, type });
+    if (notificationTimeoutRef.current) clearTimeout(notificationTimeoutRef.current);
+    notificationTimeoutRef.current = setTimeout(() => {
+      setNotification(null);
+    }, 5000);
+  };
 
   // --- API CALL HELPERS ---
   const callOrderApi = async (orderType: any, mode: string) => {
@@ -202,7 +220,13 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orderType, mode })
     });
-    return res.json();
+    const data = await res.json();
+    if (data.success) {
+      showNotification('Order placed successfully', 'success');
+    } else {
+      showNotification(data.error || 'Order failed', 'error');
+    }
+    return data;
   };
   const callCloseTradeApi = async (orderType: any, pair: string, unitsOverride: any, mode: string) => {
     const res = await fetch('/api/closeTrade', {
@@ -210,7 +234,13 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orderType, pair, unitsOverride, mode })
     });
-    return res.json();
+    const data = await res.json();
+    if (data.success) {
+      showNotification('Trade closed successfully', 'success');
+    } else {
+      showNotification(data.error || 'Close trade failed', 'error');
+    }
+    return data;
   };
   const callModifyTradeApi = async (orderType: any, pairOrTradeId: string, mode: string) => {
     const res = await fetch('/api/modifyTrade', {
@@ -218,7 +248,13 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orderType, pairOrTradeId, mode })
     });
-    return res.json();
+    const data = await res.json();
+    if (data.success) {
+      showNotification('Trade modified successfully', 'success');
+    } else {
+      showNotification(data.error || 'Modify trade failed', 'error');
+    }
+    return data;
   };
 
   const rateLimitedBuyOanda = createRateLimitedFunction(() =>
@@ -234,8 +270,8 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
       case 'oanda':
         switch (functionName) {
           case '0 - CLOSE': callCloseTradeApi({ action: ACTION.CLOSE, pair }, pair, undefined, accountType); break;
-          case '1 - BUY': rateLimitedBuyOanda(); break;
-          case '2 - SELL': rateLimitedSellOanda(); break;
+          case '1 - BUY': rateLimitedBuyOanda(); showNotification('Buy order submitted', 'warning'); break;
+          case '2 - SELL': rateLimitedSellOanda(); showNotification('Sell order submitted', 'warning'); break;
           case '3 - SL AT ENTRY': callModifyTradeApi({ action: ACTION.SLatEntry, pair }, pair, accountType); break;
           case '4 - SL DOWN': callModifyTradeApi({ action: ACTION.MoveSL, action2: ACTION.DOWN, pair }, pair, accountType); break;
           case '5 - TP DOWN': callModifyTradeApi({ action: ACTION.MoveTP, action2: ACTION.DOWN, pair }, pair, accountType); break;
@@ -250,6 +286,14 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
 
   return (
     <>
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+          duration={5000}
+        />
+      )}
       <div style={{ borderTop: '1px solid #ccc', margin: '10px 0' }} />
 
       <h2 style={{ color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>

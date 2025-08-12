@@ -224,7 +224,7 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     if (data.success) {
       showNotification(`Order placed: ${data.reason}`, 'success');
     } else {
-      showNotification(`Order failed: ${data.reason}`, 'error');
+      showNotification(`Order failed: ${data.reason || data.error}`, 'error');
     }
     return data;
   };
@@ -238,7 +238,7 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     if (data.success) {
       showNotification('Trade closed successfully', 'success');
     } else {
-      showNotification(data.error || 'Close trade failed', 'error');
+      showNotification(data.error || `Close trade failed: ${data.reason}`, 'error');
     }
     return data;
   };
@@ -252,7 +252,7 @@ const Keyboard = ({ platform, pair, setPair, accountType, setAccountType }: Keyb
     if (data.success) {
       showNotification(`Trade modified: ${data.reason}`, 'success');
     } else {
-      showNotification(`Modify trade failed: ${data.reason}`, 'error');
+      showNotification(data.error || `Modify trade failed: ${data.reason}`, 'error');
     }
     return data;
   };

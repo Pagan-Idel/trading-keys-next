@@ -36,7 +36,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ) {
         isGood = false;
         reason = 'Order modification rejected';
-        errorMsg = raw.errorMessage || 'Modification rejected';
+        // Build a more detailed error message
+        errorMsg = [
+          raw.errorMessage,
+          raw.errorCode ? `Code: ${raw.errorCode}` : undefined,
+          raw.takeProfitOrderRejectTransaction ? 'TP Reject' : undefined,
+          raw.stopLossOrderRejectTransaction ? 'SL Reject' : undefined
+        ].filter(Boolean).join(' | ');
+        if (!errorMsg) errorMsg = 'Modification rejected';
       }
     }
     res.status(200).json({

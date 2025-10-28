@@ -1,5 +1,5 @@
 Trading Keys App
-Trading Keys is a personal trading application that interacts with both the Match-Trader API and Oanda API to execute trades and implement proper risk management strategies. Currently, the application supports trading the EUR/USD currency pair with automated processes for risk management and trade execution.
+Trading Keys is a personal trading application that interacts with both the Oanda Broker API to execute trades and implement proper risk management strategies. Currently, the application supports trading the EUR/USD currency pair with automated processes for risk management and trade execution.
 
 Note: This application is intended for my personal use only. Cloning, copying, or distributing this project is strictly prohibited.
 

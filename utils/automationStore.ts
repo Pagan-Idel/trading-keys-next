@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { fixMojibake } from './textEncoding';
+import { isRiskProfile, RISK_PROFILES, type RiskProfile } from './dynamicRisk';
 
 export type AutomationLevel = 'debug' | 'info' | 'warn' | 'error';
 export type WorkerState = 'starting' | 'scanning' | 'waiting' | 'in_trade' | 'paused' | 'stopped' | 'error';
@@ -27,6 +28,9 @@ export interface TradeRecordInput {
   closedAt: string;
   realizedPL?: string;
   mode?: 'live' | 'demo';
+  score?: number;
+  riskProfile?: RiskProfile;
+  riskPercentage?: number;
 }
 
 export interface ActiveTradeInput {
@@ -37,6 +41,9 @@ export interface ActiveTradeInput {
   stopLoss?: number;
   takeProfit?: number;
   mode: 'live' | 'demo';
+  score?: number;
+  riskProfile?: RiskProfile;
+  riskPercentage?: number;
 }
 
 const DATA_DIRECTORY = path.resolve(process.cwd(), 'data');
@@ -118,7 +125,23 @@ const getDatabase = (): Database.Database => {
       opened_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS automation_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
+  const ensureColumn = (table: string, column: string, definition: string) => {
+    const columns = database!.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!columns.some(item => item.name === column)) database!.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  };
+  ensureColumn('trades', 'score', 'INTEGER');
+  ensureColumn('trades', 'risk_profile', 'TEXT');
+  ensureColumn('trades', 'risk_percentage', 'REAL');
+  ensureColumn('active_trades', 'score', 'INTEGER');
+  ensureColumn('active_trades', 'risk_profile', 'TEXT');
+  ensureColumn('active_trades', 'risk_percentage', 'REAL');
   runEventRetention(database, true);
   return database;
 };
@@ -195,15 +218,18 @@ export const saveTradeToDatabase = (trade: TradeRecordInput): void => {
   getDatabase().prepare(`
     INSERT INTO trades
       (trade_id, pair, direction, entry, stop_loss, take_profit, outcome,
-       realized_pl, mode, opened_at, closed_at, journal_json)
+       realized_pl, mode, opened_at, closed_at, journal_json, score, risk_profile, risk_percentage)
     VALUES
       (@tradeId, @pair, @direction, @entry, @stopLoss, @takeProfit, @outcome,
-       @realizedPl, @mode, @openedAt, @closedAt, @journalJson)
+       @realizedPl, @mode, @openedAt, @closedAt, @journalJson, @score, @riskProfile, @riskPercentage)
     ON CONFLICT(trade_id) DO UPDATE SET
       outcome = excluded.outcome,
       realized_pl = excluded.realized_pl,
       closed_at = excluded.closed_at,
-      journal_json = excluded.journal_json
+      journal_json = excluded.journal_json,
+      score = excluded.score,
+      risk_profile = excluded.risk_profile,
+      risk_percentage = excluded.risk_percentage
   `).run({
     tradeId: trade.tradeId,
     pair: trade.pair,
@@ -217,6 +243,9 @@ export const saveTradeToDatabase = (trade: TradeRecordInput): void => {
     openedAt,
     closedAt: trade.closedAt,
     journalJson: safeJson(trade.journalData),
+    score: trade.score ?? null,
+    riskProfile: trade.riskProfile ?? null,
+    riskPercentage: trade.riskPercentage ?? null,
   });
 };
 
@@ -224,9 +253,9 @@ export const setActiveTrade = (trade: ActiveTradeInput): void => {
   const now = new Date().toISOString();
   getDatabase().prepare(`
     INSERT INTO active_trades
-      (pair, trade_id, direction, entry, stop_loss, take_profit, mode, opened_at, updated_at)
+      (pair, trade_id, direction, entry, stop_loss, take_profit, mode, opened_at, updated_at, score, risk_profile, risk_percentage)
     VALUES
-      (@pair, @tradeId, @direction, @entry, @stopLoss, @takeProfit, @mode, @now, @now)
+      (@pair, @tradeId, @direction, @entry, @stopLoss, @takeProfit, @mode, @now, @now, @score, @riskProfile, @riskPercentage)
     ON CONFLICT(pair) DO UPDATE SET
       trade_id = excluded.trade_id,
       direction = excluded.direction,
@@ -234,12 +263,18 @@ export const setActiveTrade = (trade: ActiveTradeInput): void => {
       stop_loss = excluded.stop_loss,
       take_profit = excluded.take_profit,
       mode = excluded.mode,
+      score = excluded.score,
+      risk_profile = excluded.risk_profile,
+      risk_percentage = excluded.risk_percentage,
       updated_at = excluded.updated_at
   `).run({
     ...trade,
     stopLoss: trade.stopLoss ?? null,
     takeProfit: trade.takeProfit ?? null,
     now,
+    score: trade.score ?? null,
+    riskProfile: trade.riskProfile ?? null,
+    riskPercentage: trade.riskPercentage ?? null,
   });
 };
 
@@ -251,6 +286,20 @@ export const clearAutomationEvents = (): void => {
   const db = getDatabase();
   db.prepare('DELETE FROM automation_events').run();
   db.pragma('wal_checkpoint(PASSIVE)');
+};
+
+export const getRiskProfile = (): RiskProfile => {
+  const row = getDatabase().prepare(`SELECT value FROM automation_settings WHERE key = 'risk_profile'`).get() as { value?: string } | undefined;
+  return isRiskProfile(row?.value) ? row.value : 'default';
+};
+
+export const setRiskProfile = (profile: RiskProfile): RiskProfile => {
+  getDatabase().prepare(`
+    INSERT INTO automation_settings (key, value, updated_at) VALUES ('risk_profile', ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(profile, new Date().toISOString());
+  recordAutomationEvent({ source: 'risk-manager', step: 'risk_profile_changed', message: `Dynamic risk profile changed to ${RISK_PROFILES[profile].label}.`, data: RISK_PROFILES[profile] });
+  return profile;
 };
 
 export const getAutomationDashboard = (eventLimit = 120) => {
@@ -273,25 +322,44 @@ export const getAutomationDashboard = (eventLimit = 120) => {
   const trades = db.prepare(`
     SELECT trade_id AS tradeId, pair, direction, entry, stop_loss AS stopLoss,
       take_profit AS takeProfit, outcome, realized_pl AS realizedPL, mode,
-      opened_at AS openedAt, closed_at AS closedAt
+      opened_at AS openedAt, closed_at AS closedAt, score, risk_profile AS riskProfile,
+      risk_percentage AS riskPercentage,
+      CAST(json_extract(journal_json, '$.goldilocks.confirmationTime') AS INTEGER) AS confirmationTime
     FROM trades
     ORDER BY closed_at DESC
     LIMIT 250
   `).all();
   const activeTrades = db.prepare(`
     SELECT pair, trade_id AS tradeId, direction, entry, stop_loss AS stopLoss,
-      take_profit AS takeProfit, mode, opened_at AS openedAt, updated_at AS updatedAt
+      take_profit AS takeProfit, mode, opened_at AS openedAt, updated_at AS updatedAt,
+      score, risk_profile AS riskProfile, risk_percentage AS riskPercentage
     FROM active_trades
     ORDER BY pair
   `).all();
   const summary = db.prepare(`
     SELECT
       COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END), 0) AS wins,
+      COALESCE(SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END), 0) AS losses,
+      COALESCE(SUM(realized_pl), 0) AS realizedPL,
+      COALESCE(SUM(CASE WHEN realized_pl > 0 THEN realized_pl ELSE 0 END), 0) AS grossProfit,
+      COALESCE(ABS(SUM(CASE WHEN realized_pl < 0 THEN realized_pl ELSE 0 END)), 0) AS grossLoss
+    FROM trades
+  `).get() as { total: number; wins: number; losses: number; realizedPL: number; grossProfit: number; grossLoss: number };
+
+  const pairPerformance = db.prepare(`
+    SELECT pair, COUNT(*) AS trades,
       SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS wins,
       SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS losses,
-      COALESCE(SUM(realized_pl), 0) AS realizedPL
-    FROM trades
-  `).get() as { total: number; wins: number; losses: number; realizedPL: number };
+      COALESCE(SUM(realized_pl), 0) AS realizedPL,
+      COALESCE(SUM(CASE WHEN realized_pl > 0 THEN realized_pl ELSE 0 END), 0) AS grossProfit,
+      COALESCE(ABS(SUM(CASE WHEN realized_pl < 0 THEN realized_pl ELSE 0 END)), 0) AS grossLoss,
+      AVG(risk_percentage) AS averageRisk
+    FROM trades GROUP BY pair ORDER BY realizedPL DESC
+  `).all();
 
-  return { events, workers, trades, activeTrades, summary };
+  const riskProfile = getRiskProfile();
+  const riskConfig = { selected: riskProfile, profiles: RISK_PROFILES };
+
+  return { events, workers, trades, activeTrades, summary, pairPerformance, riskConfig };
 };

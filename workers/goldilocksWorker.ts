@@ -12,12 +12,13 @@ import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 import { isInHighImpactNewsWindow, getActiveNewsEvent, getNewsGuardError } from '../utils/newsGuard.ts';
 import { getPrecision, isForexMarketOpen, normalizePairKeyUnderscore, wait } from '../utils/shared.ts';
 import { isHolidayCloseWindow, isWeekendCloseWindow } from '../utils/marketCloseGuard.ts';
-import { clearActiveTrade, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
+import { clearActiveTrade, getRiskProfile, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { classifyTradeOutcome, saveTradeRecord, type JournalData } from '../utils/tradeHistory.ts';
 import { GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_LIVE_CANDLE_LIMITS, GOLDILOCKS_TIMEFRAME_SECONDS, getGoldilocksMinimumScore } from '../utils/goldilocksConfig.ts';
 import { fetchCandleHistory } from '../utils/oanda/api/fetchCandleHistory.ts';
 import { scoreGoldilocksSetup, type GoldilocksScoreResult } from '../utils/goldilocksScoring.ts';
+import { calculateScoreRisk, type RiskProfile } from '../utils/dynamicRisk.ts';
 
 const TREND_TIMEFRAME = GOLDILOCKS_DEMO_TIMEFRAMES.trend;
 const ZONE_TIMEFRAME = GOLDILOCKS_DEMO_TIMEFRAMES.zone;
@@ -26,17 +27,11 @@ const CONFIRMATION_SECONDS = GOLDILOCKS_TIMEFRAME_SECONDS[CONFIRMATION_TIMEFRAME
 const CANDLE_CLOSE_GRACE_MS = 350;
 const ZONE_CANDLE_COUNT = 5_000;
 const CONFIRMATION_CANDLE_COUNT = 500;
-const DEFAULT_RISK_PERCENT = 0.25;
-const MAX_RISK_PERCENT = 1;
 
 const pair = process.argv[2] ?? '';
 const modeArg = process.argv.find(argument => argument.startsWith('--mode='));
 const mode: 'live' | 'demo' = modeArg?.split('=')[1] === 'live' ? 'live' : 'demo';
 const usesSharedMarketDataHub = Boolean(process.env.OANDA_MARKET_DATA_HUB_URL);
-const configuredRisk = Number(process.env.GOLDILOCKS_RISK_PERCENT ?? DEFAULT_RISK_PERCENT);
-const riskPercent = Number.isFinite(configuredRisk) && configuredRisk > 0
-  ? Math.min(configuredRisk, MAX_RISK_PERCENT)
-  : DEFAULT_RISK_PERCENT;
 const minimumScore = getGoldilocksMinimumScore();
 
 let killed = false;
@@ -97,6 +92,7 @@ const journalFor = (
   zone: { id: string; kind: string; side: string; low: number; high: number; touches: number; candleTime: number },
   confirmationTime: number,
   score?: GoldilocksScoreResult,
+  risk?: { profile: RiskProfile; riskPercentage: number },
 ): JournalData => ({
   direction,
   rrZone: { low: zone.low, high: zone.high },
@@ -106,7 +102,11 @@ const journalFor = (
   },
   tf: `${TREND_TIMEFRAME}/${ZONE_TIMEFRAME}/${CONFIRMATION_TIMEFRAME}`,
   timestamp: new Date().toISOString(),
-  goldilocks: { zoneId: zone.id, kind: zone.kind, side: zone.side, touches: zone.touches, candleTime: zone.candleTime, confirmationTime, score },
+  goldilocks: {
+    zoneId: zone.id, kind: zone.kind, side: zone.side, touches: zone.touches,
+    candleTime: zone.candleTime, confirmationTime, score,
+    riskProfile: risk?.profile, riskPercentage: risk?.riskPercentage,
+  },
 } as JournalData);
 
 const recordClosedTrade = async (trade: Trade, journal: JournalData, breakEvenActivated: boolean) => {
@@ -171,6 +171,9 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
     stopLoss: stopLoss || undefined,
     takeProfit: takeProfit || undefined,
     mode,
+    score: journal.goldilocks?.score?.total,
+    riskProfile: journal.goldilocks?.riskProfile,
+    riskPercentage: journal.goldilocks?.riskPercentage,
   });
   tradeManagerLog(
     'trade_manager_armed',
@@ -414,6 +417,13 @@ const scan = async () => {
       continue;
     }
 
+    const riskDecision = calculateScoreRisk(score.total, score.minimumScore, getRiskProfile());
+    logMessage(
+      `DYNAMIC RISK | ${pair} | ${score.total}/20 uses ${riskDecision.riskPercentage.toFixed(3)}% account equity (${riskDecision.profile} profile).`,
+      riskDecision,
+      { pair, fileName: 'goldilocksWorker', step: 'dynamic_risk_sized' },
+    );
+
     // Recheck all volatile guards directly before broker submission.
     const finalBlock = await safetyBlockReason();
     const finalOpen = await openNow(pair, mode);
@@ -422,20 +432,20 @@ const scan = async () => {
       return;
     }
     attemptedConfirmations.add(key);
-    updateWorkerStatus(pair, 'scanning', 'placing_trade', `Submitting ${direction} at ${riskPercent}% risk with an exact live 2R target.`, mode);
+    updateWorkerStatus(pair, 'scanning', 'placing_trade', `Submitting ${direction} at ${riskDecision.riskPercentage}% account-equity risk with an exact live 2R target.`, mode);
     const tradeInfo = await placeTrade({
       pair,
       action: direction,
       stopLoss: finalCheck.stopLoss,
       takeProfit: finalCheck.takeProfit,
       exactRewardRisk: 2,
-      risk: riskPercent,
+      risk: riskDecision.riskPercentage,
     }, mode);
     if (!tradeInfo) {
       updateWorkerStatus(pair, 'waiting', 'order_rejected', 'The final execution guard or broker rejected the order.', mode);
       return;
     }
-    const journal = journalFor(direction, tradeInfo.spread, scoringContext.zone, confirmation.confirmationCandle.time, score);
+    const journal = journalFor(direction, tradeInfo.spread, scoringContext.zone, confirmation.confirmationCandle.time, score, riskDecision);
     await monitorTrade({
       id: tradeInfo.tradeId,
       instrument: normalizePairKeyUnderscore(pair),
@@ -462,7 +472,7 @@ const run = async () => {
     undefined,
     { pair, level: initialQuote ? 'info' : 'warn', fileName: 'goldilocksWorker', step: 'market_data_ready' },
   );
-  updateWorkerStatus(pair, 'starting', 'goldilocks_starting', `Goldilocks demo worker starting: ${TREND_TIMEFRAME} trend → ${ZONE_TIMEFRAME} zones → ${CONFIRMATION_TIMEFRAME} touch/confirmation · ${riskPercent}% risk · minimum score ${minimumScore}.`, mode);
+  updateWorkerStatus(pair, 'starting', 'goldilocks_starting', `Goldilocks demo worker starting: ${TREND_TIMEFRAME} trend → ${ZONE_TIMEFRAME} zones → ${CONFIRMATION_TIMEFRAME} touch/confirmation · dynamic ${getRiskProfile()} risk · minimum score ${minimumScore}.`, mode);
   await recoverOpenTrade();
   while (!killed) {
     try {

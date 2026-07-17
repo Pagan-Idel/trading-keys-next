@@ -308,7 +308,9 @@ export const calculateRisk = async (
     }
 
     const pipValuePerUnit = pipValuePerLot / contractSize;
-    const riskAmount = parseFloat(account.balance) * (orderType.risk / 100);
+    // Size against current equity (NAV), which includes open unrealized P/L.
+    const accountEquity = parseFloat(account.NAV || account.balance);
+    const riskAmount = accountEquity * (orderType.risk / 100);
     const units = riskAmount / (stopLossPips * pipValuePerUnit);
 
     // console.log(`💰 Risk Amount: ${riskAmount}`, undefined, { fileName: "shared", pair });

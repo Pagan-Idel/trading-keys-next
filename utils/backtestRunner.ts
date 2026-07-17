@@ -4,6 +4,7 @@ import { forexPairs } from './constants.ts';
 import { fetchCandleHistory } from './oanda/api/fetchCandleHistory.ts';
 import { simulateGoldilocksPair } from './goldilocksBacktest.ts';
 import { addBacktestEvent, createBacktestRun, getActiveBacktestRun, getBacktestRuntime, replaceBacktestTrades, updateBacktestRun, type BacktestRunConfig, type BacktestTradeInput } from './backtestStore.ts';
+import { isRiskProfile } from './dynamicRisk.ts';
 
 const limits:Record<string,number>={M1:250_000,M5:150_000,M15:60_000};
 
@@ -66,6 +67,9 @@ export const startBacktest=(input:Partial<BacktestRunConfig>)=>{
     lookbackDays:Math.min(730,Math.max(30,Math.floor(input.lookbackDays??730))),
     minimumScore:Math.min(20,Math.max(0,Math.floor(input.minimumScore??14))),
     label:String(input.label??`20pt-${new Date().toISOString().slice(0,16)}`).slice(0,80),
+    startingBalance:Math.min(100_000_000,Math.max(1,Number(input.startingBalance??1000))),
+    leverage:[10,20,30,50].includes(Number(input.leverage))?Number(input.leverage):30,
+    riskProfile:isRiskProfile(input.riskProfile)?input.riskProfile:'default',
   };
   const id=randomUUID();
   createBacktestRun(id,config);

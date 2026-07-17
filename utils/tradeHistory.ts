@@ -1,5 +1,6 @@
 import { getLoginMode } from './loginState';
 import { saveTradeToDatabase } from './automationStore';
+import type { RiskProfile } from './dynamicRisk';
 
 export type JournalData = {
   swingA?: unknown;
@@ -16,7 +17,17 @@ export type JournalData = {
   };
   tf: string;
   timestamp: string;
-  goldilocks?: unknown;
+  goldilocks?: {
+    zoneId?: string;
+    kind?: string;
+    side?: string;
+    touches?: number;
+    candleTime?: number;
+    confirmationTime?: number;
+    score?: { total?: number };
+    riskProfile?: RiskProfile;
+    riskPercentage?: number;
+  };
   tradeManagement?: {
     breakEvenAtOneR: boolean;
     breakEvenActivated: boolean;
@@ -58,5 +69,8 @@ export async function saveTradeRecord(
     closedAt: new Date().toISOString(),
     realizedPL,
     mode,
+    score: journalData.goldilocks?.score?.total,
+    riskProfile: journalData.goldilocks?.riskProfile,
+    riskPercentage: journalData.goldilocks?.riskPercentage,
   });
 }

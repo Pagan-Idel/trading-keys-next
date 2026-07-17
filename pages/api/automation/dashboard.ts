@@ -1,9 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getAutomationDashboard } from '../../../utils/automationStore';
+import { getAutomationDashboard, setRiskProfile } from '../../../utils/automationStore';
+import { isRiskProfile } from '../../../utils/dynamicRisk';
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
+  if (!['GET', 'POST'].includes(req.method ?? '')) {
+    res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
@@ -14,6 +15,10 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     res.setHeader('Cache-Control', 'no-store');
+    if (req.method === 'POST') {
+      if (!isRiskProfile(req.body?.riskProfile)) return res.status(400).json({ error: 'Risk profile must be easy, default, or aggressive.' });
+      setRiskProfile(req.body.riskProfile);
+    }
     return res.status(200).json({
       ...getAutomationDashboard(eventLimit),
       generatedAt: new Date().toISOString(),
@@ -23,4 +28,3 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(500).json({ error: 'Failed to load automation dashboard' });
   }
 }
-

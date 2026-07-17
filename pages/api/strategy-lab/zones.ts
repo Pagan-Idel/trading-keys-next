@@ -8,6 +8,8 @@ import { annotateConfluenceAt, buildGoldilocksHistoryChunked, getGoldilocksRange
 import { GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_LIVE_CANDLE_LIMITS, getGoldilocksMinimumScore } from '../../../utils/goldilocksConfig';
 import { scoreGoldilocksSetup } from '../../../utils/goldilocksScoring';
 
+const replayCache=new Map<string,{expiresAt:number;payload:unknown}>();
+
 const isBullishPair = (left: string, right: string) =>
   ['LL','HL','L'].includes(left) && ['HH','LH','H'].includes(right);
 const isBearishPair = (left: string, right: string) =>
@@ -61,9 +63,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const pair = String(req.query.pair ?? 'EUR/USD').toUpperCase();
   if (!forexPairs.includes(pair)) return res.status(400).json({ error: 'Unsupported pair' });
   const timeframe = String(req.query.timeframe ?? 'M15').toUpperCase();
+  const requestedTradeTime = Number(req.query.tradeTime);
   const supportedTimeframes = ['M5', 'M15', 'M30', 'H1', 'H4'];
   if (!supportedTimeframes.includes(timeframe)) {
     return res.status(400).json({ error: 'Unsupported timeframe' });
+  }
+  const replayCacheKey=Number.isFinite(requestedTradeTime)?`${pair}:${timeframe}:${requestedTradeTime}`:'';
+  const cachedReplay=replayCacheKey?replayCache.get(replayCacheKey):undefined;
+  if(cachedReplay&&cachedReplay.expiresAt>Date.now()){
+    res.setHeader('Cache-Control','private, max-age=60');
+    return res.status(200).json(cachedReplay.payload);
   }
 
   try {
@@ -265,7 +274,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return completedSetups;
     }) as Array<{zone:(typeof zoneHistory.activeZones)[number];confirmationTimeframe:string;confirmationTime:number;confirmationCandle:(typeof strategyCandles)[number];runway:ReturnType<typeof validateTwoToOneRunway>;trend:ReturnType<typeof getGoldilocksTrend>;score:ReturnType<typeof scoreGoldilocksSetup>;outcome:'win'|'loss'|'open';exitReason:'target'|'stop'|'break_even'|'open';breakEvenActivated:boolean;outcomeTime?:number}>;
     const openHistoricalSetups=historicalEntrySetups.filter(setup=>setup.outcome==='open').sort((a,b)=>a.confirmationTime-b.confirmationTime);
-    const historicalEntrySetup=openHistoricalSetups[0]??historicalEntrySetups.sort((a,b)=>b.confirmationTime-a.confirmationTime)[0]??null;
+    const nearestRequestedSetup=Number.isFinite(requestedTradeTime)
+      ? [...historicalEntrySetups].sort((a,b)=>Math.abs(a.confirmationTime-requestedTradeTime)-Math.abs(b.confirmationTime-requestedTradeTime))[0]??null
+      : null;
+    const requestedHistoricalEntrySetup=nearestRequestedSetup&&Math.abs(nearestRequestedSetup.confirmationTime-requestedTradeTime)<=60
+      ?nearestRequestedSetup
+      :null;
+    const historicalEntrySetup=Number.isFinite(requestedTradeTime)
+      ?requestedHistoricalEntrySetup
+      :openHistoricalSetups[0]??historicalEntrySetups.sort((a,b)=>b.confirmationTime-a.confirmationTime)[0]??null;
     const runwayChecks = detection.zones.map((zone) => ({
       zoneId: zone.id,
       ...validateTwoToOneRunway(zone, zoneHistory.activeZones),
@@ -315,7 +332,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }));
 
     res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).json({
+    const payload={
       pair,
       timeframe,
       currentTrend,
@@ -328,6 +345,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       runwayChecks,
       finalEntryChecks,
       historicalEntrySetup,
+      requestedTradeTime:Number.isFinite(requestedTradeTime)?requestedTradeTime:null,
+      historicalMatchDeltaSeconds:requestedHistoricalEntrySetup?Math.abs(requestedHistoricalEntrySetup.confirmationTime-requestedTradeTime):null,
       historicalEntrySetups,
       backtestCoverage:{
         from:historicalCandles[0]?.time??null,
@@ -364,7 +383,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           candleIndex: item.candleIndex - viewStart,
         })),
       },
-    });
+    };
+    if(replayCacheKey){
+      if(replayCache.size>=30)replayCache.delete(replayCache.keys().next().value!);
+      replayCache.set(replayCacheKey,{expiresAt:Date.now()+5*60_000,payload});
+    }
+    return res.status(200).json(payload);
   } catch (error) {
     console.error('[strategy-lab/zones]', error);
     return res.status(500).json({ error: (error as Error).message });

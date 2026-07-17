@@ -52,14 +52,42 @@ const marketContextAt=(index:MarketContextPoint[],time:number,entry:number,direc
   const aligned=direction==='BUY'?entry<=point.midpoint:entry>=point.midpoint;
   return {trend:point.trend,rangeAssessment:{aligned,low:point.low,high:point.high,midpoint:point.midpoint,detail:`${direction} entry ${entry} is ${aligned?'in the correct':'in the opposite'} half of M15 range ${point.low}-${point.high} (midpoint ${point.midpoint}).`}};
 };
-export const resolveProtectedOutcome=(candles:StrategyCandle[],startIndex:number,direction:'BUY'|'SELL',stopLoss:number,oneR:number)=>{
+const runnerFractionForScore=(score?:number)=>score==null||score<16?0:score<18?.25:.5;
+const blendedRunnerR=(runnerFraction:number,runnerExitR:number)=>(1-runnerFraction)*2+runnerFraction*runnerExitR;
+
+export const resolveProtectedOutcome=(candles:StrategyCandle[],startIndex:number,direction:'BUY'|'SELL',stopLoss:number,oneR:number,takeProfit?:number,score?:number)=>{
+  const entry=(stopLoss+oneR)/2;
+  const risk=Math.abs(entry-stopLoss);
+  const target=takeProfit??(direction==='BUY'?entry+Math.abs(entry-stopLoss)*2:entry-Math.abs(entry-stopLoss)*2);
+  const runnerTarget=direction==='BUY'?entry+risk*4:entry-risk*4;
+  const runnerFraction=runnerFractionForScore(score);
+  let protectedAt=-1;
+  let partialAt=-1;
   for(let index=startIndex;index<candles.length;index+=1){
     const candle=candles[index];
-    const stopped=direction==='BUY'?candle.low<=stopLoss:candle.high>=stopLoss;
-    const protectedAtOneR=direction==='BUY'?candle.high>=oneR:candle.low<=oneR;
-    if(stopped||protectedAtOneR)return {outcome:(protectedAtOneR&&!stopped?'WIN':'LOSS') as 'WIN'|'LOSS',outcomeTime:candle.time,exitReason:(protectedAtOneR&&!stopped?'one_r_protected':'stop') as 'one_r_protected'|'stop'};
+    if(partialAt>=0){
+      const runnerStopped=direction==='BUY'?candle.low<=oneR:candle.high>=oneR;
+      const runnerWon=direction==='BUY'?candle.high>=runnerTarget:candle.low<=runnerTarget;
+      if(runnerStopped)return {outcome:'WIN' as const,outcomeTime:candle.time,exitReason:'runner_stop' as const,realizedR:blendedRunnerR(runnerFraction,1)};
+      if(runnerWon)return {outcome:'WIN' as const,outcomeTime:candle.time,exitReason:'runner_target' as const,realizedR:blendedRunnerR(runnerFraction,4)};
+      continue;
+    }
+    if(protectedAt<0){
+      const stopped=direction==='BUY'?candle.low<=stopLoss:candle.high>=stopLoss;
+      const reachedOneR=direction==='BUY'?candle.high>=oneR:candle.low<=oneR;
+      const reachedTarget=direction==='BUY'?candle.high>=target:candle.low<=target;
+      if(stopped)return {outcome:'LOSS' as const,outcomeTime:candle.time,exitReason:'stop' as const,realizedR:-1};
+      if(reachedTarget){if(!runnerFraction)return {outcome:'WIN' as const,outcomeTime:candle.time,exitReason:'target' as const,realizedR:2};partialAt=index;continue}
+      if(reachedOneR)protectedAt=index;
+      continue;
+    }
+    const breakEven=direction==='BUY'?candle.low<=entry:candle.high>=entry;
+    const reachedTarget=direction==='BUY'?candle.high>=target:candle.low<=target;
+    if(breakEven)return {outcome:'WIN' as const,outcomeTime:candle.time,exitReason:'break_even' as const,realizedR:0};
+    if(reachedTarget){if(!runnerFraction)return {outcome:'WIN' as const,outcomeTime:candle.time,exitReason:'target' as const,realizedR:2};partialAt=index}
   }
-  return null;
+  if(partialAt>=0&&candles.length)return {outcome:'WIN' as const,outcomeTime:candles[candles.length-1].time,exitReason:'runner_open' as const,realizedR:blendedRunnerR(runnerFraction,1)};
+  return protectedAt>=0&&candles.length?{outcome:'WIN' as const,outcomeTime:candles[candles.length-1].time,exitReason:'one_r_protected' as const,realizedR:0}:null;
 };
 
 export const buildProtectedOutcomeResolver=(candles:StrategyCandle[])=>{
@@ -91,13 +119,38 @@ export const buildProtectedOutcomeResolver=(candles:StrategyCandle[])=>{
     const first=firstLowAtMost(start,value,node*2,left,midpoint);
     return first>=0?first:firstLowAtMost(start,value,node*2+1,midpoint+1,right);
   };
-  return (startIndex:number,direction:'BUY'|'SELL',stopLoss:number,oneR:number)=>{
+  return (startIndex:number,direction:'BUY'|'SELL',stopLoss:number,oneR:number,takeProfit?:number,score?:number)=>{
+    const entry=(stopLoss+oneR)/2;
+    const risk=Math.abs(entry-stopLoss);
+    const target=takeProfit??(direction==='BUY'?entry+Math.abs(entry-stopLoss)*2:entry-Math.abs(entry-stopLoss)*2);
+    const runnerTarget=direction==='BUY'?entry+risk*4:entry-risk*4;
+    const runnerFraction=runnerFractionForScore(score);
     const stopIndex=direction==='BUY'?firstLowAtMost(startIndex,stopLoss):firstHighAtLeast(startIndex,stopLoss);
     const protectedIndex=direction==='BUY'?firstHighAtLeast(startIndex,oneR):firstLowAtMost(startIndex,oneR);
-    if(stopIndex<0&&protectedIndex<0)return null;
-    const outcomeIndex=stopIndex<0?protectedIndex:protectedIndex<0?stopIndex:Math.min(stopIndex,protectedIndex);
-    const protectedFirst=protectedIndex>=0&&(stopIndex<0||protectedIndex<stopIndex);
-    return {outcome:(protectedFirst?'WIN':'LOSS') as 'WIN'|'LOSS',outcomeTime:candles[outcomeIndex].time,exitReason:(protectedFirst?'one_r_protected':'stop') as 'one_r_protected'|'stop'};
+    if(protectedIndex<0)return stopIndex>=0?{outcome:'LOSS' as const,outcomeTime:candles[stopIndex].time,exitReason:'stop' as const,realizedR:-1}:null;
+    if(stopIndex>=0&&stopIndex<=protectedIndex)return {outcome:'LOSS' as const,outcomeTime:candles[stopIndex].time,exitReason:'stop' as const,realizedR:-1};
+    const directTargetIndex=direction==='BUY'?firstHighAtLeast(startIndex,target):firstLowAtMost(startIndex,target);
+    if(directTargetIndex===protectedIndex){
+      if(!runnerFraction)return {outcome:'WIN' as const,outcomeTime:candles[directTargetIndex].time,exitReason:'target' as const,realizedR:2};
+      const after=directTargetIndex+1;
+      const runnerStopIndex=direction==='BUY'?firstLowAtMost(after,oneR):firstHighAtLeast(after,oneR);
+      const runnerTargetIndex=direction==='BUY'?firstHighAtLeast(after,runnerTarget):firstLowAtMost(after,runnerTarget);
+      if(runnerStopIndex<0&&runnerTargetIndex<0)return {outcome:'WIN' as const,outcomeTime:candles[candles.length-1].time,exitReason:'runner_open' as const,realizedR:blendedRunnerR(runnerFraction,1)};
+      if(runnerStopIndex>=0&&(runnerTargetIndex<0||runnerStopIndex<=runnerTargetIndex))return {outcome:'WIN' as const,outcomeTime:candles[runnerStopIndex].time,exitReason:'runner_stop' as const,realizedR:blendedRunnerR(runnerFraction,1)};
+      return {outcome:'WIN' as const,outcomeTime:candles[runnerTargetIndex].time,exitReason:'runner_target' as const,realizedR:blendedRunnerR(runnerFraction,4)};
+    }
+    const after=protectedIndex+1;
+    const breakEvenIndex=direction==='BUY'?firstLowAtMost(after,entry):firstHighAtLeast(after,entry);
+    const targetIndex=direction==='BUY'?firstHighAtLeast(after,target):firstLowAtMost(after,target);
+    if(breakEvenIndex<0&&targetIndex<0)return {outcome:'WIN' as const,outcomeTime:candles[candles.length-1].time,exitReason:'one_r_protected' as const,realizedR:0};
+    if(breakEvenIndex>=0&&(targetIndex<0||breakEvenIndex<=targetIndex))return {outcome:'WIN' as const,outcomeTime:candles[breakEvenIndex].time,exitReason:'break_even' as const,realizedR:0};
+    if(!runnerFraction)return {outcome:'WIN' as const,outcomeTime:candles[targetIndex].time,exitReason:'target' as const,realizedR:2};
+    const runnerAfter=targetIndex+1;
+    const runnerStopIndex=direction==='BUY'?firstLowAtMost(runnerAfter,oneR):firstHighAtLeast(runnerAfter,oneR);
+    const runnerTargetIndex=direction==='BUY'?firstHighAtLeast(runnerAfter,runnerTarget):firstLowAtMost(runnerAfter,runnerTarget);
+    if(runnerStopIndex<0&&runnerTargetIndex<0)return {outcome:'WIN' as const,outcomeTime:candles[candles.length-1].time,exitReason:'runner_open' as const,realizedR:blendedRunnerR(runnerFraction,1)};
+    if(runnerStopIndex>=0&&(runnerTargetIndex<0||runnerStopIndex<=runnerTargetIndex))return {outcome:'WIN' as const,outcomeTime:candles[runnerStopIndex].time,exitReason:'runner_stop' as const,realizedR:blendedRunnerR(runnerFraction,1)};
+    return {outcome:'WIN' as const,outcomeTime:candles[runnerTargetIndex].time,exitReason:'runner_target' as const,realizedR:blendedRunnerR(runnerFraction,4)};
   };
 };
 
@@ -168,7 +221,7 @@ export const simulateGoldilocksPair=(input:GoldilocksBacktestInput):BacktestTrad
         });
         if(score.eligible){
           const oneR=direction==='BUY'?runway.entry+runway.risk:runway.entry-runway.risk;
-          const resolved=resolveOutcome(index+1,direction,runway.stopLoss,oneR);
+          const resolved=resolveOutcome(index+1,direction,runway.stopLoss,oneR,runway.takeProfit,score.total);
           const result:BacktestTradeInput|null=resolved?{runId:input.runId,pair:input.pair,zoneId:zone.id,zoneKind:zone.kind,direction,
             confirmationTime:candle.time,...resolved,entry:runway.entry,stopLoss:runway.stopLoss,
             oneR,takeProfit:runway.takeProfit,score:score.total,scoreJson:score,priorTouches:state.priorTouches,maxPenetration:state.priorMaxPenetration,

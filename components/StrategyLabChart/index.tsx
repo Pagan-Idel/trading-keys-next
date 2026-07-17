@@ -195,6 +195,12 @@ export default function StrategyLabChart({direction,scenario,runwayExample='bloc
       addRunwayLine(runway.takeProfit,'#2edb91','TARGET · 2R');
     }
     chart.timeScale().fitContent();
+    if(scenario?.tradeSetup&&entryTime!==undefined){
+      let closestIndex=0;
+      let closestDistance=Number.POSITIVE_INFINITY;
+      candles.forEach((candle,index)=>{const distance=Math.abs(Number(candle.time)-Number(entryTime));if(distance<closestDistance){closestDistance=distance;closestIndex=index}});
+      chart.timeScale().setVisibleLogicalRange({from:Math.max(0,closestIndex-70),to:Math.min(candles.length-1,closestIndex+70)});
+    }
     chartRef.current=chart;seriesRef.current=series;
     const place=()=>{setPositions(zones.flatMap(zone=>{const left=chart.timeScale().timeToCoordinate(zone.startTime);const right=chart.timeScale().timeToCoordinate(zone.endTime);const top=series.priceToCoordinate(zone.high);const bottom=series.priceToCoordinate(zone.low);const baseX=chart.timeScale().timeToCoordinate(zone.baseTime);return left===null||right===null||top===null||bottom===null||baseX===null?[]:[{...zone,left,top,width:Math.max(2,right-left),height:Math.max(2,bottom-top),baseX}]}));if(runway&&entryTime!==undefined){const startTime=entryTime;const lastTime=Number(candles[candles.length-1].time);const previousTime=Number(candles[Math.max(0,candles.length-2)].time);const interval=Math.max(1,lastTime-previousTime);const ratioEndTime=(scenario?.tradeSetup?.outcomeTime??Math.max(lastTime,Number(startTime)+interval)) as UTCTimestamp;const left=chart.timeScale().timeToCoordinate(startTime);const right=chart.timeScale().timeToCoordinate(ratioEndTime);const entryY=series.priceToCoordinate(runway.entry);const stopY=series.priceToCoordinate(runway.stopLoss);const targetY=series.priceToCoordinate(runway.takeProfit);setRatioPosition(left===null||right===null||entryY===null||stopY===null||targetY===null?null:{left,width:Math.max(4,right-left),entryY,stopY,targetY})}else setRatioPosition(null)};
     const timer=window.setTimeout(place,50);

@@ -182,7 +182,24 @@ points but may still qualify if its total meets the threshold and every gate pas
 Configuration:
 
 - `GOLDILOCKS_MIN_SCORE`, default 14 and clamped to 0-20
-- `GOLDILOCKS_RISK_PERCENT`, default 0.25 and clamped to a maximum of 1
+- Dynamic risk profile, selected from the Automation dashboard and stored in SQLite
+
+### Score-powered fixed-fractional risk
+
+Position size uses current OANDA account equity (NAV), the selected zone stop distance,
+and a score-derived risk percentage. Scores between the eligible threshold and 20 are
+linearly interpolated:
+
+| Profile | Risk at 14/20 | Risk at 20/20 |
+| --- | ---: | ---: |
+| Easy | 0.10% | 0.25% |
+| Default | 0.25% | 0.50% |
+| Aggressive | 0.50% | 1.00% |
+
+If the configured minimum score changes, that minimum becomes the lower endpoint of
+the curve. The profile can be changed without restarting workers. Every new trade
+stores its score, profile, and exact risk percentage. Existing trades retain their
+original sizing metadata.
 
 ## Position sizing and trade management
 

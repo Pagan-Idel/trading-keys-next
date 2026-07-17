@@ -1,12 +1,13 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import type { RiskProfile } from './dynamicRisk.ts';
 
 export type BacktestStatus='queued'|'running'|'completed'|'failed'|'cancelled';
-export interface BacktestRunConfig {pairs:string[];lookbackDays:number;minimumScore:number;label:string;}
+export interface BacktestRunConfig {pairs:string[];lookbackDays:number;minimumScore:number;label:string;startingBalance?:number;leverage?:number;riskProfile?:RiskProfile;protectedWinR?:number;}
 export interface BacktestTradeInput {
   runId:string;pair:string;zoneId:string;zoneKind:string;direction:'BUY'|'SELL';confirmationTime:number;
-  outcome:'WIN'|'LOSS';outcomeTime:number;exitReason:'one_r_protected'|'stop';entry:number;stopLoss:number;
+  outcome:'WIN'|'LOSS';outcomeTime:number;exitReason:'target'|'break_even'|'runner_target'|'runner_stop'|'runner_open'|'one_r_protected'|'stop';realizedR:number;entry:number;stopLoss:number;
   oneR:number;takeProfit:number;score:number;scoreJson:unknown;priorTouches:number;maxPenetration:number;
   availableRrr:number;confluenceCount:number;trend:string;
 }
@@ -48,6 +49,8 @@ const database=()=>{
   if(!columns.has('heartbeat_at'))db.exec('ALTER TABLE backtest_runs ADD COLUMN heartbeat_at TEXT');
   if(!columns.has('progress_stage'))db.exec('ALTER TABLE backtest_runs ADD COLUMN progress_stage TEXT');
   if(!columns.has('progress_percent'))db.exec('ALTER TABLE backtest_runs ADD COLUMN progress_percent REAL NOT NULL DEFAULT 0');
+  const tradeColumns=new Set((db.prepare('PRAGMA table_info(backtest_trades)').all() as Array<{name:string}>).map(column=>column.name));
+  if(!tradeColumns.has('realized_r'))db.exec('ALTER TABLE backtest_trades ADD COLUMN realized_r REAL');
   return db;
 };
 const json=(value:unknown)=>JSON.stringify(value,(_key,item)=>Number.isFinite(item)?item:item===Infinity?'unlimited':item);
@@ -58,6 +61,19 @@ export const createBacktestRun=(id:string,config:BacktestRunConfig)=>database().
 `).run(id,config.label,json(config),json(config.pairs),new Date().toISOString(),config.pairs.length);
 export const getActiveBacktestRun=()=>database().prepare(`SELECT id FROM backtest_runs WHERE status IN ('queued','running') ORDER BY created_at DESC LIMIT 1`).get() as {id:string}|undefined;
 export const getBacktestRuntime=(id:string)=>database().prepare(`SELECT id,status,worker_pid AS workerPid FROM backtest_runs WHERE id=?`).get(id) as {id:string;status:BacktestStatus;workerPid:number|null}|undefined;
+export const deleteBacktestRun=(id:string)=>{
+  const d=database();
+  const run=d.prepare('SELECT id,status,label FROM backtest_runs WHERE id=?').get(id) as {id:string;status:BacktestStatus;label:string}|undefined;
+  if(!run)throw new Error('Backtest run not found.');
+  if(run.status==='running'||run.status==='queued')throw new Error('Cancel this backtest before deleting it.');
+  const removed=d.transaction(()=>{
+    const trades=d.prepare('DELETE FROM backtest_trades WHERE run_id=?').run(id).changes;
+    const events=d.prepare('DELETE FROM backtest_events WHERE run_id=?').run(id).changes;
+    const runs=d.prepare('DELETE FROM backtest_runs WHERE id=?').run(id).changes;
+    return {runs,trades,events};
+  })();
+  return {deleted:true,id,label:run.label,...removed};
+};
 export const updateBacktestRun=(id:string,fields:Record<string,unknown>)=>{
   const allowed:Record<string,string>={status:'status',label:'label',startedAt:'started_at',completedAt:'completed_at',progressPair:'progress_pair',progressDone:'progress_done',progressStage:'progress_stage',progressPercent:'progress_percent',workerPid:'worker_pid',heartbeatAt:'heartbeat_at',totalTrades:'total_trades',wins:'wins',losses:'losses',error:'error'};
   const entries=Object.entries(fields).filter(([key])=>allowed[key]);
@@ -71,9 +87,9 @@ export const replaceBacktestTrades=(runId:string,trades:BacktestTradeInput[])=>{
   const d=database();
   const insert=d.prepare(`INSERT INTO backtest_trades(
     run_id,pair,zone_id,zone_kind,direction,confirmation_time,outcome,outcome_time,exit_reason,
-    entry,stop_loss,one_r,take_profit,score,score_json,prior_touches,max_penetration,available_rrr,confluence_count,trend
+    entry,stop_loss,one_r,take_profit,score,score_json,prior_touches,max_penetration,available_rrr,confluence_count,trend,realized_r
   ) VALUES(@runId,@pair,@zoneId,@zoneKind,@direction,@confirmationTime,@outcome,@outcomeTime,@exitReason,
-    @entry,@stopLoss,@oneR,@takeProfit,@score,@scoreJson,@priorTouches,@maxPenetration,@availableRrr,@confluenceCount,@trend)`);
+    @entry,@stopLoss,@oneR,@takeProfit,@score,@scoreJson,@priorTouches,@maxPenetration,@availableRrr,@confluenceCount,@trend,@realizedR)`);
   d.transaction(()=>{d.prepare('DELETE FROM backtest_trades WHERE run_id=?').run(runId);for(const trade of trades)insert.run({...trade,scoreJson:json(trade.scoreJson),availableRrr:Number.isFinite(trade.availableRrr)?trade.availableRrr:null});})();
 };
 export const getBacktestDashboard=(runId?:string)=>{
@@ -84,12 +100,22 @@ export const getBacktestDashboard=(runId?:string)=>{
     total_trades AS totalTrades,wins,losses,error FROM backtest_runs ORDER BY created_at DESC LIMIT 30`).all() as Array<Record<string,unknown>>;
   const selected=runId??String(runs[0]?.id??'');
   const trades=selected?d.prepare(`SELECT id,pair,zone_id AS zoneId,zone_kind AS zoneKind,direction,confirmation_time AS confirmationTime,
-    outcome,outcome_time AS outcomeTime,exit_reason AS exitReason,entry,stop_loss AS stopLoss,one_r AS oneR,take_profit AS takeProfit,
+    outcome,outcome_time AS outcomeTime,exit_reason AS exitReason,realized_r AS realizedR,entry,stop_loss AS stopLoss,one_r AS oneR,take_profit AS takeProfit,
     score,prior_touches AS priorTouches,max_penetration AS maxPenetration,available_rrr AS availableRrr,
-    confluence_count AS confluenceCount,trend FROM backtest_trades WHERE run_id=? ORDER BY confirmation_time DESC LIMIT 1000`).all(selected):[];
+    confluence_count AS confluenceCount,trend FROM backtest_trades WHERE run_id=? ORDER BY confirmation_time DESC`).all(selected):[];
   const pairs=selected?d.prepare(`SELECT pair,COUNT(*) AS trades,SUM(outcome='WIN') AS wins,SUM(outcome='LOSS') AS losses,
     ROUND(100.0*SUM(outcome='WIN')/COUNT(*),1) AS winRate,ROUND(AVG(score),1) AS averageScore,
-    SUM(exit_reason='one_r_protected') AS protectedWins FROM backtest_trades WHERE run_id=? GROUP BY pair ORDER BY pair`).all(selected):[];
+    SUM(outcome='WIN') AS protectedWins FROM backtest_trades WHERE run_id=? GROUP BY pair ORDER BY pair`).all(selected):[];
+  const leaderboard=(d.prepare(`SELECT r.id AS runId,r.label,r.created_at AS createdAt,r.completed_at AS completedAt,
+    r.config_json AS configJson,t.pair,COUNT(*) AS trades,SUM(t.outcome='WIN') AS wins,SUM(t.outcome='LOSS') AS losses,
+    ROUND(100.0*SUM(t.outcome='WIN')/COUNT(*),1) AS winRate,ROUND(AVG(t.score),1) AS averageScore,
+    SUM(t.outcome='WIN') AS protectedWins
+    FROM backtest_runs r JOIN backtest_trades t ON t.run_id=r.id
+    WHERE r.status='completed'
+    GROUP BY r.id,t.pair
+    ORDER BY winRate DESC,trades DESC,r.created_at DESC`).all() as Array<Record<string,unknown>>).map(row=>({
+      ...row,config:JSON.parse(String(row.configJson)),configJson:undefined
+    }));
   const events=selected?d.prepare(`SELECT id,created_at AS createdAt,pair,step,message FROM backtest_events WHERE run_id=? ORDER BY id DESC LIMIT 200`).all(selected):[];
-  return {runs:selected?runs.map(run=>({...run,config:JSON.parse(String(run.configJson)),configJson:undefined})):runs,selectedRunId:selected,trades,pairs,events};
+  return {runs:selected?runs.map(run=>({...run,config:JSON.parse(String(run.configJson)),configJson:undefined})):runs,selectedRunId:selected,trades,pairs,leaderboard,events};
 };

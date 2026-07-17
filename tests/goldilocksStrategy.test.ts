@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { calculateScoreRisk } from '../utils/dynamicRisk.ts';
 import {
   detectGoldilocksZones,
   detectGoldilocksZoneHistory,
@@ -34,11 +35,13 @@ test('classifies a break-even stop after reaching 1R as a protected win',()=>{
   assert.equal(classifyTradeOutcome('0.00',false),'LOSS');
 });
 
-test('backtest records +1R immediately as a protected win and treats ambiguous stop candles conservatively',()=>{
-  const clean=[{time:1,open:100,high:102.1,low:99.5,close:101.5}];
-  assert.deepEqual(resolveProtectedOutcome(clean,0,'BUY',98,102),{outcome:'WIN',outcomeTime:1,exitReason:'one_r_protected'});
+test('backtest follows +1R protection through break-even or the final 2R target and treats ambiguous stop candles conservatively',()=>{
+  const clean=[{time:1,open:100,high:102.1,low:99.5,close:101.5},{time:2,open:101.5,high:101.7,low:99.9,close:100.2}];
+  assert.deepEqual(resolveProtectedOutcome(clean,0,'BUY',98,102),{outcome:'WIN',outcomeTime:2,exitReason:'break_even',realizedR:0});
+  const target=[{time:1,open:100,high:102.1,low:99.5,close:101.5},{time:2,open:102,high:104.1,low:101,close:104}];
+  assert.deepEqual(resolveProtectedOutcome(target,0,'BUY',98,102),{outcome:'WIN',outcomeTime:2,exitReason:'target',realizedR:2});
   const ambiguous=[{time:2,open:100,high:102.1,low:97.9,close:101}];
-  assert.deepEqual(resolveProtectedOutcome(ambiguous,0,'BUY',98,102),{outcome:'LOSS',outcomeTime:2,exitReason:'stop'});
+  assert.deepEqual(resolveProtectedOutcome(ambiguous,0,'BUY',98,102),{outcome:'LOSS',outcomeTime:2,exitReason:'stop',realizedR:-1});
 });
 
 test('indexed backtest outcomes match the candle-by-candle reference resolver',()=>{
@@ -56,6 +59,21 @@ test('indexed backtest outcomes match the candle-by-candle reference resolver',(
       }
     }
   }
+});
+
+test('score-tiered runners blend partial 2R profit with the protected runner result',()=>{
+  const runnerStop=[
+    {time:1,open:100,high:102.1,low:99.5,close:102},
+    {time:2,open:102,high:104.1,low:101.5,close:104},
+    {time:3,open:104,high:104.2,low:101.9,close:102},
+  ];
+  assert.deepEqual(resolveProtectedOutcome(runnerStop,0,'BUY',98,102,104,16),{outcome:'WIN',outcomeTime:3,exitReason:'runner_stop',realizedR:1.75});
+  const runnerTarget=[
+    {time:1,open:100,high:104.1,low:99.5,close:104},
+    {time:2,open:104,high:108.1,low:103,close:108},
+  ];
+  assert.deepEqual(resolveProtectedOutcome(runnerTarget,0,'BUY',98,102,104,18),{outcome:'WIN',outcomeTime:2,exitReason:'runner_target',realizedR:3});
+  assert.deepEqual(resolveProtectedOutcome(runnerTarget,0,'BUY',98,102,104,15),{outcome:'WIN',outcomeTime:1,exitReason:'target',realizedR:2});
 });
 
 test('enforces the shared three-pip spread guard and applies its buffer',()=>{
@@ -539,4 +557,13 @@ test('groups alternating-color overlapping sideways candles into one continuatio
   assert.equal(continuations[0].candleIndex,4);
   assert.equal(continuations[0].low,102.7);
   assert.equal(continuations[0].high,103.55);
+});
+test('scales fixed-fractional risk from the eligible score to 20 for each profile', () => {
+  assert.equal(calculateScoreRisk(14, 14, 'easy').riskPercentage, 0.1);
+  assert.equal(calculateScoreRisk(20, 14, 'easy').riskPercentage, 0.25);
+  assert.equal(calculateScoreRisk(14, 14, 'default').riskPercentage, 0.25);
+  assert.equal(calculateScoreRisk(17, 14, 'default').riskPercentage, 0.375);
+  assert.equal(calculateScoreRisk(20, 14, 'default').riskPercentage, 0.5);
+  assert.equal(calculateScoreRisk(14, 14, 'aggressive').riskPercentage, 0.5);
+  assert.equal(calculateScoreRisk(20, 14, 'aggressive').riskPercentage, 1);
 });

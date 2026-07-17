@@ -1,5 +1,5 @@
 import type { NextApiRequest,NextApiResponse } from 'next';
-import { getBacktestDashboard } from '../../../utils/backtestStore';
+import { deleteBacktestRun,getBacktestDashboard } from '../../../utils/backtestStore';
 import { cancelBacktest, startBacktest } from '../../../utils/backtestRunner';
 
 export default function handler(req:NextApiRequest,res:NextApiResponse){
@@ -9,6 +9,7 @@ export default function handler(req:NextApiRequest,res:NextApiResponse){
     if(req.method==='DELETE'){
       const id=typeof req.query.runId==='string'?req.query.runId:String(req.body?.runId??'');
       if(!id)throw new Error('A backtest run ID is required.');
+      if(req.query.permanent==='true')return res.status(200).json(deleteBacktestRun(id));
       return res.status(200).json(cancelBacktest(id));
     }
     res.setHeader('Allow','GET, POST, DELETE');

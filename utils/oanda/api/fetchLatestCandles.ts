@@ -7,7 +7,7 @@ import { getLoginMode } from "../../loginState";
 export const fetchLatestCandles = async (
   symbol: string,
   interval: string,
-  mode: 'live' | 'demo' = 'demo'
+  mode: 'live' | 'demo' = getLoginMode()
 ): Promise<Candle[]> => {
   try {
     const hostname =

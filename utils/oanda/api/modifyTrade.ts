@@ -22,7 +22,7 @@ interface OrderDetails {
 export const modifyTrade = async (
   orderType: OrderParameters,
   pairOrTradeId: string,
-  mode: 'live' | 'demo' = 'demo'
+  mode: 'live' | 'demo' = getLoginMode()
 ): Promise<{ success: boolean; reason: string; raw: any }> => {
   const hostname =
     mode === "live"

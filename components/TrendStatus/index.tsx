@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
+import { buildDomId, buildDataTestId } from '../../utils/dom';
 
 // Helper to format ISO time to readable string
 function formatTime(iso?: string, options?: { showTime?: boolean }) {
@@ -9,11 +10,13 @@ function formatTime(iso?: string, options?: { showTime?: boolean }) {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
-    ...(options && options.showTime ? {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    } : {})
+    ...(options && options.showTime
+      ? {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        }
+      : {}),
   });
 }
 
@@ -24,7 +27,7 @@ const Card = styled.div`
   padding: 32px 0 24px 0;
   min-width: 400px;
   max-width: 600px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.13);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.13);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -38,7 +41,6 @@ const Status = styled.div<{ up?: boolean }>`
   margin-bottom: 0.2rem;
   text-align: center;
 `;
-
 
 const AboveBelow = styled.span<{ green: boolean }>`
   font-size: 1.25rem;
@@ -58,10 +60,15 @@ const StructurePoints = styled.div`
 
 const StructurePoint = styled.div<{ type: string }>`
   color: ${({ type }) =>
-    type === 'HH' ? '#22c55e' :
-    type === 'LL' ? '#ef4444' :
-    type === 'HL' ? '#3b82f6' :
-    type === 'LH' ? '#facc15' : '#a1a1aa'};
+    type === 'HH'
+      ? '#22c55e'
+      : type === 'LL'
+      ? '#ef4444'
+      : type === 'HL'
+      ? '#3b82f6'
+      : type === 'LH'
+      ? '#facc15'
+      : '#a1a1aa'};
   background: #23232b;
   border-radius: 6px;
   padding: 0.25rem 0.8rem;
@@ -99,14 +106,17 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
     let lastTwoPoints: SwingPoint[] = [];
     let trendDir: 'up' | 'down' | null = null;
     let lastCurrentPrice: number | null = null;
-    let min = 0, max = 0;
+    let min = 0,
+      max = 0;
     let intervalId: NodeJS.Timeout;
 
     const fetchTrend = async () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/determine-swing-label?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
+        const res = await fetch(
+          `/api/determine-swing-label?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`
+        );
         const data = await res.json();
         if (!data || !data.swingPoints || data.swingPoints.length < 2) {
           setError('Not enough data to determine trend.');
@@ -116,7 +126,7 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
         const swings: SwingPoint[] = data.swingPoints;
         // Find last two structure points (LL/HH/HL/LH)
         const structureLabels = ['LL', 'HH', 'HL', 'LH'];
-        const structurePoints = swings.filter(s => structureLabels.includes(s.swing));
+        const structurePoints = swings.filter((s) => structureLabels.includes(s.swing));
         lastTwoPoints = structurePoints.slice(-2);
         setLastPoints(lastTwoPoints);
         if (lastTwoPoints.length === 2) {
@@ -149,7 +159,9 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
       if (lastTwoPoints.length === 2) {
         try {
           // Only fetch current price, not all swing points
-          const res = await fetch(`/api/determine-swing-label?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
+          const res = await fetch(
+            `/api/determine-swing-label?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`
+          );
           const data = await res.json();
           if (data && typeof data.currentPrice === 'number') {
             lastCurrentPrice = data.currentPrice;
@@ -170,21 +182,56 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
     return () => clearInterval(intervalId);
   }, [symbol, interval]);
 
+  const cardId = buildDomId('trend-status', symbol, interval);
+  const cardTestId = buildDataTestId('trend-status', symbol, interval);
+
+  const firstPointId = buildDomId('trend-status', symbol, interval, 'point', 0);
+  const secondPointId = buildDomId('trend-status', symbol, interval, 'point', 1);
+
   return (
-    <Card>
+    <Card id={cardId} data-test={cardTestId}>
       {loading ? (
-        <Label>Loading...</Label>
+        <Label id={`${cardId}-loading`} data-test={buildDataTestId('trend-status', symbol, interval, 'loading')}>
+          Loading...
+        </Label>
       ) : error ? (
-        <Label>{error}</Label>
+        <Label id={`${cardId}-error`} data-test={buildDataTestId('trend-status', symbol, interval, 'error')}>
+          {error}
+        </Label>
       ) : trend && percent !== null && lastPoints.length === 2 ? (
         <>
-          <div style={{ display: 'flex', width: '100%', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
-            <Status up={trend === 'up'}>{trend === 'up' ? 'Uptrend' : 'Downtrend'}</Status>
-            <span style={{ color: '#a1a1aa', fontSize: '1.1rem', marginLeft: 16 }}>{interval.toUpperCase()}</span>
+          <div
+            id={`${cardId}-status-row`}
+            data-test={buildDataTestId('trend-status', symbol, interval, 'status-row')}
+            style={{ display: 'flex', width: '100%', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}
+          >
+            <Status
+              id={`${cardId}-status`}
+              data-test={buildDataTestId('trend-status', symbol, interval, 'status')}
+              up={trend === 'up'}
+            >
+              {trend === 'up' ? 'Uptrend' : 'Downtrend'}
+            </Status>
+            <span
+              id={`${cardId}-interval`}
+              data-test={buildDataTestId('trend-status', symbol, interval, 'interval')}
+              style={{ color: '#a1a1aa', fontSize: '1.1rem', marginLeft: 16 }}
+            >
+              {interval.toUpperCase()}
+            </span>
           </div>
-          <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-            <span style={{ color: '#a1a1aa', fontSize: '1.1rem' }}>Current Price:</span>
-            {/* Above/below 50% logic and color */}
+          <div
+            id={`${cardId}-price-row`}
+            data-test={buildDataTestId('trend-status', symbol, interval, 'price-row')}
+            style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}
+          >
+            <span
+              id={`${cardId}-price-label`}
+              data-test={buildDataTestId('trend-status', symbol, interval, 'price-label')}
+              style={{ color: '#a1a1aa', fontSize: '1.1rem' }}
+            >
+              Current Price:
+            </span>
             {(() => {
               const isAbove = percent! >= 50;
               let green = false;
@@ -194,34 +241,61 @@ const TrendStatus: React.FC<TrendStatusProps> = ({ symbol, interval }) => {
                 green = isAbove;
               }
               return (
-                <AboveBelow green={green}>
+                <AboveBelow
+                  id={`${cardId}-price-position`}
+                  data-test={buildDataTestId('trend-status', symbol, interval, 'price-position')}
+                  green={green}
+                >
                   {isAbove ? 'Above 50%' : 'Below 50%'}
                 </AboveBelow>
               );
             })()}
           </div>
-          <StructurePoints>
-            {lastPoints.length === 2 && (
-              <>
-                <StructurePoint type={lastPoints[0].swing}>
-                  {lastPoints[0].swing} {lastPoints[0].price}
-                  <span style={{ display: 'block', color: '#a1a1aa', fontWeight: 400, fontSize: '0.85em' }}>
-                    {formatTime(lastPoints[0].time, { showTime: interval === 'H4' })}
-                  </span>
-                </StructurePoint>
-                <span style={{ color: '#a1a1aa', fontSize: '1.2rem', margin: '0 0.3rem' }}>→</span>
-                <StructurePoint type={lastPoints[1].swing}>
-                  {lastPoints[1].swing} {lastPoints[1].price}
-                  <span style={{ display: 'block', color: '#a1a1aa', fontWeight: 400, fontSize: '0.85em' }}>
-                    {formatTime(lastPoints[1].time, { showTime: interval === 'H4' })}
-                  </span>
-                </StructurePoint>
-              </>
-            )}
+          <StructurePoints
+            id={`${cardId}-structure-points`}
+            data-test={buildDataTestId('trend-status', symbol, interval, 'structure-points')}
+          >
+            <StructurePoint
+              id={firstPointId}
+              data-test={buildDataTestId('trend-status', symbol, interval, 'point', 0)}
+              type={lastPoints[0].swing}
+            >
+              {lastPoints[0].swing} {lastPoints[0].price}
+              <span
+                id={buildDomId('trend-status', symbol, interval, 'point', 0, 'time')}
+                data-test={buildDataTestId('trend-status', symbol, interval, 'point', 0, 'time')}
+                style={{ display: 'block', color: '#a1a1aa', fontWeight: 400, fontSize: '0.85em' }}
+              >
+                {formatTime(lastPoints[0].time, { showTime: interval === 'H4' })}
+              </span>
+            </StructurePoint>
+            <span
+              id={`${cardId}-structure-separator`}
+              data-test={buildDataTestId('trend-status', symbol, interval, 'structure-separator')}
+              style={{ color: '#a1a1aa', fontSize: '1.2rem', margin: '0 0.3rem' }}
+            >
+              {'->'}
+            </span>
+            <StructurePoint
+              id={secondPointId}
+              data-test={buildDataTestId('trend-status', symbol, interval, 'point', 1)}
+              type={lastPoints[1].swing}
+            >
+              {lastPoints[1].swing} {lastPoints[1].price}
+              <span
+                id={buildDomId('trend-status', symbol, interval, 'point', 1, 'time')}
+                data-test={buildDataTestId('trend-status', symbol, interval, 'point', 1, 'time')}
+                style={{ display: 'block', color: '#a1a1aa', fontWeight: 400, fontSize: '0.85em' }}
+              >
+                {formatTime(lastPoints[1].time, { showTime: interval === 'H4' })}
+              </span>
+            </StructurePoint>
           </StructurePoints>
         </>
       ) : (
-        <Label>No trend data.</Label>
+        <Label id={`${cardId}-empty`} data-test={buildDataTestId('trend-status', symbol, interval, 'empty')}>
+          No trend data.
+        </Label>
       )}
     </Card>
   );

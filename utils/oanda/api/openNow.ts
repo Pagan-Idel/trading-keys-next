@@ -45,7 +45,7 @@ export interface TradeById {
 
 export const openNow = async (
   pair?: string,
-  mode: 'live' | 'demo' = 'demo'
+  mode: 'live' | 'demo' = getLoginMode()
 ): Promise<OpenTrade | undefined> => {
   const hostname =
     mode === "live"

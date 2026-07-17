@@ -1,322 +1,259 @@
 import credentials from "../../../credentials.json";
-import { getPrecision, normalizePairKeyUnderscore, tfToMs } from "../../shared";
+import { normalizePairKeyUnderscore, tfToMs } from "../../shared";
 import { logMessage } from "../../logger";
+import { getLoginMode } from "../../loginState";
 
-type Price = { bid: string; ask: string; updatedAt: number };
-const priceCache: Record<string, Price> = {};
-const streamInitialized: Set<string> = new Set();
-const streamControllers: Record<string, ReadableStreamDefaultReader<Uint8Array>> = {};
-const staleCheckIntervals: Record<string, NodeJS.Timeout> = {};
+type Mode = "live" | "demo";
+export type OandaQuote = {
+  bid: string;
+  ask: string;
+  oandaTime: string;
+  receivedAt: number;
+  tradeable: boolean;
+  source: "stream" | "rest";
+};
 
-const getLocalStorageItem = (key: string): string | null => {
-  if (typeof window !== "undefined") {
-    return localStorage.getItem(key);
+type StreamState = {
+  symbols: string[];
+  mode: Mode;
+  reader?: ReadableStreamDefaultReader<Uint8Array>;
+  abort?: AbortController;
+  decoder: TextDecoder;
+  carry: string;
+  lastMessageAt: number;
+  reconnectAttempt: number;
+  reconnectTimer?: NodeJS.Timeout;
+  healthTimer?: NodeJS.Timeout;
+  stopped: boolean;
+};
+
+const STREAM_QUOTE_MAX_AGE_MS = 2_000;
+const STREAM_MESSAGE_TIMEOUT_MS = 15_000;
+const priceCache = new Map<string, OandaQuote>();
+const streams = new Map<string, StreamState>();
+const cacheKey = (symbol: string, mode: Mode) => `${mode}:${normalizePairKeyUnderscore(symbol)}`;
+
+const getAccountDetails = (mode: Mode = getLoginMode()) => ({
+  hostname: mode === "live" ? "https://stream-fxtrade.oanda.com" : "https://stream-fxpractice.oanda.com",
+  restHost: mode === "live" ? "https://api-fxtrade.oanda.com" : "https://api-fxpractice.oanda.com",
+  accountId: mode === "live" ? credentials.OANDA_LIVE_ACCOUNT_ID : credentials.OANDA_DEMO_ACCOUNT_ID,
+  token: mode === "live" ? credentials.OANDA_LIVE_ACCOUNT_TOKEN : credentials.OANDA_DEMO_ACCOUNT_TOKEN,
+});
+
+const acceptPriceMessage = (state: StreamState, message: any) => {
+  state.lastMessageAt = Date.now();
+  if (message?.type === "HEARTBEAT") return;
+  if (message?.type !== "PRICE") return;
+  const bid = message.bids?.[0]?.price;
+  const ask = message.asks?.[0]?.price;
+  if (!bid || !ask || !message.time) return;
+
+  const instrument = message.instrument;
+  if (!instrument || !state.symbols.some(symbol => normalizePairKeyUnderscore(symbol) === instrument)) return;
+  const key = cacheKey(instrument, state.mode);
+  const current = priceCache.get(key);
+  if (current && Date.parse(message.time) < Date.parse(current.oandaTime)) return;
+  priceCache.set(key, {
+    bid,
+    ask,
+    oandaTime: message.time,
+    receivedAt: Date.now(),
+    tradeable: message.tradeable !== false,
+    source: "stream",
+  });
+  state.reconnectAttempt = 0;
+};
+
+/** OANDA uses newline-delimited JSON and may split a JSON object across chunks. */
+export const consumePricingChunk = (state: Pick<StreamState, "decoder" | "carry">, chunk: Uint8Array, onMessage: (message: any) => void) => {
+  state.carry += state.decoder.decode(chunk, { stream: true });
+  const lines = state.carry.split("\n");
+  state.carry = lines.pop() ?? "";
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed) onMessage(JSON.parse(trimmed));
+  }
+};
+
+const scheduleReconnect = (state: StreamState) => {
+  if (state.stopped || state.reconnectTimer) return;
+  state.reconnectAttempt += 1;
+  const base = Math.min(30_000, 1_000 * (2 ** Math.min(state.reconnectAttempt - 1, 5)));
+  const delay = base + Math.floor(Math.random() * 500);
+  logMessage(`Shared price stream reconnecting in ${(delay / 1000).toFixed(1)}s.`, undefined, { fileName: "priceStream" });
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = undefined;
+    void connect(state);
+  }, delay);
+};
+
+const connect = async (state: StreamState) => {
+  if (state.stopped) return;
+  const { hostname, accountId, token } = getAccountDetails(state.mode);
+  const instruments = state.symbols.map(normalizePairKeyUnderscore);
+  state.abort = new AbortController();
+  state.decoder = new TextDecoder();
+  state.carry = "";
+  try {
+    const url = `${hostname}/v3/accounts/${accountId}/pricing/stream?instruments=${encodeURIComponent(instruments.join(','))}&snapshot=true`;
+    const response = await fetch(url, {
+      signal: state.abort.signal,
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("OANDA returned no streaming response body.");
+    state.reader = reader;
+    state.lastMessageAt = Date.now();
+    logMessage(`Shared price stream connected for ${instruments.length} instrument(s) (${state.mode}).`, undefined, { fileName: "priceStream" });
+
+    while (!state.stopped) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("OANDA closed the pricing stream.");
+      if (!value) continue;
+      try {
+        consumePricingChunk(state, value, message => acceptPriceMessage(state, message));
+      } catch (error) {
+        logMessage(`Ignored malformed OANDA stream line: ${(error as Error).message}`, undefined, { level: "warn", fileName: "priceStream" });
+      }
+    }
+  } catch (error) {
+    if (!state.stopped && (error as Error).name !== "AbortError") {
+      logMessage(`Shared price stream interrupted: ${(error as Error).message}`, undefined, { level: "warn", fileName: "priceStream" });
+      scheduleReconnect(state);
+    }
+  } finally {
+    state.reader = undefined;
+    state.abort = undefined;
+  }
+};
+
+export const startCombinedPriceStream = (symbols: string[], mode: Mode = getLoginMode()) => {
+  const uniqueSymbols = [...new Set(symbols.map(normalizePairKeyUnderscore))].sort();
+  const key = `${mode}:stream:${uniqueSymbols.join(',')}`;
+  if (streams.has(key)) return;
+  const state: StreamState = {
+    symbols: uniqueSymbols, mode, decoder: new TextDecoder(), carry: "", lastMessageAt: Date.now(), reconnectAttempt: 0, stopped: false,
+  };
+  state.healthTimer = setInterval(() => {
+    if (!state.reader || Date.now() - state.lastMessageAt <= STREAM_MESSAGE_TIMEOUT_MS) return;
+    logMessage(`Shared price stream heartbeat is stale; reconnecting.`, undefined, { level: "warn", fileName: "priceStream" });
+    void state.reader.cancel().catch(() => undefined);
+  }, 5_000);
+  streams.set(key, state);
+  void connect(state);
+};
+
+export const startPriceStream = (symbol: string, mode: Mode = getLoginMode()) => startCombinedPriceStream([symbol], mode);
+
+export const initializePriceStreams = async (symbols: string[], mode: Mode = getLoginMode()) => {
+  startCombinedPriceStream(symbols, mode);
+};
+
+export const isStreamInitialized = (symbol: string, mode: Mode = getLoginMode()) =>
+  [...streams.values()].some(state => state.mode === mode && state.symbols.includes(normalizePairKeyUnderscore(symbol)));
+
+export const stopPriceStream = async (symbol: string, mode: Mode = getLoginMode()) => {
+  const entry = [...streams.entries()].find(([, candidate]) => candidate.mode === mode && candidate.symbols.includes(normalizePairKeyUnderscore(symbol)));
+  const key = entry?.[0];
+  const state = entry?.[1];
+  if (!state) return;
+  state.stopped = true;
+  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+  if (state.healthTimer) clearInterval(state.healthTimer);
+  state.abort?.abort();
+  await state.reader?.cancel().catch(() => undefined);
+  if (key) streams.delete(key);
+};
+
+export const stopAllStreams = async () => {
+  await Promise.all([...streams.values()].map(state => stopPriceStream(state.symbols[0], state.mode)));
+};
+
+export const getLatestQuote = (symbol: string, mode: Mode = getLoginMode(), maxAgeMs = STREAM_QUOTE_MAX_AGE_MS): OandaQuote | null => {
+  const quote = priceCache.get(cacheKey(symbol, mode));
+  if (!quote || !quote.tradeable || Date.now() - quote.receivedAt > maxAgeMs) return null;
+  return quote;
+};
+
+export const waitForFreshPrice = async (symbol: string, mode: Mode = getLoginMode(), timeoutMs = 5_000): Promise<OandaQuote | null> => {
+  if (!isStreamInitialized(symbol, mode)) startPriceStream(symbol, mode);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const quote = getLatestQuote(symbol, mode);
+    if (quote) return quote;
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
   return null;
 };
 
-const getAccountDetails = (mode: 'live' | 'demo' = 'demo') => {
-  const accountType = mode;
-  const hostname =
-    accountType === "live"
-      ? "https://stream-fxtrade.oanda.com"
-      : "https://stream-fxpractice.oanda.com";
-  const restHost =
-    accountType === "live"
-      ? "https://api-fxtrade.oanda.com"
-      : "https://api-fxpractice.oanda.com";
-  const accountId =
-    accountType === "live"
-      ? credentials.OANDA_LIVE_ACCOUNT_ID
-      : credentials.OANDA_DEMO_ACCOUNT_ID;
-  const token =
-    accountType === "live"
-      ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
-      : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
+export const fetchPriceOnce = async (symbol: string, mode: Mode = getLoginMode()): Promise<OandaQuote | null> => {
+  const hubUrl = typeof process !== 'undefined' ? process.env.OANDA_MARKET_DATA_HUB_URL : undefined;
+  if (hubUrl) {
+    try {
+      const response = await fetch(`${hubUrl}/quote?instrument=${encodeURIComponent(normalizePairKeyUnderscore(symbol))}`, {
+        signal: AbortSignal.timeout(1_500),
+        headers: { Accept: 'application/json' },
+      });
+      if (response.ok) return await response.json() as OandaQuote;
+    } catch {
+      // The worker falls through to direct OANDA REST pricing if the local hub is unavailable.
+    }
+  }
+  const streamed = getLatestQuote(symbol, mode);
+  if (streamed) return streamed;
 
-  return { hostname, restHost, accountId, token };
-};
-
-export const fetchPriceOnce = async (symbol: string, mode: 'live' | 'demo' = 'demo'): Promise<{ bid: string; ask: string } | null> => {
   const norm = normalizePairKeyUnderscore(symbol);
   const { restHost, accountId, token } = getAccountDetails(mode);
-  const url = `${restHost}/v3/accounts/${accountId}/pricing?instruments=${norm}`;
-
   try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` }
+    const response = await fetch(`${restHost}/v3/accounts/${accountId}/pricing?instruments=${norm}`, {
+      signal: AbortSignal.timeout(5_000),
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     });
-    const json = await res.json();
-    const prices = json?.prices?.[0];
-
-    if (!prices?.bids?.[0]?.price || !prices?.asks?.[0]?.price) {
-      logMessage(`❌ Missing price data for ${norm}`);
-      return null;
-    }
-
-    // logMessage(`📡 One-time price fetch for ${norm} — Bid: ${prices.bids[0].price}, Ask: ${prices.asks[0].price}`, undefined, {fileName: "priceStream"});
-
-    return {
-      bid: prices.bids[0].price,
-      ask: prices.asks[0].price
-    };
-  } catch (err: any) {
-    logMessage(`❌ Error fetching one-time price for ${norm}: ${err.message}`, undefined, { fileName: "priceStream" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    const price = (await response.json())?.prices?.[0];
+    const bid = price?.bids?.[0]?.price;
+    const ask = price?.asks?.[0]?.price;
+    if (!bid || !ask || !price.time || price.tradeable === false) return null;
+    const quote: OandaQuote = { bid, ask, oandaTime: price.time, receivedAt: Date.now(), tradeable: true, source: "rest" };
+    priceCache.set(cacheKey(symbol, mode), quote);
+    return quote;
+  } catch (error) {
+    logMessage(`Price unavailable for ${norm}: ${(error as Error).message}`, undefined, { level: "warn", fileName: "priceStream" });
     return null;
   }
 };
 
-const monitorStaleStream = (symbol: string, mode: 'live' | 'demo' = 'demo') => {
-  const norm = normalizePairKeyUnderscore(symbol);
-  if (staleCheckIntervals[norm]) return;
-
-  staleCheckIntervals[norm] = setInterval(async () => {
-    const price = priceCache[norm];
-    const ageSec = price ? (Date.now() - price.updatedAt) / 1000 : Infinity;
-
-    if (ageSec > 5) {
-      logMessage(`🔁 Detected stale price for ${norm} (${ageSec.toFixed(1)}s old). Restarting stream.`, undefined, { fileName: "priceStream" });
-      await stopPriceStream(symbol);
-      await new Promise((res) => setTimeout(res, 1000));
-      setupStream(symbol, mode);
-    }
-  }, 5000);
+/** Compatibility wrapper. Prefer getLatestQuote so stale data is represented as null. */
+export const getLatestPrice = (symbol: string, mode: Mode = getLoginMode()) => {
+  const quote = getLatestQuote(symbol, mode);
+  return quote ? { bid: quote.bid, ask: quote.ask } : { bid: "0", ask: "0" };
 };
 
-const setupStream = async (symbol: string, mode: 'live' | 'demo' = 'demo') => {
-  const norm = normalizePairKeyUnderscore(symbol);
-  if (streamInitialized.has(norm)) {
-    logMessage(`⏩ Stream already initialized for ${norm}`, undefined, { fileName: "priceStream" });
-    return;
-  }
-
-  streamInitialized.add(norm);
-  const { hostname, accountId, token } = getAccountDetails(mode);
-  const url = `${hostname}/v3/accounts/${accountId}/pricing/stream?instruments=${norm}`;
-
-  logMessage(`📡 Opening price stream for ${norm}`, undefined, { fileName: "priceStream" });
-  logMessage(`🌐 URL: ${url}`, undefined, { fileName: "priceStream" });
-
-  try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error("Stream reader not available");
-
-    streamControllers[norm] = reader;
-    monitorStaleStream(symbol, mode);
-
-    const decoder = new TextDecoder();
-    // @ts-ignore
-    (async () => {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-          logMessage(`📴 Stream for ${norm} closed. Retrying in 5 seconds...`, undefined, { fileName: "priceStream" });
-          streamInitialized.delete(norm);
-          delete streamControllers[norm];
-          clearInterval(staleCheckIntervals[norm]);
-          delete staleCheckIntervals[norm];
-          setTimeout(() => setupStream(symbol), 5000);
-          break;
-        }
-
-        const text = decoder.decode(value);
-        const lines = text.split("\n").filter(Boolean);
-
-        for (const line of lines) {
-          try {
-            const json = JSON.parse(line);
-            if (json.asks && json.bids) {
-              const ask = json.asks.at(-1)?.price;
-              const bid = json.bids.at(-1)?.price;
-              if (ask && bid) {
-                priceCache[norm] = {
-                  ask,
-                  bid,
-                  updatedAt: Date.now(),
-                };
-              } else {
-                logMessage(`⚠️ Missing ask/bid price in stream data for ${norm}`, undefined, { fileName: "priceStream" });
-              }
-            }
-          } catch (err) {
-            logMessage(`❌ Failed to parse stream data for ${norm}: ${line}`, undefined, { fileName: "priceStream" });
-          }
-        }
-      }
-    })().catch((err) => {
-      logMessage(`❌ Stream error for ${norm}: ${err.message}`, undefined, { fileName: "priceStream" });
-      streamInitialized.delete(norm);
-      delete streamControllers[norm];
-      clearInterval(staleCheckIntervals[norm]);
-      delete staleCheckIntervals[norm];
-    });
-
-  } catch (err: any) {
-    logMessage(`❌ Stream connection error for ${norm}: ${err.message}. Retrying in 5 seconds...`, undefined, { fileName: "priceStream" });
-    streamInitialized.delete(norm);
-    delete streamControllers[norm];
-    clearInterval(staleCheckIntervals[norm]);
-    delete staleCheckIntervals[norm];
-    setTimeout(() => setupStream(symbol, mode), 5000);
-  }
-};
-
-export const initializePriceStreams = async (symbols: string[], mode: 'live' | 'demo' = 'demo') => {
-  logMessage(`🧠 Initializing price streams for: ${symbols.join(", ")}`, undefined, { fileName: "priceStream" });
-  symbols.forEach(symbol => startPriceStream(symbol, mode));
-};
-
-export const startPriceStream = (symbol: string, mode: 'live' | 'demo' = 'demo') => {
-  setupStream(symbol, mode); // non-blocking
-};
-
-export const isStreamInitialized = (symbol: string): boolean => {
-  const norm = normalizePairKeyUnderscore(symbol);
-  return streamInitialized.has(norm);
-};
-
-export const stopPriceStream = async (symbol: string) => {
-  const norm = normalizePairKeyUnderscore(symbol);
-  const controller = streamControllers[norm];
-  if (controller) {
-    try {
-      await controller.cancel();
-      logMessage(`🛑 Manually closed stream for ${norm}`, undefined, { fileName: "priceStream" });
-    } catch (err: any) {
-      logMessage(`⚠️ Error closing stream for ${norm}: ${err.message}`, undefined, { fileName: "priceStream" });
-    }
-  } else {
-    logMessage(`⚠️ No stream controller found for ${norm}`, undefined, { fileName: "priceStream" });
-  }
-  streamInitialized.delete(norm);
-  delete streamControllers[norm];
-  clearInterval(staleCheckIntervals[norm]);
-  delete staleCheckIntervals[norm];
-};
-
-export const stopAllStreams = async () => {
-  const pairs = Object.keys(streamControllers);
-  for (const pair of pairs) {
-    await stopPriceStream(pair);
-  }
-};
-
-export const getLatestPrice = (symbol: string): { bid: string; ask: string } => {
-  const norm = normalizePairKeyUnderscore(symbol);
-  const price = priceCache[norm];
-  if (!price) {
-    logMessage(`⚠️ No price found in cache for ${norm}. Returning 0s.`, undefined, { fileName: "priceStream" });
-    return { bid: "0", ask: "0" };
-  }
-
-  const ageSec = (Date.now() - price.updatedAt) / 1000;
-  if (ageSec > 5) {
-    logMessage(`⚠️ Stale price data (${ageSec.toFixed(1)}s old) for ${norm}.`, undefined, { fileName: "priceStream" });
-  } else {
-    // logMessage(`📦 Cached price for ${norm}: Bid ${price.bid}, Ask ${price.ask}, Age ${ageSec.toFixed(1)}s`, undefined, { fileName: "priceStream" });
-  }
-
-  return { bid: price.bid, ask: price.ask };
-};
-
-export const streamToCandles = async (
-  symbol: string,
-  tf: string,
-  maxCandles = 10
-): Promise<{ instrument: string; granularity: string; candles: any[] }> => {
-  const norm = normalizePairKeyUnderscore(symbol);
+// Retained for the legacy strategy. Goldilocks uses OANDA-completed REST candles.
+export const streamToCandles = async (symbol: string, tf: string, maxCandles = 10) => {
   const durationMs = tfToMs(tf);
-
+  startPriceStream(symbol);
+  await waitForFreshPrice(symbol);
   const candles: any[] = [];
-  let current: any = null;
-  let start = 0;
-
-  // ✅ Ensure stream is running
-  if (!isStreamInitialized(symbol)) {
-    logMessage(`📡 Starting price stream for ${norm}`, undefined, { fileName: "priceStream" });
-    startPriceStream(symbol);
-  }
-
-  // ✅ Wait for first tick BEFORE aligning
-  let tries = 0;
-  while (tries < 50) {
-    const price = getLatestPrice(symbol);
-    const bid = parseFloat(price.bid);
-    const ask = parseFloat(price.ask);
-    if (!isNaN(bid) && !isNaN(ask)) {
-      logMessage(`✅ First tick received for ${norm}`, undefined, { fileName: "priceStream" });
-      break;
-    }
-    logMessage(`⏳ Waiting for first price tick for ${norm}...`, undefined, { fileName: "priceStream" });
-    await new Promise(res => setTimeout(res, 200));
-    tries++;
-  }
-
-  // ✅ Snap to current TF window without waiting for next boundary
-  const now = Date.now();
-  start = Math.floor(now / durationMs) * durationMs;
-
-  logMessage(`🕯️ Starting candle aggregation for ${norm} TF ${tf}`, undefined, { fileName: "priceStream" });
-
+  let current: any;
   while (candles.length < maxCandles) {
-    const price = getLatestPrice(symbol);
-    const bid = parseFloat(price.bid);
-    const ask = parseFloat(price.ask);
-
-    if (isNaN(bid) || isNaN(ask)) {
-      await new Promise(res => setTimeout(res, 250));
-      continue;
+    const quote = getLatestQuote(symbol);
+    if (!quote) { await new Promise(resolve => setTimeout(resolve, 50)); continue; }
+    const mid = (Number(quote.bid) + Number(quote.ask)) / 2;
+    const tickTime = Date.parse(quote.oandaTime);
+    const start = Math.floor(tickTime / durationMs) * durationMs;
+    if (!current || current.time !== new Date(start).toISOString()) {
+      if (current) { current.complete = true; candles.push(current); }
+      current = { time: new Date(start).toISOString(), mid: { o: mid, h: mid, l: mid, c: mid }, volume: 0, complete: false };
     }
-
-    const mid = (bid + ask) / 2; // ✅ raw mid, no rounding
-
-    const now = Date.now();
-
-    if (!current || now >= start + durationMs) {
-      if (current) {
-        if (
-          current.mid &&
-          typeof current.mid.o === "number" &&
-          !isNaN(current.mid.o)
-        ) {
-          current.complete = true;
-          candles.push(current);
-        }
-      }
-      start = Math.floor(now / durationMs) * durationMs;
-      current = {
-        time: new Date(start).toISOString(),
-        mid: { o: mid, h: mid, l: mid, c: mid },
-        volume: 0,
-        complete: false
-      };
-    }
-
-    // ✅ Preserve raw floats, no rounding here
     current.mid.h = Math.max(current.mid.h, mid);
     current.mid.l = Math.min(current.mid.l, mid);
     current.mid.c = mid;
-    current.volume++;
-
-    await new Promise(res => setTimeout(res, 250)); // sample interval
+    current.volume += 1;
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
-
-  return { instrument: norm, granularity: tf, candles };
+  return { instrument: normalizePairKeyUnderscore(symbol), granularity: tf, candles };
 };
 
-
-export const killStreamByPair = async (symbol: string) => {
-  const norm = normalizePairKeyUnderscore(symbol);
-  logMessage(`🛑 Killing price stream for ${norm}`, undefined, { fileName: "priceStream" });
-  await stopPriceStream(symbol);
-};
-
-function roundToOanda(symbol: string, value: number): number {
-  const precision = getPrecision(symbol);
-  const factor = Math.pow(10, precision);
-  return Math.trunc(value * factor) / factor;
-}
+export const killStreamByPair = stopPriceStream;

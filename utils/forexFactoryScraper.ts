@@ -1,7 +1,6 @@
 import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import * as cheerio from 'cheerio';
-import type { Cheerio as CheerioType } from 'cheerio';
 import type { Element } from 'domhandler';
 
 
@@ -17,8 +16,9 @@ const puppeteer = puppeteerExtra as any;
 puppeteer.use(StealthPlugin());
 
 const BASE_URL = 'https://www.forexfactory.com/calendar?day=';
+export const FOREX_FACTORY_TIME_ZONE = 'America/Chicago';
 
-const impactFromSpan = (span: cheerio.Cheerio<any>): 'High' | 'Medium' | 'Low' => {
+const impactFromSpan = (span: any): 'High' | 'Medium' | 'Low' => {
   const title = span.attr('title')?.toLowerCase() || '';
   const className = span.attr('class')?.toLowerCase() || '';
   if (title.includes('high') || className.includes('impact-red')) return 'High';
@@ -35,7 +35,7 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
   // Force local midnight to avoid UTC drift
   const localDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timeZone = FOREX_FACTORY_TIME_ZONE;
   // console.log('🕒 System date now:', now.toString());
   // console.log('📅 Local date (forced 00:00):', localDate.toString());
   // console.log('🌍 Timezone detected:', timeZone);
@@ -65,6 +65,7 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
   });
 
   const page = await browser.newPage();
+  await page.emulateTimezone(FOREX_FACTORY_TIME_ZONE);
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
   const html = await page.content();

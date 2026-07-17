@@ -1,16 +1,12 @@
-// src/utils/tradeHistory.ts
-import fs from 'fs';
-import path from 'path';
+import { getLoginMode } from './loginState';
+import { saveTradeToDatabase } from './automationStore';
 
 export type JournalData = {
-  swingA: any;
-  swingB: any;
-  direction: "BUY" | "SELL";
-  range: number;
-  rrZone: {
-    low: number;
-    high: number;
-  };
+  swingA?: unknown;
+  swingB?: unknown;
+  direction: 'BUY' | 'SELL';
+  range?: number;
+  rrZone?: { low: number; high: number };
   spread: {
     bid: string;
     ask: string;
@@ -20,22 +16,20 @@ export type JournalData = {
   };
   tf: string;
   timestamp: string;
+  goldilocks?: unknown;
+  tradeManagement?: {
+    breakEvenAtOneR: boolean;
+    breakEvenActivated: boolean;
+    breakEvenActivatedAt?: string;
+    breakEvenPrice?: number;
+  };
 };
 
-type TradeRecord = {
-  tradeId: string;
-  pair: string;
-  entry: number;
-  sl: number;
-  tp: number;
-  orderSide: "BUY" | "SELL";
-  journalData: JournalData;
-  outcome: "WIN" | "LOSS";
-  closedAt: string;
-  realizedPL?: string;
+export const classifyTradeOutcome = (realizedPL: string | undefined, breakEvenActivated = false): 'WIN' | 'LOSS' => {
+  if (breakEvenActivated) return 'WIN';
+  const numericPL = Number(realizedPL ?? 0);
+  return Number.isFinite(numericPL) && numericPL > 0 ? 'WIN' : 'LOSS';
 };
-
-const JOURNAL_PATH = path.resolve("data", "trade-journal.json");
 
 export async function saveTradeRecord(
   tradeId: string,
@@ -43,20 +37,16 @@ export async function saveTradeRecord(
   entry: number,
   sl: number,
   tp: number,
-  orderSide: "BUY" | "SELL",
+  orderSide: 'BUY' | 'SELL',
   journalData: JournalData,
-  outcome: "WIN" | "LOSS",
-  realizedPL?: string
+  outcome: 'WIN' | 'LOSS',
+  realizedPL?: string,
+  mode: 'live' | 'demo' = getLoginMode(),
+  breakEvenActivated = false,
 ) {
-  // Adjust outcome if realizedPL is available
-  if (realizedPL !== undefined) {
-    const numericPL = parseFloat(realizedPL);
-    if (!isNaN(numericPL)) {
-      outcome = numericPL > 0 ? "WIN" : "LOSS";
-    }
-  }
+  outcome = classifyTradeOutcome(realizedPL, breakEvenActivated);
 
-  const record: TradeRecord = {
+  saveTradeToDatabase({
     tradeId,
     pair,
     entry,
@@ -67,32 +57,6 @@ export async function saveTradeRecord(
     outcome,
     closedAt: new Date().toISOString(),
     realizedPL,
-  };
-
-  let existing: TradeRecord[] = [];
-  try {
-    if (fs.existsSync(JOURNAL_PATH)) {
-      const content = fs.readFileSync(JOURNAL_PATH, "utf-8").trim();
-      if (content) {
-        try {
-          existing = JSON.parse(content);
-        } catch (jsonErr) {
-          console.error("❌ Invalid JSON in trade-journal.json — resetting file.", jsonErr);
-          existing = [];
-        }
-      }
-    }
-  } catch (e) {
-    console.error("⚠️ Failed to read existing journal:", e);
-  }
-
-
-  existing.push(record);
-
-  try {
-    fs.mkdirSync(path.dirname(JOURNAL_PATH), { recursive: true });
-    fs.writeFileSync(JOURNAL_PATH, JSON.stringify(existing, null, 2));
-  } catch (e) {
-    console.error("❌ Failed to write trade journal:", e);
-  }
+    mode,
+  });
 }

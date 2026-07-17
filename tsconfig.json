@@ -20,7 +20,8 @@
       "@/*": ["./*"],
       "*": ["*", "*", "*.tsx"]
     },
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true
   },
   "include": [
     "next-env.d",

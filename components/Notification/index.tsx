@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import styled from 'styled-components';
+import { buildDomId, buildDataTestId } from '../../utils/dom';
 
 const NotificationContainer = styled.div<{ color: string }>`
   position: fixed;
@@ -46,8 +47,17 @@ const Notification: React.FC<NotificationProps> = ({ message, type, onClose, dur
     }
   }, [onClose, duration]);
 
+  const messageFragment = message.slice(0, 40);
+  const containerId = buildDomId('notification', type, messageFragment || 'message');
+  const dataTestId = buildDataTestId('notification', type, messageFragment || 'message');
+
   return (
-    <NotificationContainer color={colorMap[type]}>
+    <NotificationContainer
+      id={containerId}
+      data-test={dataTestId}
+      role="alert"
+      color={colorMap[type]}
+    >
       {message}
     </NotificationContainer>
   );

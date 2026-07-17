@@ -21,7 +21,7 @@ const JOURNAL_PATH = path.resolve("data", "trade-journal.json");
 
 export const getTradeDetailsById = async (
   tradeId: string,
-  mode: 'live' | 'demo' = 'demo'
+  mode: 'live' | 'demo' = getLoginMode()
 ): Promise<TradeDetail | null> => {
   const hostname = mode === "live"
     ? "https://api-fxtrade.oanda.com"

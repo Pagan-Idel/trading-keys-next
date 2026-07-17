@@ -4,6 +4,7 @@ import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
 import credentials from "../../../credentials.json";
 import { type RISK, calculateRisk, getPrecision, normalizeOandaSymbol } from "../../shared";
+import { getLoginMode } from "../../loginState";
 
 export const TYPE = {
   MARKET: 'MARKET',
@@ -52,7 +53,7 @@ export interface OrderRequest {
   order: MarketOrderRequest;
 }
 
-export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 'demo'): Promise<{ success: boolean; reason: string; raw: any }> => {
+export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = getLoginMode()): Promise<{ success: boolean; reason: string; raw: any }> => {
   const fileName = "order";
   logMessage("Placing order", orderType, { fileName });
 

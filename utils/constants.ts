@@ -95,4 +95,13 @@ export const PAIR_CURRENCY_MAP: Record<string, [string, string]> = {
   'NZD/USD': ['NZD', 'USD'],
   'EUR/JPY': ['EUR', 'JPY'],
   'GBP/JPY': ['GBP', 'JPY'],
+  'EUR/NZD': ['EUR', 'NZD'],
 };
+
+export const SESSION_LOCAL_SCHEDULE = {
+  sydney: { timeZone: 'Australia/Sydney', start: 8, end: 17 },
+  tokyo: { timeZone: 'Asia/Tokyo', start: 9, end: 18 },
+  frankfurt: { timeZone: 'Europe/Berlin', start: 8, end: 17 },
+  london: { timeZone: 'Europe/London', start: 8, end: 17 },
+  new_york: { timeZone: 'America/New_York', start: 8, end: 17 },
+} as const;

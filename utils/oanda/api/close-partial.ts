@@ -3,6 +3,7 @@ import { logMessage } from "../../logger";
 import { openNow } from "./openNow";
 import { closeTrade } from "./closeTrade";
 import type { TradeCloseResponse } from "./closeTrade";
+import { getLoginMode } from "../../loginState";
 
 export interface ErrorOandaResponse {
   errorMessage: string;
@@ -10,7 +11,7 @@ export interface ErrorOandaResponse {
 export const closeTradePartial = async (
   tradeId: string,
   unitsToClose: number,
-  mode: 'live' | 'demo' = 'demo'
+  mode: 'live' | 'demo' = getLoginMode()
 ): Promise<TradeCloseResponse | ErrorOandaResponse> => {
   console.log('[closeTradePartial] mode:', mode, 'tradeId:', tradeId);
   const openTrades = await openNow(undefined, mode);

@@ -1,123 +1,124 @@
-Trading Keys App
-Trading Keys is a personal trading application that interacts with both the Oanda Broker API to execute trades and implement proper risk management strategies. Currently, the application supports trading the EUR/USD currency pair with automated processes for risk management and trade execution.
+# Trading Keys
 
-Note: This application is intended for my personal use only. Cloning, copying, or distributing this project is strictly prohibited.
+Trading Keys is a private Next.js trading workstation for manual keyboard execution,
+Goldilocks strategy visualization, automated OANDA practice/live workers, structured
+trade management, and historical backtesting.
 
-Features
-Match-Trader API Integration: Allows you to place and manage trades on the Match-Trader platform.
-Oanda API Integration: Enables risk management and trading on the Oanda platform.
-Risk Management: Automatic calculation of stop-loss and take-profit levels based on user-defined risk parameters.
-EUR/USD Currency Pair: Currently, the app supports trading only for the EUR/USD pair.
-Personal Use Only: This app is designed strictly for personal use and should not be cloned or shared.
-Installation
-To set up the Trading Keys app locally, follow these steps:
+The current demo strategy uses:
 
-Clone the repository:
+- M15 for trend and range context
+- M5 for demand/supply zone construction
+- M1 for zone touch and close-through confirmation
+- A 20-point quality score with a default minimum of 14
+- A required clear 2:1 runway before an order is submitted
+- Break-even protection at +1R; reaching +1R is recorded as a protected win
 
-```bash
-git clone https://github.com/your-username/trading-keys-next.git
-```
-Note: Cloning this repository is only allowed for personal use by the owner of this project.
+This software can lose money. Backtests are research evidence, not a prediction or
+guarantee. Validate changes out of sample and in an OANDA practice account before
+considering live execution.
 
-Install dependencies:
+## Documentation
 
-Navigate to the project directory and install the required dependencies:
+- [Goldilocks strategy and code guide](docs/GOLDILOCKS_STRATEGY.md)
+- [AI research and training guide](docs/AI_TRAINING_AND_RESEARCH.md)
+- [Original 20-point scoring sheet](docs/reference/20-point-scoring-sheet.pdf)
+- Repo-local AI skill: `.codex/skills/goldilocks-strategy/`
 
-```bash
-cd trading-keys-next
+The PDF is retained as source material. The implemented score is documented in the
+strategy guide and should be treated as the executable specification.
 
-## Installation & Setup (All Platforms)
+## Main screens
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/your-username/trading-keys-next.git
-cd trading-keys-next
-```
+| Route | Purpose |
+| --- | --- |
+| `/` | Trading keyboard and lazily loaded automation candylog |
+| `/automation` | Worker state, active trades, structured logs, and trade history |
+| `/strategy-lab` | Goldilocks zones, swing markers, trend, and historical 2R drawings |
+| `/backtesting` | Manual research runs, tweak history, per-pair results, and trades |
 
-### 2. Install Dependencies
+The development server listens on `http://localhost:4000`.
+
+## Setup
+
+Requirements: Node.js 20+, npm, and OANDA credentials.
+
 ```bash
 npm install
-```
-
-
-### 3. Set Up Credentials
-Create a `credentials.json` file in the project root with your API credentials:
-```json
-{
-  "MTR_DEMO_EMAIL": "your-demo-email",
-  "MTR_DEMO_PASSWORD": "your-demo-password",
-  "MTR_LIVE_EMAIL": "your-live-email",
-  "MTR_LIVE_PASSWORD": "your-live-password",
-  "OANDA_LIVE_ACCOUNT_ID": "your-live-account-id",
-  "OANDA_LIVE_ACCOUNT_TOKEN": "your-live-account-token",
-  "OANDA_DEMO_ACCOUNT_ID": "your-demo-account-id",
-  "OANDA_DEMO_ACCOUNT_TOKEN": "your-demo-account-token"
-}
-```
-
-### 5. Run the Application
-```bash
+npm run test:strategy
 npm run dev
 ```
 
----
+Store credentials in the existing private credential mechanism. Never commit
+`credentials.json`, `.env*`, SQLite databases, candle archives, or runtime logs.
 
-## Running as a Background/Minimized Service (Windows)
+Expected OANDA values include demo/live account IDs and tokens. Demo mode uses the
+practice API; live mode can place real orders.
 
-1. **Use the Provided Batch and VBScript:**
-   - `trading-keys.bat` starts the app.
-   - `run_service_minimized.vbs` launches the batch file completely hidden (no window or taskbar icon).
-
-2. **Create a Desktop Shortcut:**
-   - Right-click `run_service_minimized.vbs` → Send to → Desktop (create shortcut).
-   - Optionally, rename the shortcut (e.g., "Trading Keys Service").
-   - Double-click the shortcut to start the app in the background.
-
----
-
-## Running as a Background Service (macOS/Linux)
-
-**macOS/Linux:**
-You can use `nohup` or `screen` to run the app in the background:
+## Commands
 
 ```bash
-nohup npm run dev &
-# or
-screen -dmS trading-keys npm run dev
+# Web dashboard on port 4000
+npm run dev
+
+# Validate worker compilation and startup without normal trading operation
+npm run check:automation
+
+# OANDA practice automation
+npm run run:demo
+
+# OANDA live automation - real-money risk
+npm run run:live
+
+# Strategy regression suite
+npm run test:strategy
+
+# Type-check worker entry points
+npm run build:threads
+
+# Production web build
+npm run build
 ```
 
----
+The dashboard can also start/stop the demo automation through
+`/api/automation/runtime`. Backtests run in a detached hidden worker so the web server
+remains responsive. The backtesting screen reports intra-pair stages and heartbeats and
+can cancel the active worker without stopping the dashboard or trading automation.
 
-## Stopping the Service
+## Runtime configuration
 
-**Windows:**
- - Open Task Manager, find `node.exe` or `trading-keys.bat`, and end the process.
+| Variable | Default | Meaning |
+| --- | ---: | --- |
+| `GOLDILOCKS_MIN_SCORE` | `14` | Minimum score from 0 through 20; lower setups are logged and skipped |
+| `GOLDILOCKS_RISK_PERCENT` | `0.25` | Percent risk per order; code clamps it to a maximum of 1% |
 
-**macOS/Linux:**
- - Use `ps aux | grep node` to find the process and `kill <pid>` to stop it.
+Hard risk and execution gates remain independent from scoring. Raising a score does
+not bypass spread, session, news, zone, runway, freshness, or one-trade-per-pair rules.
 
----
+## Data and retention
 
+`data/automation.sqlite` uses SQLite WAL mode and contains worker status, active and
+closed trades, backtest runs, backtest trades, and structured events.
 
-## Notes
-- Make sure your credentials are correct in `credentials.json`.
-- For production, consider using a process manager like PM2 (Node.js) or systemd (Linux) for reliability.
-- Redis is **not required** for this project. All Redis-related code and setup have been removed.
+- Automation candylog events are deleted after three days.
+- Closed trades and backtest results are retained for research.
+- Candle archives are stored separately under `data/` and grow through backfills.
+- Runtime and generated data must remain out of version control.
 
----
-Personal Use Disclaimer
-This application is intended strictly for personal use only. Unauthorized copying, sharing, or distribution of this codebase is prohibited. By using this application, you agree to the following conditions:
+Read [AI_TRAINING_AND_RESEARCH.md](docs/AI_TRAINING_AND_RESEARCH.md) before using this
+data for optimization or model training.
 
-The code within this repository may not be cloned, forked, or distributed without the express written permission of the owner.
-Modifying and redistributing this application in any way is not allowed.
-The application is provided "as is" with no warranty or liability.
-License
-This project is not open source and is subject to a custom restrictive license.
+## Raspberry Pi deployment
 
-Future Features
-Support for additional currency pairs.
+Use a 64-bit Raspberry Pi OS, Node.js 20+, and production builds. Run the web server
+and automation as separate `systemd` services with automatic restart and separate
+logs. Start with `run:demo`, bind the dashboard to the trusted LAN only, protect
+credentials with restrictive permissions, and back up the SQLite database.
 
-Integration with more trading platforms.
-Contact
-For any inquiries or issues regarding this project, please contact the repository owner at idelpagan@gmail.com.
+Do not expose the dashboard or runtime APIs directly to the public internet. Add
+authentication and TLS before any remote access.
 
+## Ownership
+
+This is private personal software and is not an open-source distribution. Do not
+copy, redistribute, or publish credentials, data, strategy materials, or source code
+without the owner's explicit permission.

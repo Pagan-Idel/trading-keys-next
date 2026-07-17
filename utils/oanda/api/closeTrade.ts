@@ -6,7 +6,7 @@ import { ACTION } from "./order";
 import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
 import { recentTrade } from "../../shared";
-// import { getLoginMode } from "../../loginState";
+import { getLoginMode } from "../../loginState";
 
 export interface TradeCloseResponse {
   lastTransactionID?: TransactionID;
@@ -50,7 +50,7 @@ export const closeTrade = async (
   orderType: OrderParameters,
   pair?: string,
   unitsOverride?: number,
-  mode: 'live' | 'demo' = 'demo'
+  mode: 'live' | 'demo' = getLoginMode()
 ): Promise<TradeCloseResponse | boolean> => {
   const accountType = mode;
   let accountId = '';

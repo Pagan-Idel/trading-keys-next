@@ -1,7 +1,10 @@
 import { ACTION, order, TYPE } from "./oanda/api/order";
-import { logMessage } from "./logger";
+import { logMessage } from "./automationLogger";
 import { openNow } from "./oanda/api/openNow";
 import { wait, getPrecision } from "./shared";
+import { getLoginMode } from "./loginState";
+import { fetchPriceOnce } from "./oanda/api/priceStreamManager";
+import { applySpreadBuffer, calculateExactRiskRewardLevels, evaluateSpread, type SpreadCheck } from "./spreadGuard";
 
 export interface TradeSignal {
   pair: string;
@@ -10,6 +13,7 @@ export interface TradeSignal {
   stopLoss: number;
   takeProfit: number;
   risk?: number; // Optional risk percentage, default is .25%
+  exactRewardRisk?: number;
 }
 
 export interface TradeStartInfo {
@@ -19,6 +23,7 @@ export interface TradeStartInfo {
   orderSide: "BUY" | "SELL";
   openPrice: number;
   pair: string;
+  spread: SpreadCheck;
 }
 
 const RISK_PERCENT = .25; // Default risk percentage 
@@ -27,16 +32,47 @@ const RISK_PERCENT = .25; // Default risk percentage
  * Returns trade info to start TradeManager externally if successful.
  */
 
-export const placeTrade = async (signal: TradeSignal, mode: 'live' | 'demo' = 'demo'): Promise<TradeStartInfo | null> => {
-  const { pair, action, stopLoss, takeProfit } = signal;
+export const placeTrade = async (signal: TradeSignal, mode: 'live' | 'demo' = getLoginMode()): Promise<TradeStartInfo | null> => {
+  const { pair, action } = signal;
+
+  const quote = await fetchPriceOnce(pair, mode);
+  if (!quote?.bid || !quote?.ask) {
+    logMessage(`Spread guard rejected ${pair}: no fresh bid/ask quote.`, undefined, { level: "warn", fileName: "placeTrade", pair });
+    return null;
+  }
+  const spread = evaluateSpread(pair, Number(quote.bid), Number(quote.ask));
+  if (!spread.allowed) {
+    logMessage(`Spread guard rejected ${pair}: ${spread.reason}`, undefined, { level: "warn", fileName: "placeTrade", pair });
+    return null;
+  }
+  const direction = action === ACTION.BUY ? 'BUY' : 'SELL';
+  const executableEntry = direction === 'BUY' ? spread.ask : spread.bid;
+  const exactLevels = signal.exactRewardRisk === undefined
+    ? null
+    : calculateExactRiskRewardLevels(direction, executableEntry, signal.stopLoss, signal.exactRewardRisk);
+  if (signal.exactRewardRisk !== undefined && !exactLevels) {
+    logMessage(`Entry rejected for ${pair}: live price is beyond the zone stop or the requested reward/risk is invalid.`, undefined, { level: "warn", fileName: "placeTrade", pair });
+    return null;
+  }
+  const levels = exactLevels ?? applySpreadBuffer(direction, signal.stopLoss, signal.takeProfit, spread.buffer);
+  const stopLoss = levels.stopLoss;
+  const takeProfit = levels.takeProfit;
 
   const precision = getPrecision(pair);
   const formattedSL = stopLoss.toFixed(precision);
   const formattedTP = takeProfit.toFixed(precision);
 
+  logMessage(
+    exactLevels
+      ? `Spread guard passed | ${spread.spreadPips.toFixed(2)} pips | Goldilocks SL remains at the zone edge and TP is ${signal.exactRewardRisk}R from live entry.`
+      : `Spread guard passed | ${spread.spreadPips.toFixed(2)} pips | legacy buffer=${spread.buffer}`,
+    undefined,
+    { fileName: "placeTrade", pair },
+  );
+
   logMessage(`📥 Executing ${action} on ${pair} | SL: ${formattedSL} | TP: ${formattedTP}`, undefined, { fileName: "placeTrade", pair });
 
-  const success = await order({
+  const orderResult = await order({
     pair,
     action,
     risk: signal.risk ?? RISK_PERCENT,
@@ -45,7 +81,7 @@ export const placeTrade = async (signal: TradeSignal, mode: 'live' | 'demo' = 'd
     takeProfit: formattedTP,
   }, mode);
 
-  if (!success) {
+  if (!orderResult.success) {
     logMessage(`❌ Trade failed for ${pair}`, undefined, { fileName: "placeTrade", pair });
     return null;
   }
@@ -99,5 +135,6 @@ export const placeTrade = async (signal: TradeSignal, mode: 'live' | 'demo' = 'd
     orderSide: parseFloat(trade.currentUnits || "0") > 0 ? "BUY" : "SELL",
     openPrice: parseFloat(trade.price!),
     pair,
+    spread,
   };
 };

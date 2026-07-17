@@ -1,0 +1,4 @@
+interface:
+  display_name: "Goldilocks Strategy"
+  short_description: "Operate and improve the Goldilocks trading system"
+  default_prompt: "Use $goldilocks-strategy to analyze, test, or safely improve the Goldilocks trading strategy."

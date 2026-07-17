@@ -6,6 +6,7 @@ import { fetchPriceOnce } from "./oanda/api/priceStreamManager";
 import { openNow } from './oanda/api/openNow';
 import { pipMap, instrumentPrecision, contractSize } from './constants';
 import type { SwingResult } from './swingLabeler';
+import { getLoginMode } from './loginState';
 
 export interface OrderParameters {
   orderType?: (typeof TYPE)[keyof typeof TYPE];
@@ -20,8 +21,8 @@ export interface OrderParameters {
   takeProfit?: string;
 }
 
-export const toLocalTime = (utc: string): string =>
-  new Date(utc).toLocaleString("en-US", {
+export const toLocalTime = (utc?: string): string =>
+  utc ? new Date(utc).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -29,9 +30,9 @@ export const toLocalTime = (utc: string): string =>
     second: "numeric",
     hour12: true,
     timeZone: "America/Chicago",
-  });
+  }) : "unknown time";
 
-export const logSwingSummary = (
+const legacyLogSwingSummary = (
   swings: SwingResult[],
   tf: string,
   summarize = true,
@@ -57,6 +58,17 @@ export const logSwingSummary = (
       console.log(format(l), undefined, { fileName, pair })
     );
   }
+};
+
+export const logSwingSummary = (
+  swings: SwingResult[],
+  tf: string,
+  summarize = true,
+  pair: string,
+) => {
+  const labels = summarize ? swings.slice(-5) : swings;
+  const summary = labels.map((label) => `${label.swing} @ ${label.price}`).join(' -> ');
+  console.log(`[info] ${pair} ${tf} structure: ${summary || 'not enough confirmed swings'}`);
 };
 
 export function isForexMarketOpen(): boolean {
@@ -215,7 +227,7 @@ export const getQuoteRateSymbol = (quote: string): string => {
 export const calculateRisk = async (
   orderType: OrderParameters,
   pair: string,
-  mode: 'live' | 'demo' = 'demo'
+  mode: 'live' | 'demo' = getLoginMode()
 ): Promise<RISK | undefined> => {
   const pip = getPipIncrement(pair);
   const precision = getPrecision(pair);
@@ -321,7 +333,7 @@ export const calculateRisk = async (
 
 export const recentTrade = async (
   pair?: string,
-  mode: 'live' | 'demo' = 'demo'
+  mode: 'live' | 'demo' = getLoginMode()
 ): Promise<Trade | undefined> => {
  // logMessage(`🔎 recentTrade called for pair: ${pair}, mode: ${mode}`, undefined, { fileName: "shared", pair });
   const openTrades = await openNow(pair, mode);

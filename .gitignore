@@ -2,3 +2,17 @@ node_modules
 .next
 logs
 credentials.json
+.env
+.env.*
+!.env.example
+.codex-dev-server*.log
+data/trade-journal.json
+data/automation.sqlite*
+data/automation-runtime*
+data/news-windows.json
+data/candle-history/
+.runtime/
+tmp/
+dev-server.*.log
+data/dev-server*.log
+tsconfig.tsbuildinfo

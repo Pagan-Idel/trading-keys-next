@@ -7,6 +7,7 @@ import { openNow } from './oanda/api/openNow';
 import { pipMap, instrumentPrecision, contractSize } from './constants';
 import type { SwingResult } from './swingLabeler';
 import { getLoginMode } from './loginState';
+import { getUSDHolidayDates as getMarketUSDHolidayDates, isForexHolidayAt, isForexMarketOpenAt } from './forexMarketHours';
 
 export interface OrderParameters {
   orderType?: (typeof TYPE)[keyof typeof TYPE];
@@ -71,30 +72,10 @@ export const logSwingSummary = (
   console.log(`[info] ${pair} ${tf} structure: ${summary || 'not enough confirmed swings'}`);
 };
 
-export function isForexMarketOpen(): boolean {
-  const now = new Date();
-
-  // Get current UTC date parts
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
-  const date = now.getUTCDate();
-
-  // Calculate most recent Sunday 21:00 UTC
-  const dayOfWeek = now.getUTCDay();
-  const daysSinceSunday = dayOfWeek; // 0 = Sunday
-  const sundayOpen = new Date(Date.UTC(year, month, date - daysSinceSunday, 21, 0, 0, 0));
-
-  // Calculate upcoming Friday 21:00 UTC relative to same week
-  const daysUntilFriday = 5 - dayOfWeek + (dayOfWeek === 0 ? 0 : 0);
-  const fridayClose = new Date(Date.UTC(year, month, date - daysSinceSunday + 5, 21, 0, 0, 0));
-
-  const utcNow = now.getTime();
-  const isMarketOpen = utcNow >= sundayOpen.getTime() && utcNow < fridayClose.getTime();
-
-  const todayKey = now.toISOString().split("T")[0];
-  const { fullHolidays, partialHolidays } = getUSDHolidayDates(now.getFullYear());
-  if (fullHolidays.has(todayKey) || partialHolidays.has(todayKey)) {
-    console.log(`🚫 Holiday detected: ${todayKey}`);
+export function isForexMarketOpen(now = new Date()): boolean {
+  const isMarketOpen = isForexMarketOpenAt(now);
+  if (isForexHolidayAt(now)) {
+    console.log('🚫 Holiday detected in America/New_York market time.');
     return false;
   }
 
@@ -107,6 +88,8 @@ function pad(n: number): string {
 }
 
 export function getUSDHolidayDates(year: number): { fullHolidays: Set<string>; partialHolidays: Set<string> } {
+  return getMarketUSDHolidayDates(year);
+  /* Legacy construction retained below temporarily; callers use the centralized market calendar above. */
   const full = new Set<string>();
   const half = new Set<string>();
 

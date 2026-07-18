@@ -1,6 +1,9 @@
 import { getLoginMode } from './loginState';
 import { saveTradeToDatabase } from './automationStore';
 import type { RiskProfile } from './dynamicRisk';
+import type { GoldilocksApproachPressure } from './approachPressure';
+import type { ZoneCorridorMeasurement } from './zoneCorridor';
+import type { TradePathSummary } from './tradeManagementResearch';
 
 export type JournalData = {
   swingA?: unknown;
@@ -24,15 +27,22 @@ export type JournalData = {
     touches?: number;
     candleTime?: number;
     confirmationTime?: number;
+    zoneAgeSeconds?: number;
     score?: { total?: number };
     riskProfile?: RiskProfile;
     riskPercentage?: number;
+    approachPressure?: GoldilocksApproachPressure;
+    zoneCorridors?: ZoneCorridorMeasurement[];
   };
   tradeManagement?: {
     breakEvenAtOneR: boolean;
     breakEvenActivated: boolean;
     breakEvenActivatedAt?: string;
     breakEvenPrice?: number;
+    weekendLiquidation?: boolean;
+    weekendLiquidatedAt?: string;
+    policyId?: string;
+    path?: TradePathSummary;
   };
 };
 

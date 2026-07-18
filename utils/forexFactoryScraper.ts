@@ -18,6 +18,14 @@ puppeteer.use(StealthPlugin());
 const BASE_URL = 'https://www.forexfactory.com/calendar?day=';
 export const FOREX_FACTORY_TIME_ZONE = 'America/Chicago';
 
+const dayUrl = (date: string) => {
+  const [year, month, day] = date.split('-').map(Number);
+  const monthName = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC', month: 'short',
+  }).format(new Date(Date.UTC(year, month - 1, day))).toLowerCase();
+  return `${BASE_URL}${monthName}${day}.${year}`;
+};
+
 const impactFromSpan = (span: any): 'High' | 'Medium' | 'Low' => {
   const title = span.attr('title')?.toLowerCase() || '';
   const className = span.attr('class')?.toLowerCase() || '';
@@ -75,6 +83,7 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
   const events: ForexEvent[] = [];
 
   let dateTracker = expectedDate;
+  let timeTracker = '';
 
   $('.calendar__row').each((_, el) => {
     const row = $(el);
@@ -83,6 +92,7 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
     if (dateAttr) {
       console.log(`📍 Found row for date: ${dateAttr}`);
       dateTracker = dateAttr;
+      timeTracker = '';
     }
 
     if (dateTracker !== expectedDate) {
@@ -90,7 +100,8 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
       return;
     }
 
-    const time = row.find('.calendar__time').text().trim();
+    const displayedTime = row.find('.calendar__time').text().trim();
+    if (displayedTime) timeTracker = displayedTime;
     const currency = row.find('.calendar__currency').text().trim();
     const title = row.find('.calendar__event').text().trim();
     const impactSpan = row.find('.calendar__impact span');
@@ -104,7 +115,7 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
 
     events.push({
       title,
-      time: time || 'Tentative',
+      time: timeTracker || 'Tentative',
       currency,
       impact,
       date: dateTracker,
@@ -112,5 +123,68 @@ export const fetchForexFactoryEvents = async (inputDate?: string): Promise<Forex
   });
 
   // Removed noisy log for parsed events
+  return events;
+};
+
+/**
+ * Fetch complete Forex Factory calendar weeks with one browser process. Historical
+ * backfills use this instead of launching Chromium once for every calendar day.
+ */
+export const fetchForexFactoryCalendarWeeks = async (
+  weekStarts: string[],
+  onWeek?: (completed: number, total: number, weekStart: string) => void,
+): Promise<ForexEvent[]> => {
+  if (!weekStarts.length) return [];
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    defaultViewport: null,
+  });
+  const page = await browser.newPage();
+  await page.emulateTimezone(FOREX_FACTORY_TIME_ZONE);
+  const events: ForexEvent[] = [];
+  try {
+    for (let index = 0; index < weekStarts.length; index += 1) {
+      const weekStart = weekStarts[index];
+      const cursor = new Date(`${weekStart}T00:00:00Z`);
+      for (let dayOffset = 0; dayOffset < 7; dayOffset += 1) {
+        const date = cursor.toISOString().slice(0, 10);
+        await page.goto(dayUrl(date), { waitUntil: 'domcontentloaded', timeout: 60_000 });
+        if ((await page.title()).toLowerCase().includes('just a moment')) {
+          throw new Error(`Forex Factory challenge page prevented historical date ${date} from loading.`);
+        }
+        const $ = cheerio.load(await page.content());
+        if (!$('.calendar__row').length) throw new Error(`Forex Factory returned no calendar rows for ${date}.`);
+        let dateTracker = date;
+        let timeTracker = '';
+        $('.calendar__row').each((_, element) => {
+          const row = $(element);
+          const dateAttr = row.attr('data-calendar-date');
+          if (dateAttr) {
+            dateTracker = dateAttr;
+            timeTracker = '';
+          }
+          if (dateTracker !== date) return;
+          const displayedTime = row.find('.calendar__time').text().trim();
+          if (displayedTime) timeTracker = displayedTime;
+          const currency = row.find('.calendar__currency').text().trim();
+          const title = row.find('.calendar__event').text().trim();
+          const impactSpan = row.find('.calendar__impact span');
+          if (!currency || !title || impactSpan.length === 0) return;
+          events.push({
+            title,
+            time: timeTracker || 'Tentative',
+            currency,
+            impact: impactFromSpan(impactSpan),
+            date,
+          });
+        });
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+      }
+      onWeek?.(index + 1, weekStarts.length, weekStart);
+    }
+  } finally {
+    await browser.close();
+  }
   return events;
 };

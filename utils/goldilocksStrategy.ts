@@ -1,3 +1,5 @@
+import { GOLDILOCKS_DEPARTURE_QUALITY, GOLDILOCKS_ENTRY_PROXIMITY } from './goldilocksConfig';
+
 export type GoldilocksDirection = 'bullish' | 'bearish';
 export type GoldilocksZoneKind = 'base' | 'continuation';
 export type GoldilocksZoneState = 'fresh' | 'touched' | 'invalidated' | 'expired';
@@ -9,6 +11,85 @@ export interface StrategyCandle {
   low: number;
   close: number;
 }
+
+export interface GoldilocksEntryProximityCheck {
+  allowed: boolean;
+  touchRange: number;
+  touchRangeZoneFraction: number;
+  confirmationDistance: number;
+  confirmationDistanceZoneFraction: number;
+  executableDistance: number;
+  executableDistanceZoneFraction: number;
+  maxTouchRangeZoneFraction: number;
+  maxEntryDistanceZoneFraction: number;
+  reason: string;
+}
+
+export interface GoldilocksFirstTouchCheck {
+  allowed: boolean;
+  touchRange: number;
+  touchRangeZoneFraction: number;
+  maxTouchRangeZoneFraction: number;
+  reason: string;
+}
+
+export const validateGoldilocksFirstTouchCandle = (
+  zone: GoldilocksZone,
+  touchCandle: StrategyCandle,
+): GoldilocksFirstTouchCheck => {
+  const width=Math.max(Number.EPSILON,zone.width);
+  const touchRange=Math.max(0,touchCandle.high-touchCandle.low);
+  const touchRangeZoneFraction=touchRange/width;
+  const allowed=touchRangeZoneFraction<=GOLDILOCKS_ENTRY_PROXIMITY.maxTouchRangeZoneFraction;
+  const percent=(value:number)=>(value*100).toFixed(1);
+  return {
+    allowed,
+    touchRange,
+    touchRangeZoneFraction,
+    maxTouchRangeZoneFraction:GOLDILOCKS_ENTRY_PROXIMITY.maxTouchRangeZoneFraction,
+    reason:allowed
+      ?`First M5 touch range ${percent(touchRangeZoneFraction)}% of the M15 zone width.`
+      :`The first M5 touch candle spans ${percent(touchRangeZoneFraction)}% of the M15 zone; maximum ${percent(GOLDILOCKS_ENTRY_PROXIMITY.maxTouchRangeZoneFraction)}%.`,
+  };
+};
+
+export const validateGoldilocksEntryProximity = (
+  zone: GoldilocksZone,
+  touchCandle: StrategyCandle,
+  confirmationClose: number,
+  executableEntry = confirmationClose,
+): GoldilocksEntryProximityCheck => {
+  const width=Math.max(Number.EPSILON,zone.width);
+  const firstTouch=validateGoldilocksFirstTouchCandle(zone,touchCandle);
+  const touchRange=firstTouch.touchRange;
+  const outsideDistance=(price:number)=>zone.side==='demand'
+    ?Math.max(0,price-zone.high)
+    :Math.max(0,zone.low-price);
+  const confirmationDistance=outsideDistance(confirmationClose);
+  const executableDistance=outsideDistance(executableEntry);
+  const touchRangeZoneFraction=firstTouch.touchRangeZoneFraction;
+  const confirmationDistanceZoneFraction=confirmationDistance/width;
+  const executableDistanceZoneFraction=executableDistance/width;
+  const touchAllowed=firstTouch.allowed;
+  const confirmationAllowed=confirmationDistanceZoneFraction<=GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction;
+  const executableAllowed=executableDistanceZoneFraction<=GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction;
+  const allowed=touchAllowed&&confirmationAllowed&&executableAllowed;
+  const percent=(value:number)=>(value*100).toFixed(1);
+  const reason=!touchAllowed
+    ?firstTouch.reason
+    :!confirmationAllowed
+      ?`The M5 close-through finished ${percent(confirmationDistanceZoneFraction)}% of one M15 zone width beyond the proximal edge; maximum ${percent(GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction)}%.`
+      :!executableAllowed
+        ?`The executable entry moved ${percent(executableDistanceZoneFraction)}% of one M15 zone width beyond the proximal edge; maximum ${percent(GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction)}%.`
+        :`First M5 touch range ${percent(touchRangeZoneFraction)}%; close-through distance ${percent(confirmationDistanceZoneFraction)}%; executable-entry distance ${percent(executableDistanceZoneFraction)}% of the M15 zone width.`;
+  return {
+    allowed,touchRange,touchRangeZoneFraction,confirmationDistance,confirmationDistanceZoneFraction,
+    executableDistance,executableDistanceZoneFraction,
+    maxTouchRangeZoneFraction:GOLDILOCKS_ENTRY_PROXIMITY.maxTouchRangeZoneFraction,
+    maxEntryDistanceZoneFraction:GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction,
+    reason,
+  };
+};
 
 export interface SwingLeg {
   direction: GoldilocksDirection;
@@ -31,9 +112,14 @@ export interface GoldilocksZone {
   width: number;
   legMidpoint: number;
   legRange: number;
+  /** Close-based displacement used by the strength score. */
   departureMultiple: number;
+  /** Furthest wick excursion retained for audit; it no longer earns strength points by itself. */
+  wickDepartureMultiple?: number;
+  departureQuality?: GoldilocksDepartureQuality;
   strength2x: boolean;
   baseCandleCount?: number;
+  departureInsideCandleCount?: number;
   brokeOppositeLegIn?: boolean;
   touches: number;
   maxPenetration: number;
@@ -45,6 +131,68 @@ export interface GoldilocksZone {
   reasons: string[];
   timeframeConfluence?: ZoneTimeframeConfluence;
 }
+
+export interface GoldilocksDepartureQuality {
+  departureCandleTime:number;
+  departureCandleIndex:number;
+  candleRange:number;
+  priorAtr14?:number;
+  rangeAtrMultiple?:number;
+  bodyFraction:number;
+  rejectionWickFraction:number;
+  closeDepartureZoneMultiple:number;
+  wickDepartureZoneMultiple:number;
+  shockRejected:boolean;
+  reason:string;
+}
+
+export interface GoldilocksDepartureQualityCheck {
+  allowed:boolean;
+  reason:string;
+  quality?:GoldilocksDepartureQuality;
+}
+
+export const validateGoldilocksDepartureQuality=(zone:GoldilocksZone):GoldilocksDepartureQualityCheck=>{
+  const quality=zone.departureQuality;
+  if(!quality||quality.rangeAtrMultiple===undefined){
+    return {allowed:true,quality,reason:'Departure shock metrics are unavailable; no shock-rejection pattern was identified.'};
+  }
+  return {allowed:!quality.shockRejected,quality,reason:quality.reason};
+};
+
+export interface GoldilocksIntrabarDepartureSpeed {
+  fastestCandleTime:number;
+  fastestCandleRange:number;
+  priorAtr14?:number;
+  rangeAtrMultiple?:number;
+  departureRangeFraction:number;
+}
+
+export const measureGoldilocksIntrabarDepartureSpeed=(
+  zone:GoldilocksZone,
+  intrabarCandles:StrategyCandle[],
+  zoneTimeframeSeconds=15*60,
+):GoldilocksIntrabarDepartureSpeed|undefined=>{
+  const quality=zone.departureQuality;
+  if(!quality)return undefined;
+  const ordered=[...intrabarCandles].sort((left,right)=>left.time-right.time);
+  const inside=ordered.filter(candle=>candle.time>=quality.departureCandleTime&&candle.time<quality.departureCandleTime+zoneTimeframeSeconds);
+  if(!inside.length)return undefined;
+  const fastest=inside.reduce((best,candle)=>candle.high-candle.low>best.high-best.low?candle:best);
+  const before=ordered.filter(candle=>candle.time<quality.departureCandleTime).slice(-14);
+  const priorAtr14=before.length===14?before.reduce((total,candle,index)=>{
+    const previousClose=index>0?before[index-1].close:candle.open;
+    return total+Math.max(candle.high-candle.low,Math.abs(candle.high-previousClose),Math.abs(candle.low-previousClose));
+  },0)/14:undefined;
+  const fastestCandleRange=fastest.high-fastest.low;
+  return {
+    fastestCandleTime:fastest.time,
+    fastestCandleRange,
+    priorAtr14,
+    rangeAtrMultiple:priorAtr14&&priorAtr14>0?fastestCandleRange/priorAtr14:undefined,
+    departureRangeFraction:quality.candleRange>0?fastestCandleRange/quality.candleRange:0,
+  };
+};
 
 export interface ZoneTimeframeConfluence {
   timeframes: string[];
@@ -127,11 +275,12 @@ export interface FinalEntryCheck extends TradeRunwayCheck {
 export const getMostRecentActiveOpposingZone = (
   entryZone: GoldilocksZone,
   knownZones: GoldilocksZone[],
+  knownZonesUsableAtEntry=false,
 ) => knownZones
   .filter((zone) =>
     zone.id !== entryZone.id &&
     zone.side !== entryZone.side &&
-    zone.state !== 'invalidated' && zone.state !== 'expired',
+    (knownZonesUsableAtEntry || (zone.state !== 'invalidated' && zone.state !== 'expired')),
   )
   .sort((a, b) => b.candleTime - a.candleTime)[0];
 
@@ -273,12 +422,50 @@ const evaluateZone = (
     };
   }
 
-  const future = candles.slice(candleIndex + 1, leg.endIndex + 1);
-  const departureDistance =
+  const futureIndices=Array.from({length:Math.max(0,leg.endIndex-candleIndex)},(_,offset)=>candleIndex+1+offset);
+  const future = futureIndices.map(index=>candles[index]);
+  const wickDepartureDistance =
     leg.direction === 'bullish'
       ? Math.max(...future.map((item) => item.high), bounds.high) - bounds.high
       : bounds.low - Math.min(...future.map((item) => item.low), bounds.low);
-  const departureMultiple = departureDistance / width;
+  const closeDepartureDistance=leg.direction==='bullish'
+    ?Math.max(...future.map(item=>item.close),bounds.high)-bounds.high
+    :bounds.low-Math.min(...future.map(item=>item.close),bounds.low);
+  const departureMultiple=closeDepartureDistance/width;
+  const wickDepartureMultiple=wickDepartureDistance/width;
+  const departureCandleIndex=futureIndices.reduce((best,index)=>{
+    if(best<0)return index;
+    return leg.direction==='bullish'
+      ?candles[index].high>candles[best].high?index:best
+      :candles[index].low<candles[best].low?index:best;
+  },-1);
+  const departureCandle=departureCandleIndex>=0?candles[departureCandleIndex]:candle;
+  const candleRange=Math.max(0,departureCandle.high-departureCandle.low);
+  const priorAtr14=departureCandleIndex>0?atrAt(candles,departureCandleIndex-1):undefined;
+  const rangeAtrMultiple=priorAtr14&&priorAtr14>0?candleRange/priorAtr14:undefined;
+  const bodyFraction=candleRange>0?Math.abs(departureCandle.close-departureCandle.open)/candleRange:0;
+  const rejectionWick=leg.direction==='bullish'
+    ?departureCandle.high-Math.max(departureCandle.open,departureCandle.close)
+    :Math.min(departureCandle.open,departureCandle.close)-departureCandle.low;
+  const rejectionWickFraction=candleRange>0?Math.max(0,rejectionWick)/candleRange:0;
+  const closeDepartureZoneMultiple=leg.direction==='bullish'
+    ?Math.max(0,departureCandle.close-bounds.high)/width
+    :Math.max(0,bounds.low-departureCandle.close)/width;
+  const shockRejected=rangeAtrMultiple!==undefined&&
+    rangeAtrMultiple>=GOLDILOCKS_DEPARTURE_QUALITY.shockRangeAtrMultiple&&
+    rejectionWickFraction>=GOLDILOCKS_DEPARTURE_QUALITY.rejectionWickFraction&&
+    closeDepartureZoneMultiple<GOLDILOCKS_DEPARTURE_QUALITY.minimumShockCloseDepartureZoneMultiple;
+  const departureQuality:GoldilocksDepartureQuality={
+    departureCandleTime:departureCandle.time,
+    departureCandleIndex,
+    candleRange,priorAtr14,rangeAtrMultiple,bodyFraction,rejectionWickFraction,
+    closeDepartureZoneMultiple,wickDepartureZoneMultiple:wickDepartureMultiple,shockRejected,
+    reason:rangeAtrMultiple===undefined
+      ?'Departure quality has insufficient completed M15 history for a prior ATR(14) shock comparison.'
+      :shockRejected
+        ?`Shock/rejection departure rejected: ${rangeAtrMultiple.toFixed(2)}x ATR range, ${(rejectionWickFraction*100).toFixed(1)}% rejection wick, and only ${closeDepartureZoneMultiple.toFixed(2)}x zone-width close displacement.`
+        :`Departure quality passed: ${rangeAtrMultiple.toFixed(2)}x ATR range, ${(rejectionWickFraction*100).toFixed(1)}% rejection wick, and ${closeDepartureZoneMultiple.toFixed(2)}x zone-width close displacement.`,
+  };
   const strength2x = departureMultiple >= 2;
   let departureConfirmed = false;
   let touchCountingStarted = false;
@@ -346,8 +533,9 @@ const evaluateZone = (
       ? [`Zone width is ${((width / atr14) * 100).toFixed(1)}% of ATR(14).`]
       : []),
     strength2x
-      ? `Departure reached ${departureMultiple.toFixed(2)}x zone width.`
-      : `Departure reached only ${departureMultiple.toFixed(2)}x zone width.`,
+      ? `Sustained M15 closes reached ${departureMultiple.toFixed(2)}x zone width; furthest wick reached ${wickDepartureMultiple.toFixed(2)}x.`
+      : `Sustained M15 closes reached only ${departureMultiple.toFixed(2)}x zone width; furthest wick reached ${wickDepartureMultiple.toFixed(2)}x.`,
+    departureQuality.reason,
   ];
 
   return {
@@ -363,6 +551,8 @@ const evaluateZone = (
     legMidpoint: midpoint,
     legRange,
     departureMultiple,
+    wickDepartureMultiple,
+    departureQuality,
     strength2x,
     baseCandleCount,
     brokeOppositeLegIn: leg.brokeOppositeLegIn ?? false,
@@ -500,7 +690,9 @@ export const detectGoldilocksZones = (
 export const detectGoldilocksZoneHistory = (
   candles: StrategyCandle[],
   legs: SwingLeg[],
+  options: { trackTouches?: boolean } = {},
 ): GoldilocksZoneHistory => {
+  const trackTouches=options.trackTouches??true;
   const byId = new Map<string, GoldilocksZone>();
   const baseByLeg = new Map<string, GoldilocksZone>();
 
@@ -537,7 +729,7 @@ export const detectGoldilocksZoneHistory = (
         const outside=zone.side==='demand'?candle.low>zone.high:candle.high<zone.low;
         if(outside){touchCountingStarted=true;continue}
         const touched=zone.side==='demand'?candle.low<=zone.high:candle.high>=zone.low;
-        if(touched&&touchCountingStarted){
+        if(trackTouches&&touched&&touchCountingStarted){
           zone.state='touched';
           zone.touches+=1;
           zone.firstTouchIndex??=index;
@@ -581,6 +773,7 @@ export const validateTwoToOneRunway = (
   entryZone: GoldilocksZone,
   knownZones: GoldilocksZone[],
   confirmedEntryPrice?: number,
+  options?:{knownZonesUsableAtEntry?:boolean},
 ): TradeRunwayCheck => {
   const direction: TradeRunwayCheck['direction'] = entryZone.side === 'demand' ? 'buy' : 'sell';
   const entry = confirmedEntryPrice ?? (direction === 'buy' ? entryZone.high : entryZone.low);
@@ -602,7 +795,7 @@ export const validateTwoToOneRunway = (
       reason: 'Rejected: engulfing close is beyond the wrong side of the zone stop.',
     };
   }
-  const opposingZone = getMostRecentActiveOpposingZone(entryZone, knownZones);
+  const opposingZone = getMostRecentActiveOpposingZone(entryZone, knownZones,options?.knownZonesUsableAtEntry);
   const availableReward = opposingZone
     ? direction === 'buy'
       ? Math.max(0, opposingZone.low - entry)
@@ -663,6 +856,30 @@ export const validateFinalEntryAfterEngulf = (
   };
 };
 
+export interface GoldilocksFinalExecutableEntryCheck {
+  allowed: boolean;
+  proximity: GoldilocksEntryProximityCheck;
+  runway: FinalEntryCheck;
+  reason: string;
+}
+
+export const validateGoldilocksFinalExecutableEntry = (
+  zone: GoldilocksZone,
+  knownZones: GoldilocksZone[],
+  touchCandle: StrategyCandle,
+  confirmationClose: number,
+  executableEntry: number,
+): GoldilocksFinalExecutableEntryCheck => {
+  const proximity=validateGoldilocksEntryProximity(zone,touchCandle,confirmationClose,executableEntry);
+  const runway=validateFinalEntryAfterEngulf(zone,knownZones,confirmationClose,executableEntry);
+  return {
+    allowed:proximity.allowed&&runway.allowed,
+    proximity,
+    runway,
+    reason:!proximity.allowed?proximity.reason:runway.reason,
+  };
+};
+
 export const countZoneTouchesBefore = (
   zone: GoldilocksZone,
   candles: StrategyCandle[],
@@ -685,6 +902,92 @@ export const countZoneTouchesBefore = (
     if (touched && countingStarted) touches += 1;
   }
   return touches;
+};
+
+export interface HistoricalZoneTouchState {
+  armed: boolean;
+  touchCandleIndex: number;
+  totalTouches: number;
+  maxPenetration: number;
+  touchesBeforeTouch: number;
+  maxPenetrationBeforeTouch: number;
+  invalidated: boolean;
+}
+
+export const createHistoricalZoneTouchState = (): HistoricalZoneTouchState => ({
+  armed: false,
+  touchCandleIndex: -1,
+  totalTouches: 0,
+  maxPenetration: 0,
+  touchesBeforeTouch: 0,
+  maxPenetrationBeforeTouch: 0,
+  invalidated: false,
+});
+
+export interface ZoneTimeframeTouchSummary {
+  firstOutsideTime?: number;
+  departureInsideCandleCount: number;
+  touches: number;
+  maxPenetration: number;
+  touchDetails: Array<{time:number;penetration:number;price:number}>;
+  invalidated: boolean;
+}
+
+export const summarizeZoneTimeframeTouches = (
+  zone: GoldilocksZone,
+  candles: StrategyCandle[],
+  candleSeconds: number,
+  completedBefore = Number.POSITIVE_INFINITY,
+): ZoneTimeframeTouchSummary => {
+  const summary:ZoneTimeframeTouchSummary={departureInsideCandleCount:0,touches:0,maxPenetration:0,touchDetails:[],invalidated:false};
+  for(const candle of candles){
+    if(candle.time<=zone.candleTime||candle.time+candleSeconds>completedBefore)continue;
+    const broken=zone.side==='demand'?candle.low<zone.low:candle.high>zone.high;
+    if(broken){summary.invalidated=true;break}
+    const outside=zone.side==='demand'?candle.low>zone.high:candle.high<zone.low;
+    if(summary.firstOutsideTime===undefined){
+      if(outside)summary.firstOutsideTime=candle.time;
+      else if(candle.high>=zone.low&&candle.low<=zone.high)summary.departureInsideCandleCount+=1;
+      continue;
+    }
+    const touched=candle.high>=zone.low&&candle.low<=zone.high;
+    if(!touched)continue;
+    const raw=zone.side==='demand'?(zone.high-candle.low)/zone.width:(candle.high-zone.low)/zone.width;
+    summary.touches+=1;
+    const penetration=Math.max(0,Math.min(1,raw));
+    summary.maxPenetration=Math.max(summary.maxPenetration,penetration);
+    summary.touchDetails.push({time:candle.time,penetration,price:zone.side==='demand'?candle.low:candle.high});
+    if(summary.touches>3){summary.invalidated=true;break}
+  }
+  return summary;
+};
+
+/**
+ * Advances the causal trigger-timeframe touch ledger for an already-actionable zone.
+ * The caller must evaluate a pending confirmation before observing the same candle,
+ * so a confirming candle cannot rewrite the touch it is supposed to close beyond.
+ */
+export const observeHistoricalZoneCandle = (
+  zone: GoldilocksZone,
+  candle: StrategyCandle,
+  candleIndex: number,
+  state: HistoricalZoneTouchState,
+): HistoricalZoneTouchState => {
+  const outside=zone.side==='demand'?candle.low>zone.high:candle.high<zone.low;
+  const touched=candle.high>=zone.low&&candle.low<=zone.high;
+  if(outside)state.armed=true;
+  if(!touched||!state.armed)return state;
+  const rawPenetration=zone.side==='demand'
+    ?(zone.high-candle.low)/zone.width
+    :(candle.high-zone.low)/zone.width;
+  const penetration=Math.max(0,Math.min(1,rawPenetration));
+  state.touchesBeforeTouch=state.totalTouches;
+  state.maxPenetrationBeforeTouch=state.maxPenetration;
+  state.totalTouches+=1;
+  state.maxPenetration=Math.max(state.maxPenetration,penetration);
+  state.touchCandleIndex=candleIndex;
+  state.invalidated=state.totalTouches>3;
+  return state;
 };
 
 export const findFullCandleEngulfing = (

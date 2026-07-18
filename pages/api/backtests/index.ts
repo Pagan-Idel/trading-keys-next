@@ -1,12 +1,21 @@
 import type { NextApiRequest,NextApiResponse } from 'next';
-import { deleteBacktestRun,getBacktestDashboard } from '../../../utils/backtestStore';
+import { clearAllBacktestData,deleteBacktestRun,getBacktestDashboard,getBacktestTradeById,getBacktestTrainingData } from '../../../utils/backtestStore';
 import { cancelBacktest, startBacktest } from '../../../utils/backtestRunner';
 
 export default function handler(req:NextApiRequest,res:NextApiResponse){
   try{
-    if(req.method==='GET')return res.status(200).json(getBacktestDashboard(typeof req.query.runId==='string'?req.query.runId:undefined));
+    if(req.method==='GET'){
+      if(req.query.training==='true')return res.status(200).json({rows:getBacktestTrainingData(typeof req.query.runId==='string'?req.query.runId:undefined),images:'deferred'});
+      if(typeof req.query.tradeId==='string'){
+        const trade=getBacktestTradeById(req.query.tradeId);
+        if(!trade)return res.status(404).json({error:'Trade ID was not found.'});
+        return res.status(200).json({trade});
+      }
+      return res.status(200).json(getBacktestDashboard(typeof req.query.runId==='string'?req.query.runId:undefined));
+    }
     if(req.method==='POST')return res.status(202).json(startBacktest(req.body??{}));
     if(req.method==='DELETE'){
+      if(req.query.all==='true'&&req.query.permanent==='true')return res.status(200).json(clearAllBacktestData());
       const id=typeof req.query.runId==='string'?req.query.runId:String(req.body?.runId??'');
       if(!id)throw new Error('A backtest run ID is required.');
       if(req.query.permanent==='true')return res.status(200).json(deleteBacktestRun(id));

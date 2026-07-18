@@ -35,24 +35,46 @@ The primary database is `data/automation.sqlite` in WAL mode.
 | `worker_status` | Latest state and reason per pair | Latest row per pair |
 | `active_trades` | Restart recovery and dashboard state | Until closed/cleared |
 | `trades` | Closed live/demo trades and journal JSON | Persistent |
+| `trade_management_events` | Append-only requested/confirmed manager actions, broker responses, quote milestones, and path summaries | Persistent |
 | `backtest_runs` | Tweak/version configuration and aggregate results | Persistent |
 | `backtest_trades` | Historical simulated entries, scores, outcomes, and context | Persistent |
+| `backtest_trade_management_results` | Counterfactual outcomes for each versioned manager on the same M1 path | Persistent |
 | `backtest_events` | Backfill, scan, progress, and completion events | Persistent |
+| `historical_news_events` | Source-stamped high-impact releases and exact historical block windows | Persistent |
+| `historical_news_coverage` | Complete/failed calendar-day coverage, including zero-event days | Persistent |
 
 Candle archives under `data/` are inputs. Treat them as versioned datasets even when
 they are not committed to Git. Record pair, timeframe, earliest/latest timestamp,
 candle count, data source, and a content hash for reproducible experiments.
+
+Completed OANDA midpoint OHLC is stored separately in `data/candle-history.sqlite`.
+`historical_candles` is indexed by mode, pair, timeframe, and UTC candle time;
+`candle_archive_coverage` records fetched ranges, including ranges with no candles;
+`candle_archive_imports` prevents repeated decompression of legacy gzip caches. This
+database contains market data only and is intentionally separate from
+`data/automation.sqlite` so large M1 archives do not slow trade/event writes.
+
+Automatic campaign state and trial summaries are stored separately in
+`data/goldilocks-research.sqlite`. A campaign configuration hash, dataset-manifest
+key, backtest run ID, official realized-R metrics, per-pair metrics, and every
+versioned management-policy summary remain attached to each trial. The default
+archive ceiling is 5 GiB including the candle SQLite WAL/SHM and retained legacy gzip
+sources; acquisition pauses at the high-water mark instead of silently deleting data.
 
 ## Event vocabulary
 
 Important worker steps include:
 
 - `loading_zones`, `waiting_for_confirmation`
-- `spread_rejected`, `runway_rejected`, `score_rejected`
-- `purity_measured`, `available_rrr_measured`, `score_complete`
+- `spread_rejected`, `entry_proximity_rejected`, `final_execution_rejected`, `execution_coverage_rejected`, `weekly_market_hours_rejected`, `runway_rejected`, `score_rejected`
+- `historical_holiday_rejected`, `departure_quality_rejected`
+- `purity_measured`, `available_rrr_measured`, `approach_pressure_measured`, `score_complete`
+- `zone_corridor_measured`
 - `placing_trade`, `order_rejected`
 - `trade_manager_break_even`, `trade_manager_protected_win`
+- `trade_manager_weekend_liquidation`, `trade_manager_weekend_closed`, `trade_manager_weekend_close_retry`
 - `trade_manager_win`, `trade_manager_loss`
+- `trade_manager_armed`, `trade_manager_progress`, `trade_manager_risk`, `trade_manager_heartbeat`, `trade_manager_path_summary`
 - `safety_guard`, `final_safety_rejected`
 
 Prefer `step`, `pair`, `data_json`, and timestamps over parsing display text. Display
@@ -65,19 +87,51 @@ model cannot learn why a setup was rejected and will suffer selection bias. A fu
 exporter should include:
 
 - Dataset and strategy version identifiers
-- Pair and M15/M5/M1 timestamps
-- Zone ID, side, kind, age, width, ATR ratio, leg ratio, and prior touches
+- Pair and H1/M15/M5 signal timestamps plus M1 execution timestamps
+- Zone ID, side, kind, age in exact seconds from the originating M15 base to M5 entry eligibility, width, ATR ratio, leg ratio, and prior touches
+- Departure candle range/ATR, body and rejection-wick fractions, close-based and
+  wick-based displacement multiples, and M1 concentration when available
 - Every penetration depth observed before the trigger
-- Trend, range half, base candle count, departure multiple, reversal flag
+- Trend, range half, base candle count, M15 candles lingering inside the zone before
+  the first outside candle, sustained close-departure multiple, and structural reversal flag
 - MTF confluence relationships
 - Available opposing-zone distance and RRR
+- Pre-touch M5 approach-pressure fields: liquidity-sweep count/time/depth, recovery
+  displacement in causal ATRs, directional step/close fractions, progress in zone widths,
+  compression score, confirmation body/close-through/rejection-wick fractions, confirmation
+  strength, and the provisional zero-to-four adverse flag count
 - Every hard gate and its reason
 - Score component vector, total, and configured threshold
 - Executable bid/ask spread where available
 - Entry, stop, 1R, 2R, outcome time, exit reason, and realized R/P&L
+- The entry-time M5/M15/H1 demand-to-supply corridor: raw width, pips, ATR-normalized
+  width, entry location percent, initial-risk/target/opposing-room percent, and the
+  percentages occupied by 1R, 2R, and 4R. Missing corridor sides remain unavailable.
+- A policy-independent M1 path summary: MFE/MAE in R, ending R, coverage bounds/count,
+  first time each positive and negative R milestone was reached, and intrabar ambiguity.
+- One child row per versioned manager evaluated on that identical path. The 22-policy
+  grid covers set-and-forget targets from 1R through 5R, break-even-at-+1R targets from
+  1.5R through 5R, and 25%, 50%, or 75% runners after 2R toward 3R, 4R, or 5R.
+  Runner stop is +1R.
+- For live/demo executions, requested and broker-confirmed manager events, broker
+  transaction responses, sampled executable-quote MFE/MAE, and coverage timestamps.
 - Whether the row came from live, demo, or backtest data
 
 Keep rejected candidates. Mark unavailable features as unavailable rather than zero.
+The approach-pressure thresholds are research labels only. Do not promote them into a gate,
+score component, or risk modifier until chronological out-of-sample expectancy and drawdown
+show stable value across pairs and regimes.
+
+The read-only `GET /api/backtests?training=true&runId=<id>` export returns one row per
+trade/policy combination. It deliberately reports `imageStatus: "deferred"`; chart-image
+capture is not part of the current data contract. The normal stored backtest result remains
+unchanged, so counterfactual manager research cannot silently alter strategy behavior.
+The read-only `GET /api/automation/trade-management?tradeId=<broker-trade-id>` endpoint
+returns the permanent live/demo manager ledger for one broker trade.
+
+Live/demo automation currently executes `be-at-1r-full-2r-v1`. Backtests may retain the
+existing score-tiered partial-runner result as their official outcome; the research child
+rows expose all policies side by side instead of hiding that mismatch.
 
 ## Prevent leakage
 
@@ -90,6 +144,8 @@ Keep rejected candidates. Mark unavailable features as unavailable rather than z
 - Never use final zone touch counts, future invalidation, or future opposing zones as
   entry-time features.
 - Version every strategy change and retain failed experiments.
+- Treat the D1/H4/H1 profile as a separate strategy version; never merge its rows with
+  H1/M15/M5 as though the setup detector were unchanged.
 
 ## Metrics
 
@@ -104,6 +160,14 @@ Report at minimum:
 - Longest losing streak
 - Results by pair, direction, zone kind, score bucket, and calendar period
 - Sensitivity to spread, slippage, and one-candle outcome ambiguity
+
+The backtesting dashboard treats final realized-R expectancy as the primary ranking
+metric. Profit factor, average win/loss R, payoff ratio, net R, and drawdown provide
+the surrounding economics. Positive-R trade rate is displayed as a consistency
+diagnostic only. Trades protected at break-even are shown separately because reaching
++1R is useful setup information, but a later 0R exit is not realized profit. Pair and
+tweak comparisons under 50 realized-R trades are marked early; prefer 100+ before
+drawing an initial conclusion and still require chronological out-of-sample validation.
 
 A strategy with a higher win rate can still be worse if losses, drawdown, or execution
 costs increase. Require adequate sample sizes before accepting a tweak.

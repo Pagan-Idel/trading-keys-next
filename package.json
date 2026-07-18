@@ -35,6 +35,7 @@
     "run:demo": "npm run build:threads && tsx runner/startRunner.ts --mode=demo",
     "check:automation": "npm run build:threads && tsx runner/startRunner.ts --mode=demo --check",
     "test:strategy": "tsx --test tests/goldilocksStrategy.test.ts tests/priceStreamManager.test.ts",
+    "research:auto": "tsx runner/startAutoResearch.ts",
     "start:prod": "npm run run:demo"
   },
   "eslintConfig": {

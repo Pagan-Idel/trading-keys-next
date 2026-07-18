@@ -14,6 +14,12 @@ export interface TradeSignal {
   takeProfit: number;
   risk?: number; // Optional risk percentage, default is .25%
   exactRewardRisk?: number;
+  executableEntryGuard?: (context: {
+    executableEntry: number;
+    bid: number;
+    ask: number;
+    spread: SpreadCheck;
+  }) => { allowed: boolean; reason: string };
 }
 
 export interface TradeStartInfo {
@@ -22,6 +28,7 @@ export interface TradeStartInfo {
   tpPrice: number;
   orderSide: "BUY" | "SELL";
   openPrice: number;
+  currentUnits: string;
   pair: string;
   spread: SpreadCheck;
 }
@@ -47,6 +54,21 @@ export const placeTrade = async (signal: TradeSignal, mode: 'live' | 'demo' = ge
   }
   const direction = action === ACTION.BUY ? 'BUY' : 'SELL';
   const executableEntry = direction === 'BUY' ? spread.ask : spread.bid;
+  const executableGuard=signal.executableEntryGuard?.({
+    executableEntry,
+    bid:spread.bid,
+    ask:spread.ask,
+    spread,
+  });
+  if(executableGuard&&!executableGuard.allowed){
+    logMessage(`FINAL EXECUTION REJECTED · ${pair} · ${executableGuard.reason}`, {
+      executableEntry,
+      bid:spread.bid,
+      ask:spread.ask,
+      spreadPips:spread.spreadPips,
+    }, {level:'warn',fileName:'placeTrade',pair,step:'final_execution_rejected'});
+    return null;
+  }
   const exactLevels = signal.exactRewardRisk === undefined
     ? null
     : calculateExactRiskRewardLevels(direction, executableEntry, signal.stopLoss, signal.exactRewardRisk);
@@ -134,6 +156,7 @@ export const placeTrade = async (signal: TradeSignal, mode: 'live' | 'demo' = ge
     tpPrice: parseFloat(trade.takeProfitOrder?.price ?? "0"),
     orderSide: parseFloat(trade.currentUnits || "0") > 0 ? "BUY" : "SELL",
     openPrice: parseFloat(trade.price!),
+    currentUnits: trade.currentUnits ?? '0',
     pair,
     spread,
   };

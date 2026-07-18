@@ -1,6 +1,6 @@
 ---
 name: goldilocks-strategy
-description: Operate, explain, test, debug, document, and safely improve the Trading Keys Goldilocks forex strategy. Use for Goldilocks demand/supply zones, HH/HL/LH/LL structure, touches, M1 confirmations, 2R runway, 20-point scoring, trade management, automation logs, backtests, Raspberry Pi operation, or AI research based on this repository.
+description: Operate, explain, test, debug, document, and safely improve the Trading Keys Goldilocks forex strategy. Use for Goldilocks demand/supply zones, HH/HL/LH/LL structure, M5 touches and confirmations, M1 execution resolution, 2R runway, 20-point scoring, trade management, automation logs, backtests, Raspberry Pi operation, or AI research based on this repository.
 ---
 
 # Goldilocks Strategy
@@ -61,7 +61,7 @@ execution. Require explicit user approval for material live-risk changes.
 
 ## Important invariants
 
-- Current demo stack: M15 trend/range, M5 zones, M1 touch/confirmation.
+- Current demo stack: H1 trend/range, M15 zones/first-outside/prior-touch purity, M5 first touch/later confirmation, and M1 post-entry outcome resolution.
 - Total score: 20; default minimum: 14.
 - Score only after all hard gates pass.
 - Use the executable entry for the final 2R runway check.
@@ -71,4 +71,5 @@ execution. Require explicit user approval for material live-risk changes.
 - Maximum three qualifying touches; invalidate on the fourth.
 - Expire active zones after two calendar years.
 - Preserve one open trade per pair and restart recovery.
-- Backtests currently omit historical spread, news, session, slippage, and latency.
+- Backtests include historical news, configured U.S. holiday blocks, and DST-aware weekend entry/exit rules, but still
+  omit historical spread, pair-session availability, slippage, latency, and financing charges.

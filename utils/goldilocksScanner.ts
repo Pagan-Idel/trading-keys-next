@@ -1,8 +1,12 @@
 import type { Candle } from './swingLabeler.ts';
+import { GOLDILOCKS_DEMO_TIMEFRAMES } from './goldilocksConfig.ts';
 import { determineSwingPoints } from './swingLabeler.ts';
 import {
   annotateTimeframeConfluence,
   detectGoldilocksZoneHistory,
+  summarizeZoneTimeframeTouches,
+  validateGoldilocksEntryProximity,
+  type GoldilocksEntryProximityCheck,
   type GoldilocksDirection,
   type GoldilocksZone,
   type GoldilocksZoneHistory,
@@ -48,7 +52,12 @@ export const annotateConfluenceAt = (
   zoneTimeframe,
   histories
     .filter(item => item.timeframe !== zoneTimeframe)
-    .map(item => ({ timeframe: item.timeframe, zones: item.history.zones.filter(candidate => zoneUsableAt(candidate, time)) })),
+    .map(item => ({
+      timeframe:item.timeframe,
+      zones:item.history.zones
+        .filter(candidate=>zoneUsableAt(candidate,time))
+        .map(candidate=>({...candidate,state:'fresh' as const})),
+    })),
 )[0];
 
 const isBullishPair = (left: string, right: string) =>
@@ -103,33 +112,34 @@ export const getGoldilocksRangeAssessment = (
   const known=candles.filter(candle=>Math.floor(new Date(candle.time).getTime()/1000)<=atTime);
   const legs=buildGoldilocksLegs(known);
   const leg=legs.at(-1);
-  if(!leg)return {aligned:null,detail:'No completed M15 swing range was available.'};
+  if(!leg)return {aligned:null,detail:`No completed ${GOLDILOCKS_DEMO_TIMEFRAMES.trend} swing range was available.`};
   const rangeCandles=known.slice(leg.startIndex,leg.endIndex+1);
   const low=Math.min(...rangeCandles.map(candle=>candle.low));
   const high=Math.max(...rangeCandles.map(candle=>candle.high));
   const midpoint=low+(high-low)/2;
   const aligned=tradeDirection==='BUY'?entry<=midpoint:entry>=midpoint;
-  return {aligned,low,high,midpoint,detail:`${tradeDirection} entry ${entry} is ${aligned?'in the correct':'in the opposite'} half of M15 range ${low}-${high} (midpoint ${midpoint}).`};
+  return {aligned,low,high,midpoint,detail:`${tradeDirection} entry ${entry} is ${aligned?'in the correct':'in the opposite'} half of ${GOLDILOCKS_DEMO_TIMEFRAMES.trend} range ${low}-${high} (midpoint ${midpoint}).`};
 };
 
-export const buildGoldilocksHistory = (candles: Candle[]): {
+export const buildGoldilocksHistory = (candles: Candle[], options: { trackTouches?: boolean } = {}): {
   candles: StrategyCandle[];
   legs: SwingLeg[];
   history: GoldilocksZoneHistory;
 } => {
   const strategyCandles = toStrategyCandles(candles);
   const legs = buildGoldilocksLegs(candles);
-  return { candles: strategyCandles, legs, history: detectGoldilocksZoneHistory(strategyCandles, legs) };
+  return { candles: strategyCandles, legs, history: detectGoldilocksZoneHistory(strategyCandles, legs, options) };
 };
 
 export const buildGoldilocksHistoryChunked = (
   candles: Candle[],
   chunkSize = 5_000,
   overlap = 500,
+  options: { trackTouches?: boolean } = {},
 ): GoldilocksZoneHistory => {
   if (candles.length <= chunkSize) {
     const normalized = candles.map((candle, candleIndex) => ({ ...candle, candleIndex }));
-    return buildGoldilocksHistory(normalized).history;
+    return buildGoldilocksHistory(normalized,options).history;
   }
   const strategyCandles = toStrategyCandles(candles);
   const candidates = new Map<string, GoldilocksZone>();
@@ -138,7 +148,7 @@ export const buildGoldilocksHistoryChunked = (
     const sliceStart = Math.max(0, coreStart - overlap);
     const sliceEnd = Math.min(candles.length, coreStart + step + overlap);
     const slice = candles.slice(sliceStart, sliceEnd).map((candle, index) => ({ ...candle, candleIndex: index }));
-    const snapshot = buildGoldilocksHistory(slice);
+    const snapshot = buildGoldilocksHistory(slice,options);
     for (const zone of snapshot.history.zones) {
       const globalIndex = sliceStart + zone.candleIndex;
       if (globalIndex < coreStart || globalIndex >= Math.min(candles.length, coreStart + step)) continue;
@@ -191,7 +201,7 @@ export const buildGoldilocksHistoryChunked = (
         continue;
       }
       const touched = candle.high >= zone.low && candle.low <= zone.high;
-      if (touched && countingStarted.get(zone)) {
+      if ((options.trackTouches??true) && touched && countingStarted.get(zone)) {
         zone.state = 'touched';
         zone.touches += 1;
         zone.firstTouchIndex ??= candleIndex;
@@ -216,14 +226,14 @@ export const buildGoldilocksHistoryChunked = (
 export interface FreshGoldilocksConfirmation {
   zone: GoldilocksZone;
   direction: GoldilocksDirection;
+  firstOutsideTime: number;
   touchCandle: StrategyCandle;
   confirmationCandle: StrategyCandle;
+  priorTouches: number;
+  priorMaxPenetration: number;
+  proximity: GoldilocksEntryProximityCheck;
 }
 
-const isOutside = (zone: GoldilocksZone, candle: StrategyCandle) =>
-  zone.side === 'demand' ? candle.low > zone.high : candle.high < zone.low;
-const touches = (zone: GoldilocksZone, candle: StrategyCandle) =>
-  candle.high >= zone.low && candle.low <= zone.high;
 const breaks = (zone: GoldilocksZone, candle: StrategyCandle) =>
   zone.side === 'demand' ? candle.low < zone.low : candle.high > zone.high;
 
@@ -232,6 +242,8 @@ export const findFreshGoldilocksConfirmations = (
   confirmationCandles: StrategyCandle[],
   confirmationSeconds: number,
   nowMs = Date.now(),
+  zoneCandles: StrategyCandle[] = confirmationCandles,
+  zoneSeconds = confirmationSeconds,
 ): FreshGoldilocksConfirmation[] => {
   if (confirmationCandles.length < 2) return [];
   const candles = [...confirmationCandles].sort((a, b) => a.time - b.time);
@@ -240,29 +252,30 @@ export const findFreshGoldilocksConfirmations = (
   if (nowMs >= (confirmationCandle.time + confirmationSeconds * 2) * 1000) return [];
 
   return history.activeZones.flatMap((zone) => {
-    if (zone.touches > 3 || (zone.availableAt ?? zone.candleTime) >= confirmationCandle.time) return [];
-    let departed = false;
-    let touchCandle: StrategyCandle | undefined;
-    for (const candle of candles) {
-      if (candle.time <= (zone.availableAt ?? zone.candleTime) || candle.time >= confirmationCandle.time) continue;
-      if (breaks(zone, candle)) {
-        touchCandle = undefined;
-        break;
-      }
-      if (isOutside(zone, candle)) {
-        departed = true;
-        continue;
-      }
-      if (departed && touches(zone, candle)) {
-        touchCandle = candle;
-        departed = false;
-      }
+    if ((zone.availableAt ?? zone.candleTime) >= confirmationCandle.time) return [];
+    const armed=summarizeZoneTimeframeTouches(zone,zoneCandles,zoneSeconds,confirmationCandle.time);
+    if(armed.firstOutsideTime===undefined)return [];
+    let touchCandle:StrategyCandle|undefined;
+    for (let index=0;index<candles.length;index+=1) {
+      const candle=candles[index];
+      if (candle.time < armed.firstOutsideTime || candle.time >= confirmationCandle.time) continue;
+      if (breaks(zone, candle)) {touchCandle=undefined;break}
+      if(!touchCandle&&candle.high>=zone.low&&candle.low<=zone.high)touchCandle=candle;
     }
     if (!touchCandle || breaks(zone, confirmationCandle)) return [];
+    const purity=summarizeZoneTimeframeTouches(zone,zoneCandles,zoneSeconds,touchCandle.time);
+    if(purity.invalidated)return [];
     const direction: GoldilocksDirection = zone.side === 'demand' ? 'bullish' : 'bearish';
     const confirmed = direction === 'bullish'
       ? confirmationCandle.close > confirmationCandle.open && confirmationCandle.close > touchCandle.high
       : confirmationCandle.close < confirmationCandle.open && confirmationCandle.close < touchCandle.low;
-    return confirmed ? [{ zone, direction, touchCandle, confirmationCandle }] : [];
+    const proximity=validateGoldilocksEntryProximity(zone,touchCandle,confirmationCandle.close);
+    return confirmed ? [{
+      zone:{...zone,touches:purity.touches,maxPenetration:purity.maxPenetration,departureInsideCandleCount:purity.departureInsideCandleCount},
+      direction,firstOutsideTime:purity.firstOutsideTime!,touchCandle,confirmationCandle,
+      priorTouches:purity.touches,
+      priorMaxPenetration:purity.maxPenetration,
+      proximity,
+    }] : [];
   }).sort((a, b) => b.zone.candleTime - a.zone.candleTime);
 };

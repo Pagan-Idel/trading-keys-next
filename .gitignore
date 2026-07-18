@@ -11,6 +11,9 @@ data/automation.sqlite*
 data/automation-runtime*
 data/news-windows.json
 data/candle-history/
+data/candle-history.sqlite*
+data/goldilocks-research.sqlite*
+data/service-logs/
 .runtime/
 tmp/
 dev-server.*.log

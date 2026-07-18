@@ -16,6 +16,16 @@ export interface AutomationEventInput {
   data?: unknown;
 }
 
+export interface TradeManagementEventInput {
+  tradeId:string;
+  pair:string;
+  mode:'live'|'demo';
+  step:string;
+  eventTime?:string;
+  policyId?:string;
+  data?:unknown;
+}
+
 export interface TradeRecordInput {
   tradeId: string;
   pair: string;
@@ -126,6 +136,14 @@ const getDatabase = (): Database.Database => {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS trade_management_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trade_id TEXT NOT NULL,pair TEXT NOT NULL,mode TEXT NOT NULL,policy_id TEXT,
+      event_time TEXT NOT NULL,received_at TEXT NOT NULL,step TEXT NOT NULL,data_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_trade_management_events_trade ON trade_management_events(trade_id,id);
+    CREATE INDEX IF NOT EXISTS idx_trade_management_events_pair_time ON trade_management_events(pair,event_time);
+
     CREATE TABLE IF NOT EXISTS automation_settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -172,6 +190,23 @@ export const recordAutomationEvent = (event: AutomationEventInput): void => {
     message: event.message,
     dataJson: safeJson(event.data),
   });
+};
+
+/** Permanent, append-only execution research ledger. Unlike automation_events, these rows are not retention-pruned. */
+export const recordTradeManagementEvent=(event:TradeManagementEventInput):void=>{
+  const now=new Date().toISOString();
+  getDatabase().prepare(`INSERT INTO trade_management_events(
+    trade_id,pair,mode,policy_id,event_time,received_at,step,data_json
+  ) VALUES(@tradeId,@pair,@mode,@policyId,@eventTime,@receivedAt,@step,@dataJson)`).run({
+    tradeId:event.tradeId,pair:event.pair,mode:event.mode,policyId:event.policyId??null,
+    eventTime:event.eventTime??now,receivedAt:now,step:event.step,dataJson:safeJson(event.data),
+  });
+};
+
+export const getTradeManagementEvents=(tradeId:string)=>{
+  return (getDatabase().prepare(`SELECT id,trade_id AS tradeId,pair,mode,policy_id AS policyId,event_time AS eventTime,
+    received_at AS receivedAt,step,data_json AS dataJson FROM trade_management_events WHERE trade_id=? ORDER BY id`).all(tradeId) as Array<Record<string,unknown>>)
+    .map(row=>({...row,data:row.dataJson?JSON.parse(String(row.dataJson)):undefined,dataJson:undefined}));
 };
 
 export const updateWorkerStatus = (

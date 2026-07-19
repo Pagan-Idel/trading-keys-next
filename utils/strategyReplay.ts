@@ -1,4 +1,4 @@
-import type { GoldilocksZone } from './goldilocksStrategy.ts';
+import { summarizeZoneTimeframeTouches, type GoldilocksZone, type StrategyCandle } from './goldilocksStrategy.ts';
 import { zoneUsableAt } from './goldilocksScanner.ts';
 
 export interface StrategyReplayWindow {
@@ -20,6 +20,22 @@ const formatEpochInZone=(epochSeconds:number,timeZone:string)=>{
 
 export const formatStrategyReplayUtc=(epochSeconds:number)=>formatEpochInZone(epochSeconds,'UTC');
 export const formatStrategyReplayNewYork=(epochSeconds:number)=>formatEpochInZone(epochSeconds,'America/New_York');
+
+export const annotateReplayZonePurityAt=(
+  zone:GoldilocksZone,
+  zoneCandles:StrategyCandle[],
+  candleSeconds:number,
+  completedBefore:number,
+):GoldilocksZone=>{
+  const purity=summarizeZoneTimeframeTouches(zone,zoneCandles,candleSeconds,completedBefore);
+  return {
+    ...zone,
+    touches:purity.touches,
+    maxPenetration:purity.maxPenetration,
+    departureInsideCandleCount:purity.departureInsideCandleCount,
+    touchPenetrations:purity.touchDetails.map(touch=>touch.penetration),
+  };
+};
 
 export const getStrategyReplayBaseContextStart=(zoneBaseTime:number)=>(
   zoneBaseTime-STRATEGY_REPLAY_BASE_CONTEXT_SECONDS

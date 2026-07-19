@@ -8,7 +8,7 @@ import { annotateConfluenceAt, buildGoldilocksHistoryChunked, buildGoldilocksLeg
 import { GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_LIVE_CANDLE_LIMITS, GOLDILOCKS_STRATEGY_VERSION, GOLDILOCKS_TIMEFRAME_SECONDS, getGoldilocksMinimumScore } from '../../../utils/goldilocksConfig';
 import { scoreGoldilocksSetup } from '../../../utils/goldilocksScoring';
 import { getBacktestTradeReplay } from '../../../utils/backtestStore';
-import { filterReplayRejectedFirstTouchesAt, getStrategyReplayBaseContextStart, getStrategyReplayContextAnchor, getStrategyReplayRequestEnd, getStrategyReplayWindow } from '../../../utils/strategyReplay';
+import { annotateReplayZonePurityAt, filterReplayRejectedFirstTouchesAt, getStrategyReplayBaseContextStart, getStrategyReplayContextAnchor, getStrategyReplayRequestEnd, getStrategyReplayWindow } from '../../../utils/strategyReplay';
 import { getForexHolidayStatusAt, isForexWeekendEntryBlocked } from '../../../utils/forexMarketHours';
 import { getGoldilocksZoneAgeSeconds } from '../../../utils/zoneAge';
 
@@ -182,8 +182,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const recentSupplyBase=displayZonePool
       .filter(zone=>zone.kind==='base'&&zone.side==='supply')
       .sort((a,b)=>b.candleTime-a.candleTime)[0];
+    const zoneCandleSeconds=GOLDILOCKS_TIMEFRAME_SECONDS[GOLDILOCKS_DEMO_TIMEFRAMES.zone]??900;
+    const displayPurityCutoff=replayDisplayTime??Number.POSITIVE_INFINITY;
     const displayZones=[...nearestZones,...(recentSwingBase?[recentSwingBase]:[]),...(recentDemandBase?[recentDemandBase]:[]),...(recentSupplyBase?[recentSupplyBase]:[])]
-      .filter((zone,index,items)=>items.findIndex(item=>item.id===zone.id)===index);
+      .filter((zone,index,items)=>items.findIndex(item=>item.id===zone.id)===index)
+      .map(zone=>{
+        if(zone.id===storedReplayForRequest?.zoneId){
+          return {...zone,touches:storedReplayForRequest.priorTouches,maxPenetration:storedReplayForRequest.maxPenetration};
+        }
+        return annotateReplayZonePurityAt(zone,deepZoneStrategy,zoneCandleSeconds,displayPurityCutoff);
+      });
     const scoringTimeframes:string[]=[...GOLDILOCKS_DEMO_TIMEFRAMES.confluence];
     const otherTimeframeHistories=await Promise.all(scoringTimeframes
       .filter(item=>item!==GOLDILOCKS_DEMO_TIMEFRAMES.zone)

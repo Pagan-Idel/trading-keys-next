@@ -29,7 +29,7 @@ import { scoreGoldilocksSetup } from '../utils/goldilocksScoring';
 import { classifyTradeOutcome } from '../utils/tradeHistory';
 import { buildProtectedOutcomeResolver, resolveProtectedOutcome, validateGoldilocksExecutionCoverageAtEntry } from '../utils/goldilocksBacktest';
 import { GOLDILOCKS_DEFAULT_BACKTEST_LABEL, GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_SCORE_WEIGHTS, GOLDILOCKS_STRATEGY_VERSION, getGoldilocksMinimumScore, getGoldilocksTimeframeProfile } from '../utils/goldilocksConfig';
-import { filterReplayRejectedFirstTouchesAt, formatStrategyReplayNewYork, formatStrategyReplayUtc, formatStrategyZoneLabel, getReplayCandleIndexAtOrBefore, getReplayExitMarkerPrice, getReplayVisibleEnd, getReplayVisibleStart, getStrategyReplayBaseContextStart, getStrategyReplayContextAnchor, getStrategyReplayRequestEnd, getStrategyReplayWindow, sortUniqueReplayCandleItems, STRATEGY_REPLAY_BASE_CONTEXT_SECONDS } from '../utils/strategyReplay';
+import { annotateReplayZonePurityAt, filterReplayRejectedFirstTouchesAt, formatStrategyReplayNewYork, formatStrategyReplayUtc, formatStrategyZoneLabel, getReplayCandleIndexAtOrBefore, getReplayExitMarkerPrice, getReplayVisibleEnd, getReplayVisibleStart, getStrategyReplayBaseContextStart, getStrategyReplayContextAnchor, getStrategyReplayRequestEnd, getStrategyReplayWindow, sortUniqueReplayCandleItems, STRATEGY_REPLAY_BASE_CONTEXT_SECONDS } from '../utils/strategyReplay';
 import { evaluateHistoricalNewsGate } from '../utils/historicalNewsStore';
 import { stableBacktestTradeId } from '../utils/backtestStore';
 import { getForexHolidayStatusAt, isForexMarketOpenAt, isForexWeekendEntryBlocked, isForexWeekendLiquidationWindow, nextForexWeekendLiquidationTime } from '../utils/forexMarketHours';
@@ -1075,6 +1075,26 @@ test('historical zone labels keep outcome, trigger, active state, and dates out 
     timeframeConfluence:{timeframeCount:2,timeframes:['M15','M5']},
   });
   assert.equal(contextLabel,'HISTORY CONTEXT ZONE · Base supply · 3.6x · 0 touches · ZIZ 2/3 · M15+M5');
+});
+
+test('historical context-zone labels receive their causal M15 touch count at replay time',()=>{
+  const zone={
+    id:'context-supply',kind:'base' as const,side:'supply' as const,candleIndex:0,candleTime:100,
+    availableAt:500,low:1.16489,high:1.16558,width:0.00069,legMidpoint:1.16,legRange:0.01,
+    departureMultiple:7.7,strength2x:true,touches:0,maxPenetration:0,state:'fresh' as const,reasons:[],
+  };
+  const candles=[
+    {time:100,open:1.1651,high:1.1654,low:1.1650,close:1.1652},
+    {time:200,open:1.1650,high:1.1652,low:1.16495,close:1.1650},
+    {time:300,open:1.1648,high:1.16485,low:1.1644,close:1.1645},
+    {time:400,open:1.1647,high:1.1650,low:1.1646,close:1.1648},
+  ];
+  const beforeRetouch=annotateReplayZonePurityAt(zone,candles,100,400);
+  const afterRetouch=annotateReplayZonePurityAt(zone,candles,100,500);
+  assert.equal(beforeRetouch.touches,0);
+  assert.equal(afterRetouch.touches,1);
+  assert.equal(formatStrategyZoneLabel({...afterRetouch,historicalTradeZone:false,historicalContextZone:true}),
+    'HISTORY CONTEXT ZONE · Base supply · 7.7x · 1 touch');
 });
 
 test('historical replay zones exclude future bases and use validity at confirmation time',()=>{

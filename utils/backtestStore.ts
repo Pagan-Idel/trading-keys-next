@@ -33,6 +33,7 @@ export interface BacktestTradeInput {
 
 const dbPath=path.resolve(process.cwd(),'data','automation.sqlite');
 let db:Database.Database|null=null;
+let completedPairResultsCache:{key:string;rows:Array<Record<string,any>>}|undefined;
 export const stableBacktestTradeId=(trade:Pick<BacktestTradeInput,'runId'|'pair'|'zoneId'|'confirmationTime'>)=>{
   const date=new Date(trade.confirmationTime*1000);
   const stamp=`${date.getUTCFullYear()}${String(date.getUTCMonth()+1).padStart(2,'0')}${String(date.getUTCDate()).padStart(2,'0')}-${String(date.getUTCHours()).padStart(2,'0')}${String(date.getUTCMinutes()).padStart(2,'0')}`;
@@ -102,6 +103,11 @@ const database=()=>{
   return db;
 };
 const json=(value:unknown)=>JSON.stringify(value,(_key,item)=>Number.isFinite(item)?item:item===Infinity?'unlimited':item);
+const summaryConfig=(value:unknown)=>{
+  const config=JSON.parse(String(value)) as BacktestRunConfig;
+  delete config.researchManifest;
+  return config;
+};
 
 export const createBacktestRun=(id:string,config:BacktestRunConfig)=>database().prepare(`
   INSERT INTO backtest_runs(id,status,label,config_json,pairs_json,created_at,progress_total)
@@ -109,6 +115,20 @@ export const createBacktestRun=(id:string,config:BacktestRunConfig)=>database().
 `).run(id,config.label,json(config),json(config.pairs),new Date().toISOString(),config.pairs.length);
 export const getActiveBacktestRun=()=>database().prepare(`SELECT id FROM backtest_runs WHERE status IN ('queued','running') ORDER BY created_at DESC LIMIT 1`).get() as {id:string}|undefined;
 export const getBacktestRuntime=(id:string)=>database().prepare(`SELECT id,status,worker_pid AS workerPid FROM backtest_runs WHERE id=?`).get(id) as {id:string;status:BacktestStatus;workerPid:number|null}|undefined;
+export const getBacktestStatusSnapshot=(id:string)=>{
+  const d=database();
+  const row=d.prepare(`SELECT id,status,label,config_json AS configJson,created_at AS createdAt,started_at AS startedAt,
+    heartbeat_at AS heartbeatAt,progress_pair AS progressPair,progress_done AS progressDone,progress_total AS progressTotal,
+    progress_stage AS progressStage,progress_percent AS progressPercent,total_trades AS totalTrades,error
+    FROM backtest_runs WHERE id=?`).get(id) as (Record<string,unknown>&{configJson:string})|undefined;
+  if(!row)return undefined;
+  const latestEvent=d.prepare(`SELECT id,created_at AS createdAt,pair,step,message FROM backtest_events
+    WHERE run_id=? ORDER BY id DESC LIMIT 1`).get(id)??null;
+  const {configJson,...fields}=row;
+  const config=JSON.parse(configJson) as BacktestRunConfig;
+  delete config.researchManifest;
+  return {...fields,config,latestEvent};
+};
 export interface BacktestTradeReplay extends Pick<BacktestTradeInput,'zoneId'|'zoneKind'|'direction'|'confirmationTime'|'zoneAgeSeconds'|'firstOutsideTime'|'outcome'|'outcomeTime'|'exitReason'|'realizedR'|'entry'|'stopLoss'|'oneR'|'takeProfit'|'score'|'scoreJson'|'priorTouches'|'maxPenetration'|'availableRrr'|'confluenceCount'|'trend'|'approachPressure'|'zoneCorridors'|'marketPath'> {tradeId:string;strategyVersion?:string;managementPolicyResults?:TradeManagementResearchResult[]}
 export const getBacktestTradeReplay=(pair:string,confirmationTime:number,tradeId?:string):BacktestTradeReplay|undefined=>{
   const normalizedTradeId=tradeId?.trim().toUpperCase();
@@ -213,7 +233,12 @@ export const getBacktestDashboard=(runId?:string)=>{
   const pairs=selected?d.prepare(`SELECT pair,COUNT(*) AS trades,SUM(outcome='WIN') AS wins,SUM(outcome='LOSS') AS losses,
     ROUND(100.0*SUM(outcome='WIN')/COUNT(*),1) AS winRate,ROUND(AVG(score),1) AS averageScore,
     SUM(outcome='WIN') AS protectedWins FROM backtest_trades WHERE run_id=? GROUP BY pair ORDER BY pair`).all(selected):[];
-  const pairResults=(d.prepare(`SELECT r.id AS runId,r.label,r.created_at AS createdAt,r.completed_at AS completedAt,
+  const completedState=d.prepare(`SELECT COUNT(*) AS runCount,COALESCE(MAX(completed_at),'') AS latest,
+    COALESCE(SUM(total_trades),0) AS totalTrades FROM backtest_runs WHERE status='completed'`).get() as {runCount:number;latest:string;totalTrades:number};
+  const completedCacheKey=`${completedState.runCount}|${completedState.latest}|${completedState.totalTrades}`;
+  let pairResults=completedPairResultsCache?.key===completedCacheKey?completedPairResultsCache.rows:undefined;
+  if(!pairResults){
+    pairResults=(d.prepare(`SELECT r.id AS runId,r.label,r.created_at AS createdAt,r.completed_at AS completedAt,
     r.config_json AS configJson,t.pair,COUNT(*) AS trades,SUM(t.outcome='WIN') AS wins,SUM(t.outcome='LOSS') AS losses,
     ROUND(100.0*SUM(t.outcome='WIN')/COUNT(*),1) AS winRate,ROUND(AVG(t.score),1) AS averageScore,
     SUM(t.outcome='WIN') AS protectedWins
@@ -221,7 +246,7 @@ export const getBacktestDashboard=(runId?:string)=>{
     WHERE r.status='completed'
     GROUP BY r.id,t.pair
     ORDER BY winRate DESC,trades DESC,r.created_at DESC`).all() as Array<Record<string,unknown>>).map(row=>{
-      const config=JSON.parse(String(row.configJson)) as BacktestRunConfig;
+       const config=summaryConfig(row.configJson);
       const portfolioTrades=d.prepare(`SELECT id,pair,confirmation_time AS confirmationTime,outcome_time AS outcomeTime,
         score,entry,stop_loss AS stopLoss,outcome,realized_r AS realizedR
         FROM backtest_trades WHERE run_id=? AND pair=? ORDER BY confirmation_time`).all(row.runId,row.pair) as PortfolioTrade[];
@@ -236,8 +261,10 @@ export const getBacktestDashboard=(runId?:string)=>{
       || Number(right.profitFactor??Number.NEGATIVE_INFINITY)-Number(left.profitFactor??Number.NEGATIVE_INFINITY)
       || Number(right.sampleTrades)-Number(left.sampleTrades)
     );
+    completedPairResultsCache={key:completedCacheKey,rows:pairResults};
+  }
   const events=selected?d.prepare(`SELECT id,created_at AS createdAt,pair,step,message FROM backtest_events WHERE run_id=? ORDER BY id DESC LIMIT 200`).all(selected):[];
-  return {runs:selected?runs.map(run=>({...run,config:JSON.parse(String(run.configJson)),configJson:undefined})):runs,selectedRunId:selected,trades,pairs,pairResults,events};
+  return {runs:selected?runs.map(run=>({...run,config:summaryConfig(run.configJson),configJson:undefined})):runs,selectedRunId:selected,trades,pairs,pairResults,events};
 };
 
 /** One row per trade/policy combination for future model training. No chart images are stored. */

@@ -1,9 +1,9 @@
 import type { NextApiRequest,NextApiResponse } from 'next';
 import { getAutoResearchDashboard,getAutoResearchTrial } from '../../../utils/autoResearchStore.ts';
 import { pauseAutoResearch,resumeAutoResearch,startAutoResearch,stopAutoResearch } from '../../../utils/autoResearchRunner.ts';
-import { getCandleArchiveStorageUsage,getCandleArchiveSummary } from '../../../utils/candleArchive.ts';
+import { getCandleArchiveStorageUsage } from '../../../utils/candleArchive.ts';
 import { GOLDILOCKS_RESEARCH_VERSION,GOLDILOCKS_TIMEFRAME_PROFILES } from '../../../utils/goldilocksConfig.ts';
-import { getActiveBacktestRun,getBacktestDashboard,getBacktestTradeAudits } from '../../../utils/backtestStore.ts';
+import { getActiveBacktestRun,getBacktestStatusSnapshot,getBacktestTradeAudits } from '../../../utils/backtestStore.ts';
 
 const isProcessAlive=(pid:unknown)=>{
   const processId=Number(pid);
@@ -14,15 +14,7 @@ const isProcessAlive=(pid:unknown)=>{
 const activeBacktestStatus=()=>{
   const active=getActiveBacktestRun();
   if(!active)return null;
-  const dashboard=getBacktestDashboard(active.id);
-  const run=dashboard.runs.find(item=>String((item as Record<string,unknown>).id)===active.id) as Record<string,any>|undefined;
-  if(!run)return {id:active.id};
-  return {
-    id:run.id,status:run.status,label:run.label,createdAt:run.createdAt,startedAt:run.startedAt,
-    heartbeatAt:run.heartbeatAt,progressPair:run.progressPair,progressDone:run.progressDone,
-    progressTotal:run.progressTotal,progressStage:run.progressStage,progressPercent:run.progressPercent,
-    totalTrades:run.totalTrades,error:run.error,config:run.config,latestEvent:dashboard.events[0]??null,
-  };
+  return getBacktestStatusSnapshot(active.id)??{id:active.id};
 };
 
 export default function handler(req:NextApiRequest,res:NextApiResponse){
@@ -36,7 +28,7 @@ export default function handler(req:NextApiRequest,res:NextApiResponse){
       const dashboard=getAutoResearchDashboard(typeof req.query.campaignId==='string'?req.query.campaignId:undefined);
       const selected=dashboard.campaigns.find(item=>item.id===dashboard.selectedCampaignId)??dashboard.campaigns[0];
       return res.status(200).json({
-        ...dashboard,archive:getCandleArchiveStorageUsage(),coverage:getCandleArchiveSummary(),
+        ...dashboard,archive:getCandleArchiveStorageUsage(),
         researchVersion:GOLDILOCKS_RESEARCH_VERSION,timeframeProfiles:GOLDILOCKS_TIMEFRAME_PROFILES,
         workerAlive:isProcessAlive(selected?.workerPid),activeBacktest:activeBacktestStatus(),serverTime:new Date().toISOString(),
       });

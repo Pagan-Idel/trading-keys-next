@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import styled from "styled-components";
 import { forexPairs } from "../utils/constants";
@@ -516,6 +516,8 @@ const formatPayoff = (value: number | null) =>
   value == null ? "N/A" : `${formatFactor(value)}:1`;
 
 export default function Backtesting() {
+  const dashboardRequestInFlight=useRef(false);
+  const researchRequestInFlight=useRef(false);
   const [data, setData] = useState<Dashboard | null>(null),
     [selected, setSelected] = useState<string[]>([...forexPairs]);
   const [research,setResearch]=useState<ResearchDashboard|null>(null),
@@ -535,6 +537,8 @@ export default function Backtesting() {
     [tradeSearchResult, setTradeSearchResult] = useState<Record<string, any> | null>(null),
     [tradeSearching, setTradeSearching] = useState(false);
   const load = useCallback(async (runId?: string) => {
+    if(dashboardRequestInFlight.current)return;
+    dashboardRequestInFlight.current=true;
     try {
       const r = await fetch(`/api/backtests${runId ? `?runId=${runId}` : ""}`, {
         cache: "no-store",
@@ -544,15 +548,17 @@ export default function Backtesting() {
       setError("");
     } catch (e) {
       setError((e as Error).message);
-    }
+    } finally {dashboardRequestInFlight.current=false}
   }, []);
   const loadResearch=useCallback(async()=>{
+    if(researchRequestInFlight.current)return;
+    researchRequestInFlight.current=true;
     try{
       const response=await fetch('/api/backtests/research',{cache:'no-store'});
       const body=await response.json();
       if(!response.ok)throw new Error(body.error);
       setResearch(body);
-    }catch(researchError){setError((researchError as Error).message)}
+    }catch(researchError){setError((researchError as Error).message)}finally{researchRequestInFlight.current=false}
   },[]);
   const selectSnapshot = (
     runId: string,

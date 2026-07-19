@@ -136,7 +136,11 @@ export const getAutoResearchDashboard=(campaignId?:string)=>{
   const selected=campaignId??String(campaigns[0]?.id??'');
   const trials=selected?(db.prepare(`SELECT id,dataset_key AS datasetKey,status,backtest_run_id AS backtestRunId,config_json AS configJson,
     metrics_json AS metricsJson,error,created_at AS createdAt,started_at AS startedAt,completed_at AS completedAt
-    FROM research_trials WHERE campaign_id=? ORDER BY created_at,id`).all(selected) as Array<Record<string,unknown>>).map(row=>({...row,config:JSON.parse(String(row.configJson)),metrics:row.metricsJson?JSON.parse(String(row.metricsJson)):null,configJson:undefined,metricsJson:undefined})):[];
+    FROM research_trials WHERE campaign_id=? ORDER BY created_at,id`).all(selected) as Array<Record<string,unknown>>).map(row=>{
+      const summaryConfig=JSON.parse(String(row.configJson)) as BacktestRunConfig;
+      delete summaryConfig.researchManifest;
+      return {...row,config:summaryConfig,metrics:row.metricsJson?JSON.parse(String(row.metricsJson)):null,configJson:undefined,metricsJson:undefined};
+    }):[];
   const counts=selected?db.prepare(`SELECT status,COUNT(*) AS count FROM research_trials WHERE campaign_id=? GROUP BY status`).all(selected):[];
   const events=selected?db.prepare(`SELECT id,trial_id AS trialId,created_at AS createdAt,step,message,data_json AS dataJson
     FROM research_events WHERE campaign_id=? ORDER BY id DESC LIMIT 200`).all(selected).map((row:any)=>({...row,data:row.dataJson?JSON.parse(row.dataJson):undefined,dataJson:undefined})):[];

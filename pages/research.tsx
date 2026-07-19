@@ -1,6 +1,6 @@
 import Head from 'next/head';
 import Link from 'next/link';
-import {useCallback,useEffect,useMemo,useState} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import styled from 'styled-components';
 
 const Page=styled.div`
@@ -93,17 +93,20 @@ const statusTone=(status?:string):'good'|'warn'|'bad'|'idle'=>status==='running'
 const sampleQuality=(count:number)=>count>=100?'ELIGIBLE':count>=50?'PROVISIONAL':'INSUFFICIENT';
 
 export default function ResearchStatus(){
+  const requestInFlight=useRef(false);
   const [data,setData]=useState<ResearchData|null>(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
   const [lastRefresh,setLastRefresh]=useState<Date|null>(null);
   const load=useCallback(async()=>{
+    if(requestInFlight.current)return;
+    requestInFlight.current=true;
     try{
       const response=await fetch('/api/backtests/research',{cache:'no-store'});
       const body=await response.json();
       if(!response.ok)throw new Error(body.error??'Unable to load research status.');
       setData(body);setLastRefresh(new Date());setError('');
-    }catch(loadError){setError(loadError instanceof Error?loadError.message:String(loadError))}
+    }catch(loadError){setError(loadError instanceof Error?loadError.message:String(loadError))}finally{requestInFlight.current=false}
   },[]);
   useEffect(()=>{void load();const timer=setInterval(()=>void load(),5_000);return()=>clearInterval(timer)},[load]);
 

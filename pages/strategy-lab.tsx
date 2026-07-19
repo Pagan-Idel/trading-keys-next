@@ -11,6 +11,10 @@ import type {
 } from "../utils/goldilocksStrategy";
 import { formatStrategyReplayNewYork, formatStrategyReplayUtc } from "../utils/strategyReplay";
 import { formatGoldilocksZoneAge } from "../utils/zoneAge";
+import type { GoldilocksScoreResult } from "../utils/goldilocksScoring";
+import type { GoldilocksApproachPressure } from "../utils/approachPressure";
+import type { ZoneCorridorMeasurement } from "../utils/zoneCorridor";
+import type { TradeManagementResearchResult, TradePathSummary } from "../utils/tradeManagementResearch";
 
 const StrategyLabChart = dynamic(
   () => import("../components/StrategyLabChart"),
@@ -118,6 +122,100 @@ const Diagnostic = styled.div`
     padding-left: 18px;
   }
 `;
+const TradeCandy = styled.section`
+  margin: 14px 0;
+  padding: clamp(14px, 2vw, 20px);
+  border: 1px solid #4a365c;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 94% 0%, rgba(210, 86, 255, 0.18), transparent 31%),
+    radial-gradient(circle at 5% 100%, rgba(44, 224, 183, 0.12), transparent 32%),
+    linear-gradient(145deg, #14101b, #0a0d12 58%);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.34), inset 0 1px rgba(255, 255, 255, 0.04);
+`;
+const TradeTopline = styled.div`
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+`;
+const TradeIdentity = styled.div`
+  .eyebrow { color: #f1a6ff; font-size: .64rem; font-weight: 950; letter-spacing: .14em; text-transform: uppercase; }
+  h2 { margin: 5px 0 4px; font-size: clamp(1.1rem, 2.5vw, 1.7rem); letter-spacing: -.02em; }
+  code { color: #8996a8; font-size: .7rem; overflow-wrap: anywhere; }
+`;
+const CandyActions = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap;`;
+const Pill = styled.span<{ $tone?: "good" | "bad" | "warn" | "info" }>`
+  display: inline-flex;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: .67rem;
+  font-weight: 950;
+  letter-spacing: .06em;
+  color: ${({$tone})=>$tone==="good"?"#70f2b7":$tone==="bad"?"#ff8b9c":$tone==="warn"?"#ffd878":"#9eeeff"};
+  border: 1px solid ${({$tone})=>$tone==="good"?"#28755a":$tone==="bad"?"#7c3343":$tone==="warn"?"#715c2b":"#275f70"};
+  background: ${({$tone})=>$tone==="good"?"#102a20":$tone==="bad"?"#30131a":$tone==="warn"?"#2d250f":"#10252c"};
+`;
+const DownloadButton = styled.button`
+  border: 1px solid #8350a0;
+  background: linear-gradient(135deg, #51206c, #2b123b);
+  color: #f5d9ff;
+  border-radius: 10px;
+  padding: 8px 11px;
+  font-size: .7rem;
+  font-weight: 900;
+  cursor: pointer;
+  &:hover { border-color: #d68cff; transform: translateY(-1px); }
+`;
+const SnapshotGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px;
+  @media(max-width: 1100px){grid-template-columns: repeat(3, minmax(0, 1fr));}
+  @media(max-width: 650px){grid-template-columns: repeat(2, minmax(0, 1fr));}
+`;
+const SnapshotCard = styled.div<{ $tone?: "good" | "bad" | "warn" | "info" }>`
+  min-height: 102px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid ${({$tone})=>$tone==="good"?"#285c4a":$tone==="bad"?"#65313d":$tone==="warn"?"#5d502b":"#2b3b49"};
+  background: ${({$tone})=>$tone==="good"?"linear-gradient(145deg,#10271f,#0d1617)":$tone==="bad"?"linear-gradient(145deg,#2c1219,#151116)":$tone==="warn"?"linear-gradient(145deg,#28220f,#151411)":"linear-gradient(145deg,#111b23,#0d1218)"};
+  .label { color: #7f8b9a; font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; font-weight: 900; }
+  .value { margin: 7px 0 5px; color: #f4f8fc; font-size: 1.15rem; line-height: 1; font-weight: 950; overflow-wrap: anywhere; }
+  .meta { color: #8e9baa; font-size: .66rem; line-height: 1.4; }
+`;
+const AuditDetails = styled.details`
+  margin-top: 12px;
+  border: 1px solid #303846;
+  border-radius: 14px;
+  background: rgba(7, 10, 14, .7);
+  summary { cursor: pointer; padding: 12px 14px; color: #d5b3e8; font-size: .72rem; font-weight: 900; list-style-position: inside; }
+`;
+const AuditGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  padding: 0 12px 12px;
+  @media(max-width: 760px){grid-template-columns: 1fr;}
+`;
+const AuditCard = styled.div`
+  padding: 12px;
+  border: 1px solid #28313d;
+  border-radius: 12px;
+  background: #0d1218;
+  color: #8f9cab;
+  font-size: .68rem;
+  line-height: 1.55;
+  h3 { margin: 0 0 8px; color: #e8eef5; font-size: .75rem; }
+  strong { color: #c9d4df; }
+  ul { margin: 7px 0 0; padding-left: 17px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 6px 4px; border-bottom: 1px solid #222c36; text-align: left; vertical-align: top; }
+  th { color: #718092; font-size: .57rem; text-transform: uppercase; letter-spacing: .07em; }
+  td.points { color: #7debb8; font-weight: 900; white-space: nowrap; }
+`;
 const Ledger = styled.div`
   margin-top: 14px;
   border: 1px solid #303642;
@@ -209,12 +307,12 @@ type HistoricalEntrySetup = {
   };
   runway: TradeRunwayCheck;
   trend: "bullish" | "bearish" | "unknown";
-  score: {
-    total: number;
-    minimumScore: number;
-    eligible: boolean;
-    reason: string;
-  };
+  score: GoldilocksScoreResult;
+  realizedR?: number | null;
+  approachPressure?: GoldilocksApproachPressure;
+  zoneCorridors?: ZoneCorridorMeasurement[];
+  marketPath?: TradePathSummary | null;
+  managementPolicyResults?: TradeManagementResearchResult[];
   outcome: "win" | "loss" | "open";
   exitReason: "target" | "stop" | "break_even" | "weekend_close" | "open";
   exitPrice?: number;
@@ -396,6 +494,41 @@ export default function StrategyLab() {
           rejectedFirstTouches: live.rejectedFirstTouches,
         }
       : undefined;
+  const downloadTradeDetails = () => {
+    const trade=live?.historicalEntrySetup;
+    if(!live||!trade)return;
+    const payload={
+      exportVersion:"goldilocks-trade-audit-v1",
+      exportedAt:new Date().toISOString(),
+      tradeId:trade.tradeId??null,
+      pair:live.pair,
+      displayedTimeframe:live.displayTimeframe??live.timeframe,
+      strategyVersion:live.replayStrategyVersion??live.currentStrategyVersion??null,
+      sourceUrl:typeof window!=="undefined"?window.location.href:null,
+      trade,
+      marketTimeAudit:live.marketTimeAudit,
+      backtestCoverage:live.backtestCoverage,
+      displayedContextZones:live.zoneHistory.displayZones,
+      runwayChecks:live.runwayChecks,
+      rejectedFirstTouches:live.rejectedFirstTouches,
+      chartCandleReference:{
+        count:live.candles.length,
+        firstTime:live.candles[0]?.time??null,
+        lastTime:live.candles.at(-1)?.time??null,
+        candlesIncluded:false,
+      },
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const anchor=document.createElement("a");
+    const identity=(trade.tradeId??`${live.pair}-${trade.confirmationTime}`).replace(/[^A-Za-z0-9_-]+/g,"-");
+    anchor.href=url;
+    anchor.download=`${identity}-trade-audit.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(()=>URL.revokeObjectURL(url),0);
+  };
   return (
     <Page>
       <Header>
@@ -513,65 +646,94 @@ export default function StrategyLab() {
             chart will not substitute a different trade.
           </Diagnostic>
         )}
-      {live?.historicalEntrySetup && (
-        <Diagnostic>
-          <strong>Replay trigger audit</strong>
-          <br />
-          {live.historicalEntrySetup.tradeId && <><strong>Trade ID:</strong> {live.historicalEntrySetup.tradeId}<br /></>}
-          <strong>Outcome:</strong>{" "}
-          {live.historicalEntrySetup.outcome.toUpperCase()} · {live.historicalEntrySetup.exitReason.replaceAll("_", " ").toUpperCase()}
-          <br />
-          {live.historicalEntrySetup.firstOutsideTime && <><strong>First outside (M15):</strong> {formatStrategyReplayUtc(live.historicalEntrySetup.firstOutsideTime)}<br /></>}
-          <strong>Zone age at entry:</strong> {formatGoldilocksZoneAge(live.historicalEntrySetup.zoneAgeSeconds)}<br />
-          Zone actionable: {formatStrategyReplayUtc(live.historicalEntrySetup.zone.availableAt ?? live.historicalEntrySetup.zone.candleTime)}
-          {" "}· {live.historicalEntrySetup.zone.touches} prior touch(es), excluding the trigger.
-          <br />
-          {live.historicalEntrySetup.priorTouchDetails?.map((touch, index) => (
-            <span key={`${touch.time}-${index}`}>
-              <strong>M15 prior touch {index + 1}:</strong> {formatStrategyReplayUtc(touch.time)}
-              {" "}· wick {touch.price} · penetration {(touch.penetration * 100).toFixed(1)}%.
-              <br />
-            </span>
-          ))}
-          Trigger touch ({live.historicalEntrySetup.confirmationTimeframe}): {formatStrategyReplayUtc(live.historicalEntrySetup.touchCandle.time)}
-          {" "}· wick {live.historicalEntrySetup.zone.side === "supply" ? "low" : "high"}{" "}
-          {live.historicalEntrySetup.zone.side === "supply" ? live.historicalEntrySetup.touchCandle.low : live.historicalEntrySetup.touchCandle.high}.
-          <br />
-          Confirmation ({live.historicalEntrySetup.confirmationTimeframe}): {formatStrategyReplayUtc(live.historicalEntrySetup.confirmationTime)}
-          {" "}· close {live.historicalEntrySetup.confirmationCandle.close}{" "}
-          {live.historicalEntrySetup.zone.side === "supply" ? "<" : ">"} touched wick: PASS.
-          {live.historicalEntrySetup.proximity && <>
-            <br /><strong>Entry proximity:</strong>{" "}
-            first-touch range {(live.historicalEntrySetup.proximity.touchRangeZoneFraction * 100).toFixed(1)}%
-            {" "}· close distance {(live.historicalEntrySetup.proximity.confirmationDistanceZoneFraction * 100).toFixed(1)}%
-            {" "}· executable distance {(live.historicalEntrySetup.proximity.executableDistanceZoneFraction * 100).toFixed(1)}% of zone width: PASS.
-          </>}
-          {live.historicalEntrySetup.zone.departureQuality && <>
-            <br /><strong>Departure quality:</strong>{" "}
-            {live.historicalEntrySetup.zone.departureQuality.shockRejected ? "REJECT" : "PASS"}
-            {" "}· {live.historicalEntrySetup.zone.baseCandleCount ?? 1}-candle base
-            {" "}· {live.historicalEntrySetup.zone.departureInsideCandleCount ?? 0} lingering M15 candle(s)
-            {" "}· structural trend break {live.historicalEntrySetup.zone.brokeOppositeLegIn ? "YES" : "NO"}
-            {" "}· M15 {formatStrategyReplayUtc(live.historicalEntrySetup.zone.departureQuality.departureCandleTime)}
-            {live.historicalEntrySetup.zone.departureQuality.rangeAtrMultiple !== undefined && <>{" "}· {live.historicalEntrySetup.zone.departureQuality.rangeAtrMultiple.toFixed(2)}x ATR</>}
-            {" "}· rejection wick {(live.historicalEntrySetup.zone.departureQuality.rejectionWickFraction * 100).toFixed(1)}%
-            {" "}· close displacement {live.historicalEntrySetup.zone.departureQuality.closeDepartureZoneMultiple.toFixed(2)}x zone
-            {" "}· wick excursion {live.historicalEntrySetup.zone.departureQuality.wickDepartureZoneMultiple.toFixed(2)}x zone.
-          </>}
-          {live.historicalEntrySetup.departureSpeed && <>
-            <br /><strong>M1 departure speed:</strong> {formatStrategyReplayUtc(live.historicalEntrySetup.departureSpeed.fastestCandleTime)}
-            {live.historicalEntrySetup.departureSpeed.rangeAtrMultiple !== undefined && <>{" "}· {live.historicalEntrySetup.departureSpeed.rangeAtrMultiple.toFixed(2)}x prior M1 ATR</>}
-            {" "}· {(live.historicalEntrySetup.departureSpeed.departureRangeFraction * 100).toFixed(1)}% of the M15 departure range printed inside one M1 candle.
-          </>}
-          {live.marketTimeAudit && <>
-            <br /><strong>Entry time gate:</strong> {formatStrategyReplayUtc(live.marketTimeAudit.entryEligibilityTime)}
-            {" "}· {formatStrategyReplayNewYork(live.marketTimeAudit.entryEligibilityTime)}
-            {" "}· weekly {live.marketTimeAudit.weeklyBlocked ? "BLOCK" : "PASS"}
-            {" "}· holiday {live.marketTimeAudit.holiday.blocked ? "BLOCK" : "PASS"}. {live.marketTimeAudit.holiday.reason}
-          </>}
-          {live.historicalEntrySetup.outcomeTime && <> · Exit: {formatStrategyReplayUtc(live.historicalEntrySetup.outcomeTime)}.</>}
-        </Diagnostic>
-      )}
+      {live?.historicalEntrySetup && (()=>{
+        const trade=live.historicalEntrySetup;
+        const isWin=trade.outcome==="win";
+        const isOpen=trade.outcome==="open";
+        const directionLabel=trade.zone.side==="demand"?"BUY":"SELL";
+        const confluenceCount=trade.zone.timeframeConfluence?.timeframeCount??1;
+        const confirmationStrength=trade.approachPressure?.confirmationStrengthScore;
+        const departure=trade.zone.departureQuality;
+        return <TradeCandy>
+          <TradeTopline>
+            <TradeIdentity>
+              <div className="eyebrow">Recorded trade at a glance</div>
+              <h2>{directionLabel} {live.pair} · {trade.zone.kind} {trade.zone.side}</h2>
+              <code>{trade.tradeId??`Confirmation ${trade.confirmationTime}`}</code>
+            </TradeIdentity>
+            <CandyActions>
+              <Pill $tone={isOpen?"warn":isWin?"good":"bad"}>{trade.outcome.toUpperCase()} · {trade.exitReason.replaceAll("_"," ").toUpperCase()}</Pill>
+              <Pill $tone={trade.score?.eligible?"good":"bad"}>{trade.score?.eligible?"SCORE PASS":"SCORE FAIL"}</Pill>
+              <DownloadButton onClick={downloadTradeDetails}>Download full trade JSON</DownloadButton>
+            </CandyActions>
+          </TradeTopline>
+          <SnapshotGrid>
+            <SnapshotCard $tone={isOpen?"warn":isWin?"good":"bad"}>
+              <div className="label">Result</div><div className="value">{trade.realizedR==null?trade.outcome.toUpperCase():`${trade.realizedR>0?"+":""}${trade.realizedR.toFixed(2)}R`}</div>
+              <div className="meta">{trade.exitReason.replaceAll("_"," ")} {trade.outcomeTime?`· ${formatStrategyReplayUtc(trade.outcomeTime)}`:""}</div>
+            </SnapshotCard>
+            <SnapshotCard $tone={trade.score?.eligible?"good":"bad"}>
+              <div className="label">Setup score</div><div className="value">{trade.score?.total??0}/20</div>
+              <div className="meta">Minimum {trade.score?.minimumScore??0} · {trade.score?.reason??"No stored score detail"}</div>
+            </SnapshotCard>
+            <SnapshotCard $tone="info">
+              <div className="label">Trade zone</div><div className="value">{trade.zone.kind.toUpperCase()} {trade.zone.side.toUpperCase()}</div>
+              <div className="meta">Age {formatGoldilocksZoneAge(trade.zoneAgeSeconds)} · ZIZ {confluenceCount}/3</div>
+            </SnapshotCard>
+            <SnapshotCard $tone={trade.runway.allowed?"good":"bad"}>
+              <div className="label">Risk plan</div><div className="value">{Number(trade.runway.ratio).toFixed(2)}R</div>
+              <div className="meta">Entry {trade.runway.entry} · SL {trade.runway.stopLoss} · TP {trade.runway.takeProfit}</div>
+            </SnapshotCard>
+            <SnapshotCard $tone={trade.zone.touches===0?"good":trade.zone.touches<=1?"warn":"bad"}>
+              <div className="label">M15 purity</div><div className="value">{trade.zone.touches} prior touch{trade.zone.touches===1?"":"es"}</div>
+              <div className="meta">Deepest penetration {(trade.zone.maxPenetration*100).toFixed(1)}% · trigger excluded</div>
+            </SnapshotCard>
+            <SnapshotCard $tone={trade.approachPressure?.weakConfirmation?"warn":"good"}>
+              <div className="label">M5 confirmation</div><div className="value">{confirmationStrength===undefined?"PASS":`${(confirmationStrength*100).toFixed(0)}% strength`}</div>
+              <div className="meta">Later candle confirmed · adverse flags {trade.approachPressure?.adversePressureScore??"legacy"}/4</div>
+            </SnapshotCard>
+          </SnapshotGrid>
+          <AuditDetails>
+            <summary>Open full replay audit and research evidence</summary>
+            <AuditGrid>
+              <AuditCard><h3>Timeline</h3>
+                {trade.firstOutsideTime&&<><strong>First outside:</strong> {formatStrategyReplayUtc(trade.firstOutsideTime)}<br/></>}
+                <strong>Zone actionable:</strong> {formatStrategyReplayUtc(trade.zone.availableAt??trade.zone.candleTime)}<br/>
+                <strong>{trade.confirmationTimeframe} touch:</strong> {formatStrategyReplayUtc(trade.touchCandle.time)}<br/>
+                <strong>{trade.confirmationTimeframe} confirmation:</strong> {formatStrategyReplayUtc(trade.confirmationTime)}<br/>
+                {trade.outcomeTime&&<><strong>Exit:</strong> {formatStrategyReplayUtc(trade.outcomeTime)}</>}
+              </AuditCard>
+              <AuditCard><h3>Zone formation</h3>
+                <strong>Base:</strong> {trade.zone.baseCandleCount??1} candle(s)<br/>
+                <strong>Lingering inside:</strong> {trade.zone.departureInsideCandleCount??0} M15 candle(s)<br/>
+                <strong>Structural trend break:</strong> {trade.zone.brokeOppositeLegIn?"YES":"NO"}<br/>
+                <strong>Sustained departure:</strong> {trade.zone.departureMultiple.toFixed(2)}x zone
+                {departure&&<><br/><strong>Shock gate:</strong> {departure.shockRejected?"REJECT":"PASS"} · {departure.rangeAtrMultiple?.toFixed(2)??"n/a"}x ATR · {(departure.rejectionWickFraction*100).toFixed(1)}% rejection wick · {departure.closeDepartureZoneMultiple.toFixed(2)}x close displacement · {departure.wickDepartureZoneMultiple.toFixed(2)}x wick excursion</>}
+              </AuditCard>
+              <AuditCard><h3>Touch and entry quality</h3>
+                <strong>Touch wick:</strong> {trade.zone.side==="supply"?trade.touchCandle.low:trade.touchCandle.high}<br/>
+                <strong>Confirmation close:</strong> {trade.confirmationCandle.close}<br/>
+                {trade.proximity&&<><strong>Touch range:</strong> {(trade.proximity.touchRangeZoneFraction*100).toFixed(1)}% of zone<br/><strong>Close distance:</strong> {(trade.proximity.confirmationDistanceZoneFraction*100).toFixed(1)}%<br/><strong>Executable distance:</strong> {(trade.proximity.executableDistanceZoneFraction*100).toFixed(1)}%</>}
+                {(trade.priorTouchDetails?.length??0)>0&&<ul>{trade.priorTouchDetails?.map((touch,index)=><li key={`${touch.time}-${index}`}>Prior touch {index+1}: {formatStrategyReplayUtc(touch.time)} · {touch.price} · {(touch.penetration*100).toFixed(1)}%</li>)}</ul>}
+              </AuditCard>
+              <AuditCard><h3>Score components</h3>
+                <table><thead><tr><th>Component</th><th>Points</th><th>Evidence</th></tr></thead><tbody>{(trade.score?.components??[]).map(component=><tr key={component.name}><td>{component.name}</td><td className="points">{component.points}</td><td>{component.detail}</td></tr>)}</tbody></table>
+              </AuditCard>
+              <AuditCard><h3>Hard gates</h3>
+                <table><thead><tr><th>Gate</th><th>Result</th><th>Reason</th></tr></thead><tbody>{(trade.score?.gates??[]).map(gate=><tr key={gate.name}><td>{gate.name}</td><td className="points">{gate.passed?"PASS":"FAIL"}</td><td>{gate.reason}</td></tr>)}</tbody></table>
+                {live.marketTimeAudit&&<><br/><strong>Market time:</strong> {formatStrategyReplayNewYork(live.marketTimeAudit.entryEligibilityTime)} · weekly {live.marketTimeAudit.weeklyBlocked?"BLOCK":"PASS"} · holiday {live.marketTimeAudit.holiday.blocked?"BLOCK":"PASS"}</>}
+              </AuditCard>
+              <AuditCard><h3>Research diagnostics</h3>
+                {trade.approachPressure?<><strong>Confirmation strength:</strong> {(trade.approachPressure.confirmationStrengthScore*100).toFixed(0)}%<br/><strong>Compression:</strong> {(trade.approachPressure.approachCompressionScore*100).toFixed(0)}%<br/><strong>Liquidity sweeps:</strong> {trade.approachPressure.liquiditySweepCount}<br/><strong>Adverse flags:</strong> {trade.approachPressure.adversePressureFlags.join(", ")||"none"}</>:<>Legacy trade: approach pressure was not recorded.</>}
+                {trade.departureSpeed&&<><br/><strong>M1 speed:</strong> {trade.departureSpeed.rangeAtrMultiple?.toFixed(2)??"n/a"}x ATR · {(trade.departureSpeed.departureRangeFraction*100).toFixed(1)}% of M15 departure in one candle</>}
+                {trade.marketPath&&<><br/><strong>Path:</strong> MFE {trade.marketPath.mfeR.toFixed(2)}R · MAE {trade.marketPath.maeR.toFixed(2)}R · ending {trade.marketPath.endingR.toFixed(2)}R</>}
+                {trade.zoneCorridors?.map(corridor=><div key={corridor.timeframe}><strong>{corridor.timeframe} corridor:</strong> {corridor.available?`${corridor.widthPips?.toFixed(1)??"n/a"} pips · entry ${corridor.entryLocationPct?.toFixed(1)??"n/a"}%`:corridor.reason}</div>)}
+                {trade.managementPolicyResults&&<><strong>Manager replays:</strong> {trade.managementPolicyResults.length}</>}
+              </AuditCard>
+            </AuditGrid>
+          </AuditDetails>
+        </TradeCandy>;
+      })()}
       {deepLinkPending ? (
         <ReplayLoading>
           <div>

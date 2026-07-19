@@ -429,6 +429,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
       trend:(storedReplayForRequest.trend==='bullish'||storedReplayForRequest.trend==='bearish'?storedReplayForRequest.trend:'unknown') as ReturnType<typeof getGoldilocksTrend>,
       score:storedReplayForRequest.scoreJson as ReturnType<typeof scoreGoldilocksSetup>,
+      realizedR:storedReplayForRequest.realizedR,
+      approachPressure:storedReplayForRequest.approachPressure,
+      zoneCorridors:storedReplayForRequest.zoneCorridors,
+      marketPath:storedReplayForRequest.marketPath,
+      managementPolicyResults:storedReplayForRequest.managementPolicyResults,
       outcome:storedReplayForRequest.outcome==='WIN'?'win' as const:'loss' as const,
       exitReason:storedReplayForRequest.exitReason==='stop'?'stop' as const
         :storedReplayForRequest.exitReason==='weekend_close'?'weekend_close' as const

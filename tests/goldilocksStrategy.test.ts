@@ -447,7 +447,7 @@ test("measures backtest edge from realized R instead of protected-win labels", (
 });
 
 test("labels a new run with only its strategy version and run date", () => {
-  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.36");
+  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.37");
   assert.equal(
     getGoldilocksBacktestRunLabel(
       "lowerTimeframe",
@@ -746,10 +746,11 @@ test("measures mirrored approach pressure causally without using candles after c
   );
   assert.deepEqual(measured.adversePressureFlags, [
     "downside_sweep",
+    "momentum_drive_into_supply",
   ]);
-  assert.equal(measured.approachClassification, "orderly_approach");
-  assert.equal(measured.approachMomentumVeto, false);
-  assert.equal(measured.adversePressureScore, 1);
+  assert.equal(measured.approachClassification, "momentum_drive");
+  assert.equal(measured.approachMomentumVeto, true);
+  assert.equal(measured.adversePressureScore, 2);
   assert.equal(measured.weakConfirmation, true);
   assert.equal(measured.latestSweepTime, 6);
   assert.equal(measured.approachWindowCandles, 12);
@@ -778,6 +779,7 @@ test("measures mirrored approach pressure causally without using candles after c
   );
   assert.deepEqual(mirrored.adversePressureFlags, [
     "upside_sweep",
+    "momentum_drive_into_demand",
   ]);
   assert.equal(mirrored.adversePressureScore, measured.adversePressureScore);
   assert.ok(
@@ -818,7 +820,7 @@ test("does not call near-equal probes sweeps without a sharp ATR-qualified breac
     9,
   );
 
-  assert.equal(measured.version, 17);
+  assert.equal(measured.version, 18);
   assert.equal(measured.liquiditySweepCount, 0);
   assert.equal(measured.latestSweepTime, null);
   assert.equal(measured.approachEvidenceTime, 8);
@@ -867,36 +869,36 @@ test("separates tightening compression from a momentum drive into a zone", () =>
   assert.equal(measured.adversePressureScore, 0);
 });
 
-test("requires two consecutive 1.5 ATR attacking candles for one fast-attack burst", () => {
+test("groups a fast multi-candle impulse into one ATR-normalized push", () => {
   const steady = Array.from({ length: 14 }, (_, index) => ({
     time: index + 1,
-    open: 100 + index * 0.2,
-    high: 100.6 + index * 0.2,
-    low: 99.6 + index * 0.2,
-    close: 100.2 + index * 0.2,
+    open: 100,
+    high: 100.5,
+    low: 99.5,
+    close: index % 2 === 0 ? 100.1 : 99.9,
   }));
   const isolatedImpulse = {
     time: 15,
-    open: 102.8,
-    high: 104.8,
-    low: 102.7,
-    close: 104.6,
+    open: 100,
+    high: 103,
+    low: 99.9,
+    close: 102.8,
   };
   const pause = {
     time: 16,
-    open: 104.6,
-    high: 104.9,
-    low: 104.5,
-    close: 104.7,
+    open: 102.8,
+    high: 102.9,
+    low: 100.1,
+    close: 100.2,
   };
   const isolatedOnly = measureGoldilocksApproachPressure(
-    { side: "supply", low: 105, high: 106, width: 1, candleTime: 0 },
+    { side: "supply", low: 103.5, high: 104.5, width: 1, candleTime: 0 },
     [
       ...steady,
       isolatedImpulse,
       pause,
-      { time: 17, open: 104.7, high: 105.1, low: 104.6, close: 105 },
-      { time: 18, open: 105, high: 105.1, low: 104.4, close: 104.5 },
+      { time: 17, open: 100.2, high: 103.6, low: 100.1, close: 103.5 },
+      { time: 18, open: 103.5, high: 103.6, low: 102.8, close: 102.9 },
     ],
     16,
     17,
@@ -909,28 +911,63 @@ test("requires two consecutive 1.5 ATR attacking candles for one fast-attack bur
   );
 
   const consecutiveBurst = measureGoldilocksApproachPressure(
-    { side: "supply", low: 109, high: 110, width: 1, candleTime: 0 },
+    { side: "supply", low: 107, high: 108, width: 1, candleTime: 0 },
     [
       ...steady,
       isolatedImpulse,
       pause,
-      { time: 17, open: 104.7, high: 106.8, low: 104.6, close: 106.7 },
-      { time: 18, open: 106.7, high: 108.8, low: 106.6, close: 108.7 },
-      { time: 19, open: 108.7, high: 109.1, low: 108.6, close: 109 },
-      { time: 20, open: 109, high: 109.1, low: 108.4, close: 108.5 },
+      { time: 17, open: 100.2, high: 103.1, low: 100.1, close: 103 },
+      { time: 18, open: 103, high: 106.9, low: 102.9, close: 106.8 },
+      { time: 19, open: 106.8, high: 107.1, low: 106.7, close: 107 },
+      { time: 20, open: 107, high: 107.1, low: 106.2, close: 106.3 },
     ],
     18,
     19,
   );
   assert.equal(consecutiveBurst.fastApproachBurstCount, 1);
-  assert.equal(consecutiveBurst.fastApproachCandleCount, 2);
-  assert.deepEqual(consecutiveBurst.approachEvidenceTimes, [17, 18]);
+  assert.equal(consecutiveBurst.fastApproachCandleCount, 1);
+  assert.deepEqual(consecutiveBurst.approachEvidenceTimes, [18]);
   assert.equal(consecutiveBurst.approachMomentumVeto, true);
   assert.ok(
     consecutiveBurst.adversePressureFlags.includes(
       "momentum_drive_into_supply",
     ),
   );
+});
+
+test("separates three fast pushes divided by ATR-qualified pullbacks", () => {
+  const base = Array.from({ length: 14 }, (_, index) => ({
+    time: index + 1,
+    open: 100,
+    high: 100.5,
+    low: 99.5,
+    close: index % 2 === 0 ? 100.1 : 99.9,
+  }));
+  const returnLeg: StrategyCandle[] = [
+    { time: 15, open: 100, high: 103.1, low: 99.9, close: 103 },
+    { time: 16, open: 103, high: 106.1, low: 102.9, close: 106 },
+    { time: 17, open: 106, high: 106.1, low: 103.9, close: 104 },
+    { time: 18, open: 104, high: 107.1, low: 103.9, close: 107 },
+    { time: 19, open: 107, high: 110.1, low: 106.9, close: 110 },
+    { time: 20, open: 110, high: 110.1, low: 107.9, close: 108 },
+    { time: 21, open: 108, high: 109.1, low: 107.9, close: 109 },
+    { time: 22, open: 109, high: 109.1, low: 106.9, close: 107 },
+    { time: 23, open: 107, high: 111.1, low: 106.9, close: 111 },
+    { time: 24, open: 111, high: 116.6, low: 110.9, close: 116.5 },
+    { time: 25, open: 116.5, high: 117.1, low: 116.4, close: 117 },
+    { time: 26, open: 117, high: 117.1, low: 116.2, close: 116.3 },
+  ];
+  const measured = measureGoldilocksApproachPressure(
+    { side: "supply", low: 117, high: 119, width: 2, candleTime: 0 },
+    [...base, ...returnLeg],
+    24,
+    25,
+  );
+  assert.equal(measured.fastApproachBurstCount, 3);
+  assert.deepEqual(measured.approachEvidenceTimes, [16, 19, 24]);
+  assert.deepEqual(measured.fastApproachPushDirectionalSteps, [2, 2, 2]);
+  assert.equal(measured.approachClassification, "momentum_drive");
+  assert.equal(measured.adversePressureScore, 1);
 });
 
 test("checks the complete close-away-to-touch leg instead of a fixed warning window", () => {
@@ -1112,11 +1149,11 @@ test("classifies approach shape only from the opposite extreme back to the zone"
   assert.equal(supply.sourceApproachCandles, 28);
   assert.equal(supply.approachReturnLegStartTime, 21);
   assert.equal(supply.approachReturnLegCandles, 8);
-  assert.notEqual(supply.approachClassification, "momentum_drive");
-  assert.equal(supply.fastApproachBurstCount, 0);
-  assert.equal(supply.fastApproachCandleCount, 0);
-  assert.deepEqual(supply.approachEvidenceTimes, []);
-  assert.ok(!supply.adversePressureFlags.includes("momentum_drive_into_supply"));
+  assert.equal(supply.approachClassification, "momentum_drive");
+  assert.equal(supply.fastApproachBurstCount, 1);
+  assert.equal(supply.fastApproachCandleCount, 1);
+  assert.deepEqual(supply.approachEvidenceTimes, [28]);
+  assert.ok(supply.adversePressureFlags.includes("momentum_drive_into_supply"));
 
   const demandCandles = supplyCandles.map((candle) => ({
     time: candle.time,
@@ -1132,8 +1169,8 @@ test("classifies approach shape only from the opposite extreme back to the zone"
     29,
   );
   assert.equal(demand.approachReturnLegStartTime, 21);
-  assert.notEqual(demand.approachClassification, "momentum_drive");
-  assert.ok(!demand.adversePressureFlags.includes("momentum_drive_into_demand"));
+  assert.equal(demand.approachClassification, "momentum_drive");
+  assert.ok(demand.adversePressureFlags.includes("momentum_drive_into_demand"));
 });
 
 test("keeps a long approach scope but promotes its warning analysis resolution", () => {

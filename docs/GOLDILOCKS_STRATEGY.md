@@ -443,13 +443,16 @@ least half its successive adverse edges step toward the zone. Tightening compres
 requires that directional condition plus a composite score of at least 60%: range
 contraction contributes 30%, body contraction 20%, adjacent-candle overlap 25%, low
 net-progress efficiency 15%, and directional consistency 10%. Compression is descriptive
-only. Fast approach uses a consecutive-burst rule: an attacking confirmation-timeframe
-candle must close toward the zone, have a body at least 1.5 times its prior ATR(14),
-and have that body occupy at least 60% of its full range. At least two consecutive
-qualifying candles are required. Each qualifying run counts as one fast-attack burst
-and creates the warning category; isolated candles never qualify, even when one candle
-is unusually large. Every candle belonging to a qualifying burst is marked
-`FAST ATTACK` on replay charts. A directional
+only. Fast approach detects distinct multi-candle momentum pushes rather than isolated
+large candles. A pullback of at least 0.35 prior ATR ends the current push and starts
+a new candidate. A completed push qualifies when its net close displacement toward
+the zone is at least 2 prior ATR and 1.25 zone widths, while retaining at least 60%
+close-path efficiency and at least two advancing close-to-close steps. This separates
+strong advances divided by a meaningful pause or pullback and rejects both one-candle
+spikes and smaller noisy moves. Each qualifying
+push counts once and receives one `FAST ATTACK` marker at its peak. One or more pushes
+create the single fast-approach warning category; additional pushes do not stack score
+deductions. A directional
 return without those impulses is orderly and earns no warning; a non-directional return
 is mixed/unclear and also earns no warning. A pre-touch
 liquidity sweep is a complete three-stage pattern on the confirmation timeframe. First,

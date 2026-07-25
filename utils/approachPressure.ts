@@ -1,7 +1,7 @@
 import type { GoldilocksZone, StrategyCandle } from './goldilocksStrategy.ts';
 
 export interface GoldilocksApproachPressure {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18;
   zoneSide: 'demand' | 'supply';
   approachWindowCandles: number;
   approachReturnLegCandles?: number;
@@ -41,6 +41,11 @@ export interface GoldilocksApproachPressure {
   fastApproachCandleCount?: number;
   fastApproachBurstCount?: number;
   fastApproachMaximumBodyAtr?: number;
+  fastApproachPushStartTimes?: number[];
+  fastApproachPushDisplacementZoneWidths?: number[];
+  fastApproachPushEfficiencies?: number[];
+  fastApproachPushDirectionalSteps?: number[];
+  fastApproachMaximumDisplacementAtr?: number;
   confirmationBodyFraction: number;
   confirmationCloseThroughZoneFraction: number;
   confirmationRejectionWickFraction: number;
@@ -65,9 +70,11 @@ const SWEEP_MAXIMUM_CLOSE_DRIFT_ATR=0.75;
 const SWEEP_MINIMUM_OVERLAP_FRACTION=0.35;
 const SWEEP_MINIMUM_BREACH_ATR=0.02;
 const SWEEP_REACTION_ATR=1;
-const FAST_APPROACH_BODY_ATR=1.5;
-const FAST_APPROACH_MINIMUM_BODY_FRACTION=0.6;
-const FAST_APPROACH_MINIMUM_CANDLES=2;
+const FAST_APPROACH_PULLBACK_ATR=0.35;
+const FAST_APPROACH_MINIMUM_DISPLACEMENT_ATR=2;
+const FAST_APPROACH_MINIMUM_DISPLACEMENT_ZONE_WIDTHS=1.25;
+const FAST_APPROACH_MINIMUM_EFFICIENCY=0.6;
+const FAST_APPROACH_MINIMUM_DIRECTIONAL_STEPS=2;
 
 const averageTrueRange=(candles:StrategyCandle[],endExclusive:number,period=14)=>{
   const start=Math.max(0,endExclusive-period);
@@ -327,37 +334,86 @@ export const measureGoldilocksApproachPressure=(
   );
 
   const touch=candles[safeTouchIndex];
-  const fastApproachCandidates=compression.map((candle,index)=>{
-    const candleRange=Math.max(0,candle.high-candle.low);
-    const directionalBody=zone.side==='supply'
-      ?Math.max(0,candle.close-candle.open)
-      :Math.max(0,candle.open-candle.close);
-    const priorAtr=averageTrueRange(compression,index)||atr;
-    const bodyAtr=safeRatio(directionalBody,priorAtr);
-    const bodyFraction=safeRatio(directionalBody,candleRange);
-    return bodyAtr>=FAST_APPROACH_BODY_ATR
-      &&bodyFraction>=FAST_APPROACH_MINIMUM_BODY_FRACTION
-      ?{time:candle.time,bodyAtr}
-      :null;
+  const towardZoneClose=(candle:StrategyCandle)=>
+    zone.side==='supply'?candle.close:-candle.close;
+  const fastApproachPushCandidates:Array<{
+    startTime:number;
+    time:number;
+    displacementAtr:number;
+    displacementZoneWidths:number;
+    efficiency:number;
+    directionalSteps:number;
+  }>=[];
+  let fastPushStartIndex=0;
+  let fastPushAnchor=towardZoneClose(compression[0]??{
+    time:0,open:0,high:0,low:0,close:0,
   });
-  const fastApproachBursts:Array<Array<{time:number;bodyAtr:number}>>=[];
-  let currentFastApproachBurst:Array<{time:number;bodyAtr:number}>=[];
-  const finishFastApproachBurst=()=>{
-    if(currentFastApproachBurst.length>=FAST_APPROACH_MINIMUM_CANDLES)
-      fastApproachBursts.push(currentFastApproachBurst);
-    currentFastApproachBurst=[];
+  let fastPushPeak=fastPushAnchor;
+  let fastPushPeakIndex=0;
+  const finishFastApproachPush=()=>{
+    const displacement=Math.max(0,fastPushPeak-fastPushAnchor);
+    const segment=compression.slice(fastPushStartIndex,fastPushPeakIndex+1);
+    const traveled=segment.slice(1).reduce(
+      (sum,candle,index)=>
+        sum+Math.abs(candle.close-segment[index].close),
+      0,
+    );
+    const directionalSteps=segment.slice(1).filter((candle,index)=>
+      towardZoneClose(candle)>towardZoneClose(segment[index])).length;
+    const referenceAtr=Math.max(
+      averageTrueRange(compression,fastPushStartIndex)||atr,
+      atr,
+    );
+    fastApproachPushCandidates.push({
+      startTime:compression[fastPushStartIndex]?.time??0,
+      time:compression[fastPushPeakIndex]?.time??0,
+      displacementAtr:safeRatio(displacement,referenceAtr),
+      displacementZoneWidths:safeRatio(
+        displacement,
+        Math.max(zone.width,Number.EPSILON),
+      ),
+      efficiency:safeRatio(displacement,traveled),
+      directionalSteps,
+    });
   };
-  for(const candidate of fastApproachCandidates){
-    if(candidate)currentFastApproachBurst.push(candidate);
-    else finishFastApproachBurst();
+  for(let index=1;index<compression.length;index+=1){
+    const towardClose=towardZoneClose(compression[index]);
+    const referenceAtr=Math.max(
+      averageTrueRange(compression,index)||atr,
+      atr,
+    );
+    if(towardClose>fastPushPeak){
+      fastPushPeak=towardClose;
+      fastPushPeakIndex=index;
+    }
+    if(
+      fastPushPeak-towardClose
+      >=referenceAtr*FAST_APPROACH_PULLBACK_ATR
+    ){
+      finishFastApproachPush();
+      fastPushStartIndex=index;
+      fastPushAnchor=towardClose;
+      fastPushPeak=towardClose;
+      fastPushPeakIndex=index;
+    }else if(towardClose<fastPushAnchor){
+      fastPushStartIndex=index;
+      fastPushAnchor=towardClose;
+      fastPushPeak=towardClose;
+      fastPushPeakIndex=index;
+    }
   }
-  finishFastApproachBurst();
-  const fastApproachCandles=fastApproachBursts.flat();
-  const fastApproachMaximumBodyAtr=Math.max(
+  if(compression.length)finishFastApproachPush();
+  const fastApproachPushes=fastApproachPushCandidates.filter((push)=>
+    push.displacementAtr>=FAST_APPROACH_MINIMUM_DISPLACEMENT_ATR
+    &&push.displacementZoneWidths
+      >=FAST_APPROACH_MINIMUM_DISPLACEMENT_ZONE_WIDTHS
+    &&push.efficiency>=FAST_APPROACH_MINIMUM_EFFICIENCY
+    &&push.directionalSteps>=FAST_APPROACH_MINIMUM_DIRECTIONAL_STEPS);
+  const fastApproachMaximumDisplacementAtr=Math.max(
     0,
-    ...fastApproachCandles.map((item)=>item.bodyAtr),
+    ...fastApproachPushes.map((push)=>push.displacementAtr),
   );
-  const approachMomentumVeto=fastApproachBursts.length>0;
+  const approachMomentumVeto=fastApproachPushes.length>0;
   const directionalApproach=directionalCloseFraction>=0.5||directionalStepFraction>=0.5;
   const approachClassification=approachMomentumVeto
     ?'momentum_drive'
@@ -388,12 +444,12 @@ export const measureGoldilocksApproachPressure=(
   if(sweeps.length)adversePressureFlags.push(zone.side==='supply'?'downside_sweep':'upside_sweep');
   if(approachClassification==='momentum_drive')adversePressureFlags.push(zone.side==='supply'?'momentum_drive_into_supply':'momentum_drive_into_demand');
   const adverseShape=approachClassification==='momentum_drive';
-  const approachEvidenceTimes=adverseShape&&fastApproachCandles.length
-    ?[...new Set(fastApproachCandles.map((item)=>item.time))]
+  const approachEvidenceTimes=adverseShape&&fastApproachPushes.length
+    ?[...new Set(fastApproachPushes.map((push)=>push.time))]
     :[];
 
   return {
-    version:17,
+    version:18,
     zoneSide:zone.side,
     approachWindowCandles:approach.length,
     approachReturnLegCandles:returnApproach.length,
@@ -430,11 +486,26 @@ export const measureGoldilocksApproachPressure=(
     approachAverageOverlapFraction,
     approachProgressEfficiency,
     approachMomentumVeto,
-    fastApproachCandleTimes:fastApproachCandles.map((item)=>item.time),
-    fastApproachCandleAtrMultiples:fastApproachCandles.map((item)=>item.bodyAtr),
-    fastApproachCandleCount:fastApproachCandles.length,
-    fastApproachBurstCount:fastApproachBursts.length,
-    fastApproachMaximumBodyAtr,
+    fastApproachCandleTimes:fastApproachPushes.map((push)=>push.time),
+    fastApproachCandleAtrMultiples:fastApproachPushes.map(
+      (push)=>push.displacementAtr,
+    ),
+    fastApproachCandleCount:fastApproachPushes.length,
+    fastApproachBurstCount:fastApproachPushes.length,
+    fastApproachMaximumBodyAtr:fastApproachMaximumDisplacementAtr,
+    fastApproachPushStartTimes:fastApproachPushes.map(
+      (push)=>push.startTime,
+    ),
+    fastApproachPushDisplacementZoneWidths:fastApproachPushes.map(
+      (push)=>push.displacementZoneWidths,
+    ),
+    fastApproachPushEfficiencies:fastApproachPushes.map(
+      (push)=>push.efficiency,
+    ),
+    fastApproachPushDirectionalSteps:fastApproachPushes.map(
+      (push)=>push.directionalSteps,
+    ),
+    fastApproachMaximumDisplacementAtr,
     confirmationBodyFraction,
     confirmationCloseThroughZoneFraction,
     confirmationRejectionWickFraction,

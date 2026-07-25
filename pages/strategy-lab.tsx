@@ -1616,21 +1616,24 @@ export default function StrategyLab() {
                             {((trade.approachPressure.approachProgressEfficiency ?? 0) * 100).toFixed(1)}%
                             <span className="why">
                               Compression remains descriptive context and does
-                              not create a warning. A FAST ATTACK burst requires
-                              at least two consecutive candles closing toward
-                              the zone, each with a body of at least 1.5 prior
-                              ATR and at least 60% of its full range. Isolated
-                              candles do not count. Compression, orderly, and
-                              mixed/unclear approaches do not create a warning.
+                              not create a warning. A FAST ATTACK is a distinct
+                              multi-candle push separated by a meaningful ATR
+                              pullback. It must advance at least 2 ATR and 1.25
+                              zone widths with at least 60% close-path
+                              efficiency across at least two advancing steps.
+                              Isolated spikes and smaller moves do not count.
+                              Compression, orderly, and mixed/unclear approaches
+                              do not create a warning.
                             </span>
                             <br />
-                            Fast attack bursts{" "}
+                            Fast attack pushes{" "}
                             {trade.approachPressure.fastApproachBurstCount ?? 0}
-                            {" · qualifying candles "}
-                            {trade.approachPressure.fastApproachCandleCount ?? 0}
-                            {" · strongest body "}
+                            {" · strongest displacement "}
                             {(
-                              trade.approachPressure.fastApproachMaximumBodyAtr ?? 0
+                              trade.approachPressure
+                                .fastApproachMaximumDisplacementAtr ??
+                              trade.approachPressure.fastApproachMaximumBodyAtr ??
+                              0
                             ).toFixed(2)} ATR
                           </>
                         )}

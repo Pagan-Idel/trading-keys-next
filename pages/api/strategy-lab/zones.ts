@@ -39,6 +39,7 @@ import {
   GOLDILOCKS_TIMEFRAME_SECONDS,
   getGoldilocksChartStack,
   getGoldilocksMinimumScore,
+  isGoldilocksIntradayStrategyVersion,
 } from "../../../utils/goldilocksConfig";
 import { scoreGoldilocksSetup } from "../../../utils/goldilocksScoring";
 import { getBacktestTradeReplay } from "../../../utils/backtestStore";
@@ -849,8 +850,9 @@ export default async function handler(
     const currentStrategyReplay =
       storedReplayForRequest?.strategyVersion === currentStrategyVersion;
     const compatibleTimeframeReplay = Boolean(
-      storedReplayForRequest?.strategyVersion === GOLDILOCKS_STRATEGY_VERSION ||
-      storedReplayForRequest?.strategyVersion?.startsWith("h1-m15-m5-v"),
+      isGoldilocksIntradayStrategyVersion(
+        storedReplayForRequest?.strategyVersion,
+      ),
     );
     const storedZoneForReplay = compatibleTimeframeReplay
       ? deepZoneHistory.zones.find(

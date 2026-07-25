@@ -2,6 +2,13 @@ export const GOLDILOCKS_STRATEGY_VERSION = "0.35";
 
 export const GOLDILOCKS_RESEARCH_VERSION = "goldilocks-auto-research-v1";
 
+export const isGoldilocksIntradayStrategyVersion = (
+  strategyVersion?: string,
+) =>
+  typeof strategyVersion === "string" &&
+  (/^0\.\d+$/.test(strategyVersion) ||
+    /^h1-m15-m5-v\d+$/.test(strategyVersion));
+
 export const GOLDILOCKS_TIMEFRAME_PROFILES = {
   lowerTimeframe: {
     id: "lowerTimeframe",

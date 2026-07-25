@@ -962,7 +962,8 @@ export default function StrategyLabChart({
           ...(approachPressure.adversePressureFlags.some(
             (flag) => flag.startsWith("momentum_drive_into_"),
           )
-            ? (approachPressure.approachEvidenceTimes ??
+            ? (approachPressure.fastApproachPushStartTimes ??
+                approachPressure.approachEvidenceTimes ??
                 (approachPressure.approachEvidenceTime
                   ? [approachPressure.approachEvidenceTime]
                   : []))

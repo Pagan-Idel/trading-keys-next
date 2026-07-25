@@ -1,11 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import Link from "next/link";
 import styled from "styled-components";
 import { forexPairs } from "../utils/constants";
 import { RISK_PROFILES, type RiskProfile } from "../utils/dynamicRisk";
-import { formatGoldilocksZoneAge } from "../utils/zoneAge";
 import { simulateBacktestPortfolio } from "../utils/backtestPortfolio";
-import { GOLDILOCKS_DEFAULT_BACKTEST_LABEL } from "../utils/goldilocksConfig";
+import {
+  getGoldilocksBacktestRunLabel,
+  getGoldilocksScoreCategoryWeights,
+  getGoldilocksTimeframeProfile,
+  GOLDILOCKS_BACKTEST_TWEAK_DEFAULTS,
+  normalizeGoldilocksBacktestGates,
+  normalizeGoldilocksBacktestTweaks,
+  normalizeGoldilocksScoreWeights,
+  rebalanceGoldilocksScoreCategories,
+  expandGoldilocksScoreCategoryWeights,
+  type GoldilocksBacktestGates,
+  type GoldilocksBacktestTweaks,
+  type GoldilocksScoreWeights,
+  type GoldilocksScoreCategory,
+  type GoldilocksTimeframeProfileId,
+} from "../utils/goldilocksConfig";
 import { calculateBacktestPerformance } from "../utils/backtestAnalytics";
 
 const Page = styled.div`
@@ -13,6 +34,119 @@ const Page = styled.div`
   margin: 0 auto 80px;
   color: #eef3ff;
   font-family: Inter, system-ui, sans-serif;
+`;
+const TweakGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+`;
+const TweakField = styled.label`
+  position: relative;
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid #303745;
+  border-radius: 11px;
+  background: #0d1117;
+  color: #8995a6;
+  font-size: 0.64rem;
+  font-weight: 800;
+  span { color: #dce7f5; }
+  span[title] { cursor: help; text-decoration: underline dotted #647287; text-underline-offset: 3px; }
+  input {
+    width: 100%;
+    border: 1px solid #343d4b;
+    border-radius: 8px;
+    background: #151a22;
+    color: #fff;
+    padding: 7px 8px;
+  }
+  input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    accent-color: #61efb3;
+  }
+  &[data-tooltip] { cursor: help; }
+  &[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    z-index: 40;
+    left: 50%;
+    bottom: calc(100% + 9px);
+    width: min(280px, 75vw);
+    padding: 10px 12px;
+    border: 1px solid #52617a;
+    border-radius: 10px;
+    background: #05080eef;
+    color: #dce7f5;
+    font-size: 0.7rem;
+    font-weight: 650;
+    line-height: 1.45;
+    box-shadow: 0 12px 28px #000c;
+    opacity: 0;
+    visibility: hidden;
+    transform: translate(-50%, 4px);
+    transition: 0.14s ease;
+    pointer-events: none;
+  }
+  &[data-tooltip]:hover::after,
+  &[data-tooltip]:focus-within::after {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0);
+  }
+`;
+const ConfigCategory = styled.div`
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #293445;
+  border-radius: 12px;
+  background: #081019cc;
+  h3 {
+    margin: 0;
+    color: #71efc0;
+    font-size: 0.85rem;
+  }
+  p {
+    margin: 4px 0 0;
+    color: #91a1b8;
+    font-size: 0.7rem;
+  }
+`;
+const RestoreWeightsButton = styled.button`
+  margin-top: 10px;
+  border: 1px solid #715682;
+  border-radius: 9px;
+  background: #26172f;
+  color: #f3c5ff;
+  padding: 7px 11px;
+  font-size: 0.68rem;
+  font-weight: 850;
+  cursor: pointer;
+  &:hover:not(:disabled) { background: #382043; }
+  &:disabled { opacity: 0.45; cursor: default; }
+`;
+const RuleDisclosure = styled.details`
+  margin-top: 18px;
+  border: 1px solid #354156;
+  border-radius: 14px;
+  background: #090e16cc;
+  overflow: visible;
+  summary {
+    cursor: pointer;
+    padding: 14px 16px;
+    color: #ef9cff;
+    font-size: 0.76rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    user-select: none;
+  }
+  summary:hover { background: #121925; }
+  &[open] summary { border-bottom: 1px solid #293445; }
+  .rule-body { padding: 0 14px 16px; }
 `;
 const Hero = styled.section`
   padding: 24px;
@@ -212,28 +346,9 @@ const EdgeNote = styled.p`
   color: #9a91a8;
   font-size: 0.72rem;
   line-height: 1.55;
-  strong { color: #f1c7ff; }
-`;
-const ResearchLab = styled.section`
-  margin-top: 16px;
-  padding: 20px;
-  border: 1px solid #2e6672;
-  border-radius: 20px;
-  background: radial-gradient(circle at 90% 0, #164c5b66, transparent 34%), linear-gradient(145deg, #101820, #0b1015);
-`;
-const ResearchActions = styled.div`
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  button { min-width: 110px; }
-`;
-const ResearchMeter = styled.div`
-  margin-top: 12px;
-  height: 10px;
-  border-radius: 999px;
-  background: #202a32;
-  overflow: hidden;
-  span { display:block;height:100%;background:linear-gradient(90deg,#4ce1bd,#e8a4ff); }
+  strong {
+    color: #f1c7ff;
+  }
 `;
 const Section = styled.section`
   margin-top: 16px;
@@ -268,7 +383,11 @@ const TradeSearch = styled.form`
     color: #fff;
     border-radius: 9px;
     padding: 8px 10px;
-    font: 750 0.72rem ui-monospace, SFMono-Regular, Consolas, monospace;
+    font:
+      750 0.72rem ui-monospace,
+      SFMono-Regular,
+      Consolas,
+      monospace;
     text-transform: uppercase;
   }
   button {
@@ -289,7 +408,10 @@ const TradeSearchResult = styled.div`
   background: #10251f;
   color: #bcebdd;
   font-size: 0.75rem;
-  code { color: #7dffd4; font-weight: 900; }
+  code {
+    color: #7dffd4;
+    font-weight: 900;
+  }
 `;
 const TradeId = styled.code`
   color: #7dffd4;
@@ -327,10 +449,18 @@ const Table = styled.div`
     color: #ff6678;
     font-weight: 900;
   }
+  .break-even {
+    color: #ffd166;
+    font-weight: 900;
+  }
 `;
 const LeaderboardTable = styled(Table)`
-  table { min-width: 1750px; }
-  th { white-space: nowrap; }
+  table {
+    min-width: 1750px;
+  }
+  th {
+    white-space: nowrap;
+  }
 `;
 const Feed = styled.div`
   max-height: 390px;
@@ -399,7 +529,57 @@ const ClearAllButton = styled(DeleteButton)`
   text-transform: uppercase;
   letter-spacing: 0.04em;
 `;
-const PairCount = styled.span`position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:30px;padding:4px 8px;border:1px solid #36d6a1;background:#10372d;color:#7dffd0;border-radius:999px;font-weight:900;cursor:help;outline:none;&:hover>span,&:focus-visible>span{opacity:1;visibility:visible;transform:translate(-50%,0)}>`;
+const SortControls = styled.div`
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  select {
+    border: 1px solid #3b4656;
+    background: #090d12;
+    color: #eaf1fb;
+    border-radius: 9px;
+    padding: 8px 10px;
+    font-size: 0.72rem;
+    font-weight: 800;
+  }
+`;
+const SortableHeading = styled.button`
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-transform: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  &:hover,
+  &:focus-visible {
+    color: #fff;
+  }
+`;
+const PairCount = styled.button`
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 4px 8px;
+  border: 1px solid #36d6a1;
+  background: #10372d;
+  color: #7dffd0;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 900;
+  cursor: help;
+  outline: none;
+  &:hover > span,
+  &:focus-visible > span {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0);
+  }
+`;
 const PairTip = styled.span`
   position: absolute;
   z-index: 20;
@@ -437,12 +617,19 @@ type RunConfig = {
   minimumScore: number;
   lookbackDays: number;
   pairs: string[];
+  strategyVersion?: string;
   startingBalance?: number;
   leverage?: number;
   riskProfile?: RiskProfile;
   protectedWinR?: number;
-  timeframeProfile?: "intraday" | "higherTimeframe";
+  timeframeProfile?: GoldilocksTimeframeProfileId;
+  strategyTweaks?: GoldilocksBacktestTweaks;
+  gateSettings?: GoldilocksBacktestGates;
+  scoreWeights?: GoldilocksScoreWeights;
   backfillPages?: number;
+  archiveOnly?: boolean;
+  datasetEndTime?: number;
+  datasetKey?: string;
 };
 type Run = {
   id: string;
@@ -481,7 +668,7 @@ type PairResult = {
   averageWinR: number | null;
   averageLossR: number | null;
   expectancyR: number | null;
-  profitFactor: number | null;
+  profitFactor: number | "infinite" | null;
   payoffRatio: number | null;
   breakEvenWinRate: number | null;
   netR: number;
@@ -489,43 +676,146 @@ type PairResult = {
   longestLosingStreak: number;
   config: RunConfig;
 };
+type RunResult = Run & {
+  sampleTrades: number;
+  omittedTrades: number;
+  profitableTrades: number;
+  losingTrades: number;
+  breakEvenTrades: number;
+  profitableRate: number;
+  averageWinR: number | null;
+  averageLossR: number | null;
+  expectancyR: number | null;
+  profitFactor: number | "infinite" | null;
+  payoffRatio: number | null;
+  netR: number;
+  maxDrawdownR: number;
+  longestLosingStreak: number;
+  endingBalance: number;
+  netProfitLoss: number;
+  accountReturn: number;
+  maxDrawdownPercent: number;
+  peakMargin: number;
+  marginBlocked: number;
+  acceptedTrades: number;
+};
 type Dashboard = {
   runs: Run[];
+  runResults: RunResult[];
   selectedRunId: string;
   trades: Array<Record<string, any>>;
   pairs: Array<Record<string, any>>;
   pairResults: PairResult[];
   events: Array<Record<string, any>>;
 };
-type ResearchDashboard = {
-  selectedCampaignId:string;
-  campaigns:Array<{id:string;status:string;label:string;currentTrialId?:string;error?:string;preparationStage?:string;preparationDone?:number;preparationTotal?:number;datasetKey?:string}>;
-  trials:Array<{id:string;datasetKey:string;status:string;backtestRunId?:string;config:RunConfig&{label:string};metrics?:{official?:ReturnType<typeof calculateBacktestPerformance>;policies?:Array<Record<string,any>>}}>;
-  counts:Array<{status:string;count:number}>;
-  events:Array<{id:number;createdAt:string;message:string}>;
-  archive:{usedBytes:number;maxBytes:number;percent:number;remainingBytes:number};
+type SortDirection = "asc" | "desc";
+type ScoreComponent = { name: string; points: number; detail: string };
+type TradeRow = Record<string, any> & {
+  scoreDetail?: { components?: ScoreComponent[] };
 };
-
+const backtestTweakFields: Array<{
+  key: keyof GoldilocksBacktestTweaks;
+  label: string;
+  short: string;
+  explanation: string;
+  step: number;
+}> = [
+  { key: "maximumPriorTouches", label: "Max prior touches", short: "TOUCH MAX", explanation: "Maximum completed confirmation-timeframe candles allowed to touch the zone before the trade trigger. A fourth touch is rejected when this is 3; lowering it demands fresher zones.", step: 1 },
+  { key: "maxTouchRangeZoneFraction", label: "Touch range / zone", short: "TOUCH %", explanation: "Largest allowed first-touch candle range divided by zone width. 0.50 means the candle may span at most 50% of the zone; lowering it requires a tighter touch.", step: 0.05 },
+  { key: "maxEntryDistanceZoneFraction", label: "Entry distance / zone", short: "ENTRY %", explanation: "Maximum entry distance beyond the proximal edge, divided by zone width. 0.50 means entry may be no farther than half a zone width; lowering it avoids chasing.", step: 0.05 },
+  { key: "adverseApproachCandles", label: "Approach candles", short: "APP N", explanation: "Number of completed confirmation-timeframe candles used to measure the final move into the zone. Increasing it measures the approach over a longer window.", step: 1 },
+  { key: "minimumFastApproachAtr", label: "Fast approach ATR", short: "APP ATR", explanation: "Minimum adverse displacement toward the zone, measured in prior ATRs, for the fast-approach warning. Higher values require a more extreme approach before rejection.", step: 0.1 },
+  { key: "minimumFastTouchRangeAtr", label: "Fast touch ATR", short: "TOUCH ATR", explanation: "Minimum first-touch candle range in prior ATRs for the adverse-approach gate. Higher values require a larger touch candle before rejection.", step: 0.1 },
+  { key: "shockRangeAtrMultiple", label: "Shock range ATR", short: "SHOCK ATR", explanation: "Departure candle range in prior ATRs needed for this warning. 3 means at least three ATRs. The zone is rejected when any two of SHOCK ATR, WICK %, and weak CLOSE X warnings match.", step: 0.1 },
+  { key: "rejectionWickFraction", label: "Shock rejection wick", short: "WICK %", explanation: "Minimum adverse wick share of the departure candle range. 0.50 means at least half the candle is rejection wick; increasing it requires a more severe wick.", step: 0.05 },
+  { key: "minimumShockCloseDepartureZoneMultiple", label: "Shock close-away", short: "CLOSE X", explanation: "Minimum close distance away from the zone, measured in zone widths, that avoids the weak-close shock rejection. 1 means the close must finish at least one zone width away.", step: 0.1 },
+  { key: "departureStrengthZoneMultiple", label: "Departure strength", short: "DEP X", explanation: "Close-based departure distance, in zone widths, required for the departure-strength score point. 2 means price must close more than two zone widths away.", step: 0.1 },
+];
+const backtestGateFields: Array<{
+  key: keyof GoldilocksBacktestGates;
+  label: string;
+  explanation: string;
+}> = [
+  { key: "weeklyMarketHours", label: "Weekly market hours", explanation: "When enabled, no new trade may enter from Friday 4 PM through Sunday 6 PM New York time. Disable only to research how weekend-edge signals would have behaved." },
+  { key: "holiday", label: "Holiday", explanation: "When enabled, configured U.S. market holidays are skipped because liquidity and price behavior can be abnormal." },
+  { key: "pairSession", label: "Pair session", explanation: "When enabled, at least one currency in the pair must be inside its normal local trading session. This avoids testing entries when both sides are quiet." },
+  { key: "zoneFormationNews", label: "Formation news", explanation: "When enabled, a zone is discarded if high-impact news overlaps the base-to-departure formation window. This prevents news spikes from being treated like ordinary structure." },
+  { key: "entryProximity", label: "Entry proximity", explanation: "When enabled, the first-touch candle must stay compact and the executable entry cannot be chased too far beyond the zone edge." },
+  { key: "adverseApproach", label: "Adverse approach", explanation: "When enabled, a fast multi-ATR drive plus an oversized touch is rejected unless the touch closes back beyond the proximal edge, showing reclaim." },
+  { key: "entryNews", label: "Entry news", explanation: "When enabled, entries inside the high-impact news block window for either currency are skipped." },
+  { key: "twoToOneRunway", label: "2R runway", explanation: "When enabled, the path from entry to the exact 2R target must not cross the nearest active opposing zone. The target itself remains fixed at 2R either way." },
+];
+const scoreWeightFields: Array<{
+  key: GoldilocksScoreCategory;
+  label: string;
+  explanation: string;
+}> = [
+  { key: "trend", label: "Trend alignment", explanation: "Rewards trades aligned with the protected trend. Raise it when direction should matter more; the other five categories automatically give up the same total points." },
+  { key: "departure", label: "Departure quality", explanation: "Covers combined zone-timeframe formation compactness and capped sustained displacement." },
+  { key: "approachWarnings", label: "Approach warnings", explanation: "Rewards clean pre-touch evidence. Zero warnings earns 5 points, one earns 3, and both earn none. The two confirmation-timeframe categories are a confirmed liquidity-pool sweep and a fast momentum approach. Compression is measured but does not deduct points." },
+  { key: "purity", label: "Zone freshness", explanation: "Rewards zero prior touches. Exactly one prior touch automatically receives half of this category; two or more receive zero." },
+  { key: "zoneInsideZone", label: "Zone inside zone", explanation: "Rewards same-side overlap across the timeframe stack. Two-of-three overlap automatically receives half of this category." },
+];
+const runSortOptions = [
+  ["createdAt", "Run date"], ["label", "Run label"], ["pairs", "Pairs"],
+  ["minimumScore", "Minimum score"], ["lookbackDays", "Lookback"],
+  ["totalTrades", "Trades"], ["netR", "Net R"], ["expectancyR", "Expectancy"],
+  ["profitFactor", "Profit factor"], ["averageWinR", "Average win"],
+  ["averageLossR", "Average loss"], ["payoffRatio", "Payoff"],
+  ["profitableRate", "Profitable rate"], ["breakEvenTrades", "Break-even trades"],
+  ["maxDrawdownR", "Max drawdown (R)"], ["maxDrawdownPercent", "Max drawdown (%)"],
+  ["startingBalance", "Starting balance"], ["endingBalance", "Ending balance"],
+  ["netProfitLoss", "Net P/L"], ["accountReturn", "Return"],
+  ["leverage", "Leverage"], ["risk", "Risk profile"], ["sampleTrades", "Sample size"],
+] as const;
+const normalizedSortValue = (value: unknown) => {
+  if (value == null) return Number.NEGATIVE_INFINITY;
+  if (value === "infinite") return Number.POSITIVE_INFINITY;
+  if (typeof value === "number") return value;
+  const date = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  return Number.isNaN(date) ? String(value).toLowerCase() : date;
+};
+const compareValues = (left: unknown, right: unknown, direction: SortDirection) => {
+  const a = normalizedSortValue(left);
+  const b = normalizedSortValue(right);
+  const result = typeof a === "number" && typeof b === "number"
+    ? a - b
+    : String(a).localeCompare(String(b), undefined, { numeric: true });
+  return direction === "asc" ? result : -result;
+};
 const formatR = (value: number | null, signed = false) =>
   value == null
     ? "N/A"
     : `${signed && value > 0 ? "+" : ""}${value.toFixed(2)}R`;
-const formatFactor = (value: number | null) =>
-  value == null ? "N/A" : Number.isFinite(value) ? value.toFixed(2) : "INF";
+const formatFactor = (value: number | "infinite" | null) =>
+  value === "infinite" || value === Number.POSITIVE_INFINITY
+    ? "∞"
+    : value == null
+      ? "No P/L"
+      : value.toFixed(2);
 const formatPayoff = (value: number | null) =>
   value == null ? "N/A" : `${formatFactor(value)}:1`;
 
 export default function Backtesting() {
-  const dashboardRequestInFlight=useRef(false);
-  const researchRequestInFlight=useRef(false);
+  const dashboardRequestInFlight = useRef(false);
   const [data, setData] = useState<Dashboard | null>(null),
     [selected, setSelected] = useState<string[]>([...forexPairs]);
-  const [research,setResearch]=useState<ResearchDashboard|null>(null),
-    [researchBusy,setResearchBusy]=useState(false);
-  const [label, setLabel] = useState(GOLDILOCKS_DEFAULT_BACKTEST_LABEL),
-    [timeframeProfile, setTimeframeProfile] = useState<"intraday" | "higherTimeframe">("intraday"),
+  const [label, setLabel] = useState(() =>
+      getGoldilocksBacktestRunLabel("intraday"),
+    ),
+    [timeframeProfile, setTimeframeProfile] =
+      useState<GoldilocksTimeframeProfileId>("intraday"),
     [minimumScore, setMinimumScore] = useState(14),
     [lookbackDays, setLookbackDays] = useState(730),
+    [strategyTweaks, setStrategyTweaks] = useState<GoldilocksBacktestTweaks>(
+      () => normalizeGoldilocksBacktestTweaks(undefined),
+    ),
+    [gateSettings, setGateSettings] = useState<GoldilocksBacktestGates>(
+      () => normalizeGoldilocksBacktestGates(undefined),
+    ),
+    [scoreWeights, setScoreWeights] = useState<GoldilocksScoreWeights>(
+      () => normalizeGoldilocksScoreWeights(undefined),
+    ),
     [busy, setBusy] = useState(false),
     [deletingId, setDeletingId] = useState(""),
     [clearingAll, setClearingAll] = useState(false),
@@ -534,11 +824,20 @@ export default function Backtesting() {
     [leverage, setLeverage] = useState(30),
     [riskProfile, setProjectionRiskProfile] = useState<RiskProfile>("default");
   const [tradeIdQuery, setTradeIdQuery] = useState(""),
-    [tradeSearchResult, setTradeSearchResult] = useState<Record<string, any> | null>(null),
+    [tradeSearchResult, setTradeSearchResult] = useState<Record<
+      string,
+      any
+    > | null>(null),
     [tradeSearching, setTradeSearching] = useState(false);
+  const [runSortKey, setRunSortKey] = useState("createdAt");
+  const [runSortDirection, setRunSortDirection] =
+    useState<SortDirection>("desc");
+  const [tradeSortKey, setTradeSortKey] = useState("confirmationTime");
+  const [tradeSortDirection, setTradeSortDirection] =
+    useState<SortDirection>("desc");
   const load = useCallback(async (runId?: string) => {
-    if(dashboardRequestInFlight.current)return;
-    dashboardRequestInFlight.current=true;
+    if (dashboardRequestInFlight.current) return;
+    dashboardRequestInFlight.current = true;
     try {
       const r = await fetch(`/api/backtests${runId ? `?runId=${runId}` : ""}`, {
         cache: "no-store",
@@ -548,23 +847,17 @@ export default function Backtesting() {
       setError("");
     } catch (e) {
       setError((e as Error).message);
-    } finally {dashboardRequestInFlight.current=false}
+    } finally {
+      dashboardRequestInFlight.current = false;
+    }
   }, []);
-  const loadResearch=useCallback(async()=>{
-    if(researchRequestInFlight.current)return;
-    researchRequestInFlight.current=true;
-    try{
-      const response=await fetch('/api/backtests/research',{cache:'no-store'});
-      const body=await response.json();
-      if(!response.ok)throw new Error(body.error);
-      setResearch(body);
-    }catch(researchError){setError((researchError as Error).message)}finally{researchRequestInFlight.current=false}
-  },[]);
   const selectSnapshot = (
     runId: string,
     config: Run["config"],
     snapshotLabel: string,
   ) => {
+    setTradeIdQuery("");
+    setTradeSearchResult(null);
     setSelected(Array.isArray(config.pairs) ? [...config.pairs] : []);
     setMinimumScore(config.minimumScore);
     setLookbackDays(config.lookbackDays);
@@ -572,7 +865,14 @@ export default function Backtesting() {
     setStartingBalance(config.startingBalance ?? 1000);
     setLeverage(config.leverage ?? 30);
     setProjectionRiskProfile(config.riskProfile ?? "default");
-    setLabel(`${snapshotLabel} · rerun`);
+    setStrategyTweaks(normalizeGoldilocksBacktestTweaks(config.strategyTweaks));
+    setGateSettings(normalizeGoldilocksBacktestGates(config.gateSettings));
+    setScoreWeights(
+      expandGoldilocksScoreCategoryWeights(
+        getGoldilocksScoreCategoryWeights(config.scoreWeights),
+      ),
+    );
+    setLabel(snapshotLabel);
     void load(runId);
   };
   const searchTrade = async (event: FormEvent) => {
@@ -581,7 +881,10 @@ export default function Backtesting() {
     if (!tradeId) return;
     setTradeSearching(true);
     try {
-      const response = await fetch(`/api/backtests?tradeId=${encodeURIComponent(tradeId)}`, { cache: "no-store" });
+      const response = await fetch(
+        `/api/backtests?tradeId=${encodeURIComponent(tradeId)}`,
+        { cache: "no-store" },
+      );
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
       setTradeSearchResult(body.trade);
@@ -594,18 +897,18 @@ export default function Backtesting() {
       setTradeSearching(false);
     }
   };
+  const clearTradeSearch = () => {
+    setTradeIdQuery("");
+    setTradeSearchResult(null);
+    setError("");
+  };
   const active =
     data?.runs.some(
       (run) => run.status === "running" || run.status === "queued",
     ) ?? false;
   useEffect(() => {
     void load();
-    void loadResearch();
-  }, [load,loadResearch]);
-  useEffect(()=>{
-    const id=setInterval(()=>void loadResearch(),5_000);
-    return()=>clearInterval(id);
-  },[loadResearch]);
+  }, [load]);
   useEffect(() => {
     if (!data?.selectedRunId) return;
     const id = setInterval(
@@ -616,6 +919,8 @@ export default function Backtesting() {
   }, [load, data?.selectedRunId, active]);
   const run = async () => {
     setBusy(true);
+    setTradeIdQuery("");
+    setTradeSearchResult(null);
     try {
       const r = await fetch("/api/backtests", {
         method: "POST",
@@ -629,34 +934,125 @@ export default function Backtesting() {
           leverage,
           riskProfile,
           timeframeProfile,
+          strategyTweaks,
+          gateSettings,
+          scoreWeights: expandGoldilocksScoreCategoryWeights(scoreCategories),
         }),
       });
       const body = await r.json();
       if (!r.ok) throw new Error(body.error);
-      await load(body.id);
+      setData((currentData) => {
+        if (!currentData) return currentData;
+        const optimisticRun: Run = {
+          id: body.id,
+          status: body.status,
+          label: body.config.label,
+          createdAt: new Date().toISOString(),
+          progressDone: 0,
+          progressTotal: body.config.pairs.length,
+          progressStage: "queued",
+          progressPercent: 0,
+          heartbeatAt: new Date().toISOString(),
+          totalTrades: 0,
+          wins: 0,
+          losses: 0,
+          config: body.config,
+        };
+        const optimisticResult: RunResult = {
+          ...optimisticRun,
+          sampleTrades: 0,
+          omittedTrades: 0,
+          profitableTrades: 0,
+          losingTrades: 0,
+          breakEvenTrades: 0,
+          profitableRate: 0,
+          averageWinR: null,
+          averageLossR: null,
+          expectancyR: null,
+          profitFactor: null,
+          payoffRatio: null,
+          netR: 0,
+          maxDrawdownR: 0,
+          longestLosingStreak: 0,
+          endingBalance: body.config.startingBalance ?? 1000,
+          netProfitLoss: 0,
+          accountReturn: 0,
+          maxDrawdownPercent: 0,
+          peakMargin: 0,
+          marginBlocked: 0,
+          acceptedTrades: 0,
+        };
+        return {
+          ...currentData,
+          selectedRunId: body.id,
+          runs: [
+            optimisticRun,
+            ...currentData.runs.filter((item) => item.id !== body.id),
+          ],
+          runResults: [
+            optimisticResult,
+            ...currentData.runResults.filter((item) => item.id !== body.id),
+          ],
+        };
+      });
+      window.setTimeout(() => void load(body.id), 0);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   };
-  const researchAction=async(action:'start'|'pause'|'resume'|'stop')=>{
-    setResearchBusy(true);
-    try{
-      const campaign=research?.campaigns.find(item=>item.id===research.selectedCampaignId)??research?.campaigns[0];
-      const response=await fetch(action==='start'?'/api/backtests/research':`/api/backtests/research?campaignId=${encodeURIComponent(String(campaign?.id??''))}`,{
-        method:action==='start'?'POST':action==='stop'?'DELETE':'PATCH',
-        headers:{'Content-Type':'application/json'},
-        body:action==='start'?JSON.stringify({continuous:false,pairs:selected}):action==='stop'?undefined:JSON.stringify({action}),
-      });
-      const body=await response.json();
-      if(!response.ok)throw new Error(body.error);
-      await loadResearch();
-      setError('');
-    }catch(researchError){setError((researchError as Error).message)}finally{setResearchBusy(false)}
-  };
   const current =
     data?.runs.find((item) => item.id === data.selectedRunId) ?? data?.runs[0];
+  const runSortValue = useCallback((row: RunResult, key: string) => {
+    if (key === "pairs") return row.config.pairs?.length ?? 0;
+    if (key === "minimumScore") return row.config.minimumScore;
+    if (key === "lookbackDays") return row.config.lookbackDays;
+    if (key === "startingBalance") return row.config.startingBalance ?? 1000;
+    if (key === "leverage") return row.config.leverage ?? 30;
+    if (key === "risk") return row.config.riskProfile ?? "default";
+    return (row as unknown as Record<string, unknown>)[key];
+  }, []);
+  const sortedRunResults = useMemo(
+    () => [...(data?.runResults ?? [])].sort((left, right) =>
+      compareValues(
+        runSortValue(left, runSortKey),
+        runSortValue(right, runSortKey),
+        runSortDirection,
+      )),
+    [data?.runResults, runSortDirection, runSortKey, runSortValue],
+  );
+  const visibleTrades = useMemo(
+    () =>
+      tradeSearchResult?.tradeId
+        ? (data?.trades ?? []).filter(
+            (trade) => trade.tradeId === tradeSearchResult.tradeId,
+          )
+        : (data?.trades ?? []),
+    [data?.trades, tradeSearchResult?.tradeId],
+  );
+  const tradeSortValue = useCallback((trade: TradeRow, key: string) => {
+    return trade[key];
+  }, []);
+  const sortedTrades = useMemo(
+    () => [...visibleTrades].sort((left, right) =>
+      compareValues(
+        tradeSortValue(left, tradeSortKey),
+        tradeSortValue(right, tradeSortKey),
+        tradeSortDirection,
+      )),
+    [tradeSortDirection, tradeSortKey, tradeSortValue, visibleTrades],
+  );
+  const sortTradesBy = (key: string) => {
+    if (tradeSortKey === key) {
+      setTradeSortDirection((direction) => direction === "asc" ? "desc" : "asc");
+    } else {
+      setTradeSortKey(key);
+      setTradeSortDirection("asc");
+    }
+  };
+  const tradeSortMark = (key: string) =>
+    tradeSortKey === key ? (tradeSortDirection === "asc" ? " ▲" : " ▼") : "";
   const cancel = async () => {
     if (!current) return;
     setBusy(true);
@@ -699,10 +1095,17 @@ export default function Backtesting() {
     }
   };
   const clearAllBacktests = async () => {
-    if (!window.confirm("Permanently clear every backtest run, trade, and event? Historical news coverage will be preserved. This cannot be undone.")) return;
+    if (
+      !window.confirm(
+        "Permanently clear every backtest run, trade, and event? Historical news coverage will be preserved. This cannot be undone.",
+      )
+    )
+      return;
     setClearingAll(true);
     try {
-      const response = await fetch("/api/backtests?all=true&permanent=true", { method: "DELETE" });
+      const response = await fetch("/api/backtests?all=true&permanent=true", {
+        method: "DELETE",
+      });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
       setTradeIdQuery("");
@@ -736,6 +1139,8 @@ export default function Backtesting() {
           stopLoss: Number(trade.stopLoss),
           outcome: trade.outcome as "WIN" | "LOSS",
           realizedR: trade.realizedR == null ? null : Number(trade.realizedR),
+          direction: trade.direction as "BUY" | "SELL",
+          tradeId: String(trade.tradeId),
         })),
         {
           startingBalance,
@@ -751,6 +1156,16 @@ export default function Backtesting() {
       riskProfile,
       startingBalance,
     ],
+  );
+  const projectedTradeResults = useMemo(
+    () =>
+      new Map(
+        projection.trades.map(({ trade, realizedR, pnl }) => [
+          String(trade.id),
+          { realizedR, pnl },
+        ]),
+      ),
+    [projection.trades],
   );
   const performance = useMemo(
     () =>
@@ -768,13 +1183,78 @@ export default function Backtesting() {
       currency: "USD",
       maximumFractionDigits: 2,
     }).format(value);
-  const researchCampaign=research?.campaigns.find(item=>item.id===research.selectedCampaignId)??research?.campaigns[0];
-  const researchCounts=Object.fromEntries((research?.counts??[]).map(item=>[item.status,Number(item.count)]));
-  const completedResearchTrials=[...(research?.trials??[])].filter(trial=>trial.status==='completed').sort((left,right)=>
-    Number(right.metrics?.official?.expectancyR??Number.NEGATIVE_INFINITY)-Number(left.metrics?.official?.expectancyR??Number.NEGATIVE_INFINITY)
-    || Number(left.metrics?.official?.maxDrawdownR??Number.POSITIVE_INFINITY)-Number(right.metrics?.official?.maxDrawdownR??Number.POSITIVE_INFINITY)
+  const timeframeLabel = (config: RunConfig) =>
+    getGoldilocksTimeframeProfile(config.timeframeProfile).label;
+  const replayStack = (config?: RunConfig) =>
+    config?.timeframeProfile === "lowerTimeframe"
+      ? "lowerTimeframe"
+      : config?.timeframeProfile === "higherTimeframe"
+        ? "multiDay"
+        : "intraday";
+  const replayTimeframe = (config?: RunConfig) =>
+    getGoldilocksTimeframeProfile(config?.timeframeProfile).confirmation;
+  const riskLabel = (config: RunConfig) =>
+    RISK_PROFILES[config.riskProfile ?? "default"]?.label ??
+    config.riskProfile ??
+    "Default";
+  const tweakSummary = (result: RunResult) =>
+    [
+      `Strategy: ${result.config.strategyVersion ?? result.label}`,
+      `Timeframes: ${timeframeLabel(result.config)}`,
+      `Minimum score: ${result.config.minimumScore}/20`,
+      `Lookback: ${result.config.lookbackDays} days`,
+      `Risk: ${riskLabel(result.config)}`,
+      `Starting balance: ${money(result.config.startingBalance ?? 1000)}`,
+      `Maximum leverage: ${result.config.leverage ?? 30}:1`,
+      `Pairs (${result.config.pairs?.length ?? 0}): ${(result.config.pairs ?? []).join(", ")}`,
+      result.config.protectedWinR == null
+        ? null
+        : `Protected-win R: ${result.config.protectedWinR}`,
+      result.config.archiveOnly ? "Candle source: saved archive only" : null,
+      ...backtestGateFields.map((field) => {
+        const gates = normalizeGoldilocksBacktestGates(
+          result.config.gateSettings,
+        );
+        return `${field.label}: ${gates[field.key] ? "enabled" : "disabled"}`;
+      }),
+      ...scoreWeightFields.map((field) => {
+        const categories = getGoldilocksScoreCategoryWeights(
+          result.config.scoreWeights,
+        );
+        return `${field.label}: ${categories[field.key].toFixed(2)} pts`;
+      }),
+      ...backtestTweakFields.map((field) => {
+        const tweaks = normalizeGoldilocksBacktestTweaks(
+          result.config.strategyTweaks,
+        );
+        return `${field.short}: ${tweaks[field.key]}`;
+      }),
+    ].filter((item): item is string => Boolean(item));
+  const scoreCategories = useMemo(
+    () => getGoldilocksScoreCategoryWeights(scoreWeights),
+    [scoreWeights],
   );
-  const topResearchTrials=completedResearchTrials.filter(trial=>Number(trial.metrics?.official?.sampleTrades??0)>=100).slice(0,8);
+  const scoreWeightsAreDefault = useMemo(() => {
+    const defaults = getGoldilocksScoreCategoryWeights();
+    return scoreWeightFields.every(
+      (field) =>
+        Math.abs(scoreCategories[field.key] - defaults[field.key]) < 1e-9,
+    );
+  }, [scoreCategories]);
+  const updateScoreCategory = (
+    key: GoldilocksScoreCategory,
+    value: number,
+  ) => {
+    setScoreWeights((current) =>
+      expandGoldilocksScoreCategoryWeights(
+        rebalanceGoldilocksScoreCategories(
+          getGoldilocksScoreCategoryWeights(current),
+          key,
+          value,
+        ),
+      ),
+    );
+  };
   return (
     <Page>
       <Hero>
@@ -788,7 +1268,7 @@ export default function Backtesting() {
         </Sub>
         <Controls>
           <Field>
-            Version / tweak label
+            Run label
             <input value={label} onChange={(e) => setLabel(e.target.value)} />
           </Field>
           <Field>
@@ -796,11 +1276,14 @@ export default function Backtesting() {
             <select
               value={timeframeProfile}
               onChange={(e) => {
-                const value=e.target.value as "intraday" | "higherTimeframe";
+                const value = e.target.value as GoldilocksTimeframeProfileId;
+                const profile = getGoldilocksTimeframeProfile(value);
                 setTimeframeProfile(value);
-                setLookbackDays(value === "higherTimeframe" ? 3650 : 730);
+                setLabel(getGoldilocksBacktestRunLabel(value));
+                setLookbackDays(profile.defaultLookbackDays);
               }}
             >
+              <option value="lowerTimeframe">M15 / M5 / M1</option>
               <option value="intraday">H1 / M15 / M5</option>
               <option value="higherTimeframe">D1 / H4 / H1</option>
             </select>
@@ -840,6 +1323,117 @@ export default function Backtesting() {
             </Button>
           )}
         </Controls>
+        <RuleDisclosure>
+          <summary>
+            Show backtest rule controls · {backtestGateFields.length} gates ·{" "}
+            {scoreWeightFields.length} weights · {backtestTweakFields.length} thresholds
+          </summary>
+          <div className="rule-body">
+            <Sub style={{ fontSize: ".72rem", marginTop: 12 }}>
+              These settings are saved with the run and affect only backtests.
+            </Sub>
+          <ConfigCategory>
+            <h3>1. Hard gates</h3>
+            <p>Enable or disable each backtest eligibility filter.</p>
+            <TweakGrid>
+              {backtestGateFields.map((field) => (
+                <TweakField key={field.key} data-tooltip={field.explanation}>
+                  <span>{gateSettings[field.key] ? "ENABLED" : "DISABLED"}</span>
+                  {field.label}
+                  <input
+                    aria-label={field.label}
+                    type="checkbox"
+                    checked={gateSettings[field.key]}
+                    onChange={(event) =>
+                      setGateSettings((current) => ({
+                        ...current,
+                        [field.key]: event.target.checked,
+                      }))
+                    }
+                  />
+                </TweakField>
+              ))}
+            </TweakGrid>
+          </ConfigCategory>
+          <ConfigCategory>
+            <h3>2. Score weights</h3>
+            <p>
+              Total: <strong>20.00 points</strong> · Move any slider and the
+              other categories rebalance automatically.
+            </p>
+            <RestoreWeightsButton
+              type="button"
+              disabled={scoreWeightsAreDefault}
+              onClick={() =>
+                setScoreWeights(normalizeGoldilocksScoreWeights(undefined))
+              }
+            >
+              Restore default weights
+            </RestoreWeightsButton>
+            <TweakGrid>
+              {scoreWeightFields.map((field) => (
+                <TweakField key={field.key} data-tooltip={field.explanation}>
+                  <span>{field.label}</span>
+                  {scoreCategories[field.key].toFixed(2)} points
+                  <input
+                    aria-label={`${field.label} score weight slider`}
+                    type="range"
+                    min="0"
+                    max="20"
+                    step="0.5"
+                    value={scoreCategories[field.key]}
+                    onChange={(event) =>
+                      updateScoreCategory(field.key, Number(event.target.value))
+                    }
+                  />
+                  <input
+                    aria-label={`${field.label} score weight`}
+                    type="number"
+                    min="0"
+                    max="20"
+                    step="0.5"
+                    value={Number(scoreCategories[field.key].toFixed(2))}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      if (!Number.isFinite(value) || value < 0) return;
+                      updateScoreCategory(field.key, value);
+                    }}
+                  />
+                </TweakField>
+              ))}
+            </TweakGrid>
+          </ConfigCategory>
+          <ConfigCategory>
+            <h3>3. Numeric thresholds</h3>
+            <p>Percent keys use decimals: 0.50 = 50%.</p>
+          <TweakGrid>
+            {backtestTweakFields.map((field) => (
+              <TweakField key={field.key} data-tooltip={field.explanation}>
+                <span>
+                  {field.short}
+                </span>
+                {field.label}
+                <input
+                  aria-label={field.label}
+                  type="number"
+                  min="0"
+                  step={field.step}
+                  value={strategyTweaks[field.key]}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value) || value < 0) return;
+                    setStrategyTweaks((currentTweaks) => ({
+                      ...currentTweaks,
+                      [field.key]: value,
+                    }));
+                  }}
+                />
+              </TweakField>
+            ))}
+          </TweakGrid>
+            </ConfigCategory>
+          </div>
+        </RuleDisclosure>
         <PairGrid>
           <Pair
             $on={selected.length === forexPairs.length}
@@ -869,11 +1463,12 @@ export default function Backtesting() {
         </PairGrid>
         {error && <p style={{ color: "#ff7587" }}>{error}</p>}
       </Hero>
+      {/* Automated discovery controls live exclusively on /research.
       <ResearchLab>
         <Head style={{padding:0,border:0}}>
           <div>
             <h2>24/7 auto research</h2>
-            <span className="muted">One OANDA acquisition, then sealed SQLite-only trials · D1/H4/H1 and H1/M15/M5 · scores 10-18 · 22 managers</span>
+            <span className="muted">One OANDA acquisition, then sealed SQLite-only trials · M15/M5/M1, H1/M15/M5, and D1/H4/H1 · scores 10-18 · 22 managers</span>
           </div>
           <ResearchActions>
             {!researchCampaign||['completed','cancelled','failed'].includes(researchCampaign.status)
@@ -896,10 +1491,10 @@ export default function Backtesting() {
         {topResearchTrials.length>0&&<Table style={{marginTop:14,maxHeight:300}}><table><thead><tr><th>Configuration</th><th>Stack</th><th>Score</th><th>Trades</th><th>Expectancy</th><th>Profit factor</th><th>Max DD</th><th>Best manager</th></tr></thead><tbody>{topResearchTrials.map(trial=>{
           const metrics=trial.metrics?.official;
           const bestPolicy=trial.metrics?.policies?.[0];
-          return <tr key={trial.id}><td><Link href={`/research/trials/${trial.id}`} style={{color:'#87eaff'}}>{trial.config.label}</Link></td><td>{trial.config.timeframeProfile==='higherTimeframe'?'D1/H4/H1':'H1/M15/M5'}</td><td>{trial.config.minimumScore}/20</td><td>{metrics?.sampleTrades??0}</td><td>{formatR(metrics?.expectancyR??null,true)}</td><td>{formatFactor(metrics?.profitFactor??null)}</td><td>{formatR(metrics?.maxDrawdownR??null)}</td><td>{String(bestPolicy?.policyId??'—')}</td></tr>;
+          return <tr key={trial.id}><td><Link href={`/research/trials/${trial.id}`} style={{color:'#87eaff'}}>{trial.config.label}</Link></td><td>{getGoldilocksTimeframeProfile(trial.config.timeframeProfile).label}</td><td>{trial.config.minimumScore}/20</td><td>{metrics?.sampleTrades??0}</td><td>{formatR(metrics?.expectancyR??null,true)}</td><td>{formatFactor(metrics?.profitFactor??null)}</td><td>{formatR(metrics?.maxDrawdownR??null)}</td><td>{String(bestPolicy?.policyId??'—')}</td></tr>;
         })}</tbody></table></Table>}
         <MoneyNote>{topResearchTrials.length?'Only configurations with at least 100 trades are ranked. Click a configuration to inspect every frozen input, gate, score component, diagnostic, manager, pair result, and trade audit.':`${completedResearchTrials.length} completed configuration(s), but none has the 100-trade evidence required for ranking yet.`}</MoneyNote>
-      </ResearchLab>
+      </ResearchLab> */}
       <Grid>
         <Card>
           <Label>Trade signals</Label>
@@ -907,13 +1502,31 @@ export default function Backtesting() {
         </Card>
         <Card>
           <Label>Expectancy / trade</Label>
-          <Metric style={{ color: performance.expectancyR == null ? "#fff" : performance.expectancyR >= 0 ? "#60f0a2" : "#ff6678" }}>
+          <Metric
+            style={{
+              color:
+                performance.expectancyR == null
+                  ? "#fff"
+                  : performance.expectancyR >= 0
+                    ? "#60f0a2"
+                    : "#ff6678",
+            }}
+          >
             {formatR(performance.expectancyR, true)}
           </Metric>
         </Card>
         <Card>
           <Label>Profit factor</Label>
-          <Metric style={{ color: performance.profitFactor == null ? "#fff" : performance.profitFactor >= 1 ? "#60f0a2" : "#ff6678" }}>
+          <Metric
+            style={{
+              color:
+                performance.profitFactor == null
+                  ? "#fff"
+                  : performance.profitFactor >= 1
+                    ? "#60f0a2"
+                    : "#ff6678",
+            }}
+          >
             {formatFactor(performance.profitFactor)}
           </Metric>
         </Card>
@@ -950,18 +1563,26 @@ export default function Backtesting() {
         <Head style={{ padding: 0, border: 0 }}>
           <div>
             <h2>Math-first strategy edge</h2>
-            <span className="muted">Realized R, not the win label, determines whether the setup has an edge</span>
+            <span className="muted">
+              Realized R, not the win label, determines whether the setup has an
+              edge
+            </span>
           </div>
         </Head>
         <EdgeGrid>
           <Card>
             <Label>Profitable rate</Label>
             <Metric>{performance.profitableRate.toFixed(1)}%</Metric>
-            <span className="muted">{performance.profitableTrades} positive-R trades</span>
+            <span className="muted">
+              {performance.profitableTrades} positive-R trades
+            </span>
           </Card>
           <Card>
             <Label>Average win / loss</Label>
-            <Metric style={{ fontSize: "1.35rem" }}>{formatR(performance.averageWinR)} / {formatR(performance.averageLossR)}</Metric>
+            <Metric style={{ fontSize: "1.35rem" }}>
+              {formatR(performance.averageWinR)} /{" "}
+              {formatR(performance.averageLossR)}
+            </Metric>
           </Card>
           <Card>
             <Label>Payoff ratio</Label>
@@ -969,15 +1590,25 @@ export default function Backtesting() {
           </Card>
           <Card>
             <Label>Break-even win rate</Label>
-            <Metric>{performance.breakEvenWinRate == null ? "N/A" : `${performance.breakEvenWinRate.toFixed(1)}%`}</Metric>
+            <Metric>
+              {performance.breakEvenWinRate == null
+                ? "N/A"
+                : `${performance.breakEvenWinRate.toFixed(1)}%`}
+            </Metric>
           </Card>
           <Card>
             <Label>Net realized R</Label>
-            <Metric style={{ color: performance.netR >= 0 ? "#60f0a2" : "#ff6678" }}>{formatR(performance.netR, true)}</Metric>
+            <Metric
+              style={{ color: performance.netR >= 0 ? "#60f0a2" : "#ff6678" }}
+            >
+              {formatR(performance.netR, true)}
+            </Metric>
           </Card>
           <Card>
             <Label>Max drawdown</Label>
-            <Metric style={{ color: "#ffb65c" }}>{formatR(performance.maxDrawdownR)}</Metric>
+            <Metric style={{ color: "#ffb65c" }}>
+              {formatR(performance.maxDrawdownR)}
+            </Metric>
           </Card>
           <Card>
             <Label>Longest loss streak</Label>
@@ -985,12 +1616,22 @@ export default function Backtesting() {
           </Card>
           <Card>
             <Label>Reached +1R / protected 0R</Label>
-            <Metric style={{ fontSize: "1.35rem" }}>{current?.wins ?? 0} / {performance.breakEvenTrades}</Metric>
+            <Metric style={{ fontSize: "1.35rem" }}>
+              {current?.wins ?? 0} / {performance.breakEvenTrades}
+            </Metric>
             <span className="muted">{reachRate.toFixed(1)}% reached +1R</span>
           </Card>
         </EdgeGrid>
         <EdgeNote>
-          <strong>Read win rate as consistency, not as the objective.</strong> Protected break-even trades count as 0R here, not profitable wins. Rankings below use expectancy first. {performance.sampleTrades < 50 ? `This run has only ${performance.sampleTrades} realized-R trades; treat it as an early signal until it reaches at least 50, ideally 100+.` : `${performance.sampleTrades} realized-R trades are included.`}{performance.omittedTrades ? ` ${performance.omittedTrades} legacy trade(s) without realized R are excluded from edge math.` : ""}
+          <strong>Read win rate as consistency, not as the objective.</strong>{" "}
+          Protected break-even trades count as 0R here, not profitable wins.
+          Rankings below use expectancy first.{" "}
+          {performance.sampleTrades < 50
+            ? `This run has only ${performance.sampleTrades} realized-R trades; treat it as an early signal until it reaches at least 50, ideally 100+.`
+            : `${performance.sampleTrades} realized-R trades are included.`}
+          {performance.omittedTrades
+            ? ` ${performance.omittedTrades} legacy trade(s) without realized R are excluded from edge math.`
+            : ""}
         </EdgeNote>
       </EdgeLab>
       <MoneyLab>
@@ -1107,71 +1748,157 @@ export default function Backtesting() {
           historical spread and daily/triple-rollover financing remain excluded;
           simulated positions are force-closed before the Friday weekend cutoff.
         </MoneyNote>
-        {projection.byPair.length > 0 && (
-          <Table style={{ marginTop: 14, maxHeight: 260 }}>
+      </MoneyLab>
+      {Boolean(0) && current && (
+        <Section>
+          <Head>
+            <div>
+              <h2>Tweaks for this backtest run</h2>
+              <span className="muted">
+                Saved configuration for “{current.label}” · run {current.id}
+              </span>
+            </div>
+          </Head>
+          <Table>
             <table>
               <thead>
                 <tr>
-                  <th>Pair</th>
-                  <th>Trades</th>
-                  <th>Profitable</th>
-                  <th>Losing</th>
-                  <th>Total R</th>
-                  <th>Projected net P/L</th>
+                  <th>Setting</th>
+                  <th>Saved value for this run</th>
                 </tr>
               </thead>
               <tbody>
-                {projection.byPair.map((row) => (
-                  <tr key={row.pair}>
-                    <td>{row.pair}</td>
-                    <td>{row.trades}</td>
-                    <td className="win">{row.wins}</td>
-                    <td className="loss">{row.losses}</td>
-                    <td className={row.totalR >= 0 ? "win" : "loss"}>
-                      {row.totalR.toFixed(2)}R
-                    </td>
-                    <td className={row.net >= 0 ? "win" : "loss"}>
-                      {money(row.net)}
-                    </td>
-                  </tr>
-                ))}
+                <tr>
+                  <td>Strategy / tweak label</td>
+                  <td>{current.label}</td>
+                </tr>
+                <tr>
+                  <td>Strategy version</td>
+                  <td>
+                    {current.config.strategyVersion ?? "Legacy / not recorded"}
+                  </td>
+                </tr>
+                <tr>
+                  <td>Timeframe stack</td>
+                  <td>{timeframeLabel(current.config)}</td>
+                </tr>
+                <tr>
+                  <td>Minimum score</td>
+                  <td>{current.config.minimumScore}/20</td>
+                </tr>
+                <tr>
+                  <td>Lookback</td>
+                  <td>{current.config.lookbackDays} days</td>
+                </tr>
+                <tr>
+                  <td>Selected pairs</td>
+                  <td>{current.config.pairs?.join(", ") || "None recorded"}</td>
+                </tr>
+                <tr>
+                  <td>Starting account</td>
+                  <td>{money(current.config.startingBalance ?? 1000)}</td>
+                </tr>
+                <tr>
+                  <td>Dynamic risk profile</td>
+                  <td>{riskLabel(current.config)}</td>
+                </tr>
+                <tr>
+                  <td>Maximum account leverage</td>
+                  <td>{current.config.leverage ?? 30}:1</td>
+                </tr>
+                <tr>
+                  <td>Protected-win R</td>
+                  <td>{current.config.protectedWinR ?? "Default"}</td>
+                </tr>
+                <tr>
+                  <td>Candle source</td>
+                  <td>
+                    {current.config.archiveOnly
+                      ? "Saved archive only"
+                      : "Archive with configured acquisition"}
+                  </td>
+                </tr>
               </tbody>
             </table>
           </Table>
-        )}
-      </MoneyLab>
+        </Section>
+      )}
       <Section>
         <Head>
-          <div><h2>Recorded trades</h2><span className="muted">Every trade has a permanent searchable ID</span></div>
+          <div>
+            <h2>Recorded trades</h2>
+            <span className="muted">
+              {tradeSearchResult
+                ? "Showing only the matching trade"
+                : `Trades from the selected backtest run${current ? ` · ${current.label}` : ""}`}
+            </span>
+          </div>
           <TradeSearch onSubmit={searchTrade}>
-            <input aria-label="Search trade ID" placeholder="GL-EURUSD-YYYYMMDD-HHMM-XXXXXXXX" value={tradeIdQuery} onChange={(event) => setTradeIdQuery(event.target.value)} />
-            <button type="submit" disabled={tradeSearching}>{tradeSearching ? "Searching…" : "Find trade"}</button>
+            <input
+              aria-label="Search trade ID"
+              placeholder="GL-EURUSD-YYYYMMDD-HHMM-XXXXXXXX"
+              value={tradeIdQuery}
+              onChange={(event) => {
+                const value = event.target.value;
+                setTradeIdQuery(value);
+                if (!value.trim()) clearTradeSearch();
+              }}
+            />
+            <button type="submit" disabled={tradeSearching}>
+              {tradeSearching ? "Searching…" : "Find trade"}
+            </button>
+            {tradeIdQuery && (
+              <button type="button" onClick={clearTradeSearch}>
+                Clear
+              </button>
+            )}
           </TradeSearch>
         </Head>
-        {tradeSearchResult && <TradeSearchResult>Found <code>{tradeSearchResult.tradeId}</code> · {tradeSearchResult.pair} {tradeSearchResult.direction} · {new Date(Number(tradeSearchResult.confirmationTime) * 1000).toLocaleString()} · tweak “{tradeSearchResult.runLabel}”</TradeSearchResult>}
+        {tradeSearchResult && (
+          <TradeSearchResult>
+            Found <code>{tradeSearchResult.tradeId}</code> ·{" "}
+            {tradeSearchResult.pair} {tradeSearchResult.direction} ·{" "}
+            {new Date(
+              Number(tradeSearchResult.confirmationTime) * 1000,
+            ).toLocaleString()}{" "}
+            · tweak “{tradeSearchResult.runLabel}”
+          </TradeSearchResult>
+        )}
+        {tradeSearchResult && (
+          <TradeSearchResult>
+             <ReplayLink
+               href={`/strategy-lab?pair=${encodeURIComponent(tradeSearchResult.pair)}&stack=${replayStack(tradeSearchResult.config)}&timeframe=${replayTimeframe(tradeSearchResult.config)}&tradeTime=${tradeSearchResult.confirmationTime}&exitTime=${tradeSearchResult.outcomeTime}&tradeId=${encodeURIComponent(tradeSearchResult.tradeId)}`}
+               target="_blank"
+               rel="noopener noreferrer"
+             >
+              View chart
+            </ReplayLink>
+          </TradeSearchResult>
+        )}
         <Table>
           <table>
             <thead>
               <tr>
-                <th>Trade ID</th>
-                <th>Time</th>
-                <th>First outside (M15)</th>
-                <th>Pair</th>
-                <th>Side</th>
-                <th>Zone</th>
-                <th>Age</th>
-                <th>Score</th>
-                <th>Prior touches</th>
-                <th>Penetration</th>
-                <th>Available R</th>
-                <th>ZIZ</th>
-                <th>Approach risk</th>
-                <th>Total R</th>
-                <th>Replay</th>
+                <th>Chart</th>
+                {[
+                  ["tradeId", "Trade ID"], ["confirmationTime", "Time"],
+                  ["pair", "Pair"], ["direction", "Side"],
+                  ["score", "Score"], ["realizedR", "Total R"],
+                ].map(([key, heading]) => (
+                  <th key={key}>
+                    <SortableHeading type="button" onClick={() => sortTradesBy(key)}>
+                      {heading}{tradeSortMark(key)}
+                    </SortableHeading>
+                  </th>
+                ))}
+                <th>Result</th>
+                <th>Projected net P/L</th>
               </tr>
             </thead>
             <tbody>
-              {data?.trades.map((t) => {
+              {sortedTrades.map((t: TradeRow) => {
+                const projected = projectedTradeResults.get(String(t.id));
+                const displayedR = projected?.realizedR ?? Number(t.realizedR);
                 const totalR =
                   t.realizedR == null
                     ? t.outcome === "WIN"
@@ -1180,37 +1907,48 @@ export default function Backtesting() {
                     : `${Number(t.realizedR).toFixed(2)}R`;
                 return (
                   <tr key={t.id} style={{background:tradeSearchResult?.tradeId===t.tradeId?"#12382e":""}}>
+                    <td>
+                       <ReplayLink
+                         href={`/strategy-lab?pair=${encodeURIComponent(t.pair)}&stack=${replayStack(current?.config)}&timeframe=${replayTimeframe(current?.config)}&tradeTime=${t.confirmationTime}&exitTime=${t.outcomeTime}&tradeId=${encodeURIComponent(t.tradeId)}`}
+                         target="_blank"
+                         rel="noopener noreferrer"
+                       >
+                        View chart
+                      </ReplayLink>
+                    </td>
                     <td><TradeId>{t.tradeId}</TradeId></td>
                     <td>
                       {new Date(t.confirmationTime * 1000).toLocaleString()}
                     </td>
-                    <td>{t.firstOutsideTime ? new Date(t.firstOutsideTime * 1000).toLocaleString() : "Legacy"}</td>
                     <td>{t.pair}</td>
                     <td>{t.direction}</td>
-                    <td>{t.zoneKind}</td>
-                    <td>{formatGoldilocksZoneAge(t.zoneAgeSeconds)}</td>
                     <td>{t.score}/20</td>
-                    <td>{t.priorTouches}</td>
-                    <td>{(t.maxPenetration * 100).toFixed(1)}%</td>
-                    <td>
-                      {t.availableRrr == null
-                        ? "unlimited"
-                        : Number(t.availableRrr).toFixed(2)}
-                      R
-                    </td>
-                    <td>{t.confluenceCount}/3</td>
-                    <td title={t.approachPressure?.adversePressureFlags?.join(", ") || "No recorded approach-pressure diagnostic"}>
-                      {t.approachPressure ? `${t.approachPressure.adversePressureScore}/4` : "Legacy"}
-                    </td>
                     <td className={Number(t.realizedR) >= 0 ? "win" : "loss"}>
                       {totalR}
                     </td>
-                    <td>
-                      <ReplayLink
-                        href={`/strategy-lab?pair=${encodeURIComponent(t.pair)}&timeframe=M5&tradeTime=${t.confirmationTime}&exitTime=${t.outcomeTime}&tradeId=${encodeURIComponent(t.tradeId)}`}
-                      >
-                        View chart
-                      </ReplayLink>
+                    <td
+                      className={
+                        displayedR > 0
+                          ? "win"
+                          : displayedR < 0
+                            ? "loss"
+                            : "break-even"
+                      }
+                    >
+                      {projected
+                        ? displayedR > 0
+                          ? "Won"
+                          : displayedR < 0
+                            ? "Loss"
+                            : "Break-even"
+                        : "Margin blocked"}
+                    </td>
+                    <td
+                      className={
+                        projected && projected.pnl >= 0 ? "win" : "loss"
+                      }
+                    >
+                      {projected ? money(projected.pnl) : "Not accepted"}
                     </td>
                   </tr>
                 );
@@ -1222,25 +1960,51 @@ export default function Backtesting() {
       <Section>
         <Head>
           <div>
-            <h2>Tweak history by pair</h2>
-            <span className="muted">One pair per tweak row | highest realized-R expectancy first | click to restore the combination</span>
+            <h2>Backtest runs</h2>
+            <span className="muted">
+              One row per saved run · click a row to load its settings, account
+              results, trades, chart links, and event log
+            </span>
           </div>
+          <SortControls>
+            <select
+              aria-label="Sort backtest runs by"
+              value={runSortKey}
+              onChange={(event) => setRunSortKey(event.target.value)}
+            >
+              {runSortOptions.map(([value, text]) => (
+                <option key={value} value={value}>Sort by: {text}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Backtest run sort direction"
+              value={runSortDirection}
+              onChange={(event) => setRunSortDirection(event.target.value as SortDirection)}
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
           <ClearAllButton
             disabled={active || clearingAll}
-            title={active ? "Cancel the active backtest first" : "Delete all backtest runs, trades, and events"}
+            title={
+              active
+                ? "Cancel the active backtest first"
+                : "Delete all backtest runs, trades, and events"
+            }
             onClick={() => void clearAllBacktests()}
           >
             {clearingAll ? "Clearing…" : "Clear all backtest data"}
           </ClearAllButton>
+          </SortControls>
         </Head>
         <LeaderboardTable>
           <table>
             <thead>
               <tr>
                 <th>#</th>
-                <th>Pair</th>
-                <th>Tweak</th>
+                <th>Run</th>
                 <th>Run date</th>
+                <th>Pairs</th>
                 <th>Min score</th>
                 <th>Lookback</th>
                 <th>Trades</th>
@@ -1254,79 +2018,119 @@ export default function Backtesting() {
                 <th>BE trades</th>
                 <th>Max DD (R)</th>
                 <th>Max DD (%)</th>
+                <th>Starting</th>
+                <th>Ending</th>
+                <th>Net P/L</th>
+                <th>Return</th>
+                <th>Leverage</th>
+                <th>Risk</th>
                 <th>Sample</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {data?.pairResults.map((row, index) => {
-                const runPairs = Array.isArray(row.config?.pairs)
-                  ? row.config.pairs
-                  : [];
-                const pairText = runPairs.length
-                  ? runPairs.join(", ")
-                  : "Pair details unavailable";
+              {sortedRunResults.map((row, index) => {
+                const runPairs = row.config.pairs ?? [];
+                const details = tweakSummary(row);
                 return (
                   <tr
-                    key={`${row.runId}:${row.pair}`}
+                    key={row.id}
                     onClick={() =>
-                      selectSnapshot(row.runId, row.config, row.label)
+                      selectSnapshot(row.id, row.config, row.label)
                     }
                     style={{
                       cursor: "pointer",
                       background:
-                        row.runId === data.selectedRunId ? "#152c29" : "",
+                        row.id === data?.selectedRunId ? "#152c29" : "",
                     }}
-                    title={`Restore ${row.label} settings and results`}
+                    title={`Load complete run: ${row.label}`}
                   >
                     <td>{index + 1}</td>
                     <td>
-                      <strong>{row.pair}</strong>
-                    </td>
-                    <td>
-                      {row.label}
-                      <br />
                       <PairCount
-                        tabIndex={0}
-                        title={pairText}
-                        aria-label={`${runPairs.length} run pairs: ${pairText}`}
+                        type="button"
+                        aria-label={`View saved tweaks for ${row.label}`}
                       >
-                        {runPairs.length} pairs
+                        View tweaks
                         <PairTip>
-                          <strong>Full run universe</strong>
-                          <span className="list">{pairText}</span>
+                          <strong>Saved run configuration</strong>
+                          {details.map((detail) => (
+                            <span key={detail} className="list">
+                              {detail}
+                            </span>
+                          ))}
                         </PairTip>
                       </PairCount>
                     </td>
                     <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+                    <td>{runPairs.length}</td>
                     <td>{row.config.minimumScore}/20</td>
                     <td>{row.config.lookbackDays} days</td>
-                    <td>{row.trades}</td>
-                    <td className={row.netR >= 0 ? "win" : "loss"}>{formatR(row.netR, true)}</td>
-                    <td className={(row.expectancyR ?? 0) >= 0 ? "win" : "loss"}>{formatR(row.expectancyR, true)}</td>
-                    <td>{formatFactor(row.profitFactor)}</td>
+                    <td>{row.totalTrades}</td>
+                    <td className={row.netR >= 0 ? "win" : "loss"}>
+                      {formatR(row.netR, true)}
+                    </td>
+                    <td
+                      className={(row.expectancyR ?? 0) >= 0 ? "win" : "loss"}
+                    >
+                      {formatR(row.expectancyR, true)}
+                    </td>
+                    <td
+                      title={
+                        row.profitFactor === "infinite"
+                          ? "Gross profit exists with no losing R, so profit factor is infinite."
+                          : row.profitFactor == null
+                            ? "No positive or negative realized R exists yet, so profit factor cannot be calculated."
+                            : "Gross winning R divided by gross losing R."
+                      }
+                    >
+                      {formatFactor(row.profitFactor)}
+                    </td>
                     <td className="win">{formatR(row.averageWinR)}</td>
                     <td className="loss">{formatR(row.averageLossR)}</td>
                     <td>{formatPayoff(row.payoffRatio)}</td>
                     <td>{row.profitableRate.toFixed(1)}%</td>
                     <td>{row.breakEvenTrades}</td>
                     <td className="loss">{formatR(row.maxDrawdownR)}</td>
-                    <td className="loss">{row.maxDrawdown.toFixed(2)}%</td>
-                    <td title={row.sampleTrades < 50 ? "Early sample: below 50 realized-R trades" : row.sampleTrades < 100 ? "Useful sample: continue toward 100+" : "Stronger sample: 100+ realized-R trades"}>
-                      {row.sampleTrades} {row.sampleTrades < 50 ? "| EARLY" : row.sampleTrades < 100 ? "| BUILDING" : "| 100+"}
+                    <td className="loss">
+                      {row.maxDrawdownPercent.toFixed(2)}%
+                    </td>
+                    <td>{money(row.config.startingBalance ?? 1000)}</td>
+                    <td>{money(row.endingBalance)}</td>
+                    <td className={row.netProfitLoss >= 0 ? "win" : "loss"}>
+                      {money(row.netProfitLoss)}
+                    </td>
+                    <td className={row.accountReturn >= 0 ? "win" : "loss"}>
+                      {row.accountReturn.toFixed(2)}%
+                    </td>
+                    <td>{row.config.leverage ?? 30}:1</td>
+                    <td>{riskLabel(row.config)}</td>
+                    <td
+                      title={
+                        row.sampleTrades < 50
+                          ? "Early sample: below 50 realized-R trades"
+                          : row.sampleTrades < 100
+                            ? "Useful sample: continue toward 100+"
+                            : "Stronger sample: 100+ realized-R trades"
+                      }
+                    >
+                      {row.sampleTrades}{" "}
+                      {row.sampleTrades < 50
+                        ? "| EARLY"
+                        : row.sampleTrades < 100
+                          ? "| BUILDING"
+                          : "| 100+"}
                     </td>
                     <td>
                       <DeleteButton
-                        disabled={deletingId === row.runId}
-                        title="Delete this entire tweak and all pair results"
+                        disabled={deletingId === row.id}
+                        title="Delete this entire run and all of its trades"
                         onClick={(event) => {
                           event.stopPropagation();
-                          void removeRun(row.runId, row.label);
+                          void removeRun(row.id, row.label);
                         }}
                       >
-                        {deletingId === row.runId
-                          ? "Deleting…"
-                          : "Delete tweak"}
+                        {deletingId === row.id ? "Deleting…" : "Delete run"}
                       </DeleteButton>
                     </td>
                   </tr>

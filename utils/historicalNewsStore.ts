@@ -236,8 +236,8 @@ export const getHistoricalNewsGateForRange = (pair:string,startEpochSeconds:numb
     window_end AS windowEnd,time_label AS timeLabel FROM historical_news_events
     WHERE source=? AND currency IN (${placeholders}) AND window_start<=? AND window_end>=?
     ORDER BY scheduled_at LIMIT 1`).get(SOURCE,...currencies,end,start) as HistoricalNewsGateResult['event']|undefined;
-  if(row)return {allowed:false,covered:true,reason:`High-impact ${row.currency} news window overlaps the confirmation candle: ${row.title}.`,event:row};
-  return {allowed:true,covered:true,reason:'No relevant high-impact historical news window overlaps the confirmation candle.'};
+  if(row)return {allowed:false,covered:true,reason:`High-impact ${row.currency} news window overlaps the requested interval: ${row.title}.`,event:row};
+  return {allowed:true,covered:true,reason:'No relevant high-impact historical news window overlaps the requested interval.'};
 };
 
 export const getHistoricalNewsCoverageSummary = () => database().prepare(`

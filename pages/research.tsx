@@ -2,6 +2,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import styled from 'styled-components';
+import {getGoldilocksTimeframeProfile,type GoldilocksTimeframeProfileId} from '../utils/goldilocksConfig';
 
 const Page=styled.div`
   width:min(1380px,calc(100% - 30px));margin:0 auto 80px;color:#edf5ff;
@@ -69,7 +70,7 @@ const ErrorBox=styled.div`margin-top:14px;padding:12px;border:1px solid #713442;
 type Performance={sampleTrades:number;expectancyR:number|null;profitFactor:number|null;maxDrawdownR:number;netR:number;profitableRate:number};
 type Trial={
   id:string;datasetKey:string;status:string;backtestRunId?:string;createdAt:string;startedAt?:string;completedAt?:string;error?:string;
-  config:{label:string;minimumScore:number;timeframeProfile?:'intraday'|'higherTimeframe';lookbackDays:number;pairs:string[];strategyVersion?:string;riskProfile?:string};
+  config:{label:string;minimumScore:number;timeframeProfile?:GoldilocksTimeframeProfileId;lookbackDays:number;pairs:string[];strategyVersion?:string;riskProfile?:string};
   metrics?:{official?:Performance;byPair?:Array<{pair:string}&Performance>;policies?:Array<{policyId:string}&Performance>};
 };
 type Campaign={id:string;status:string;label:string;createdAt:string;startedAt?:string;updatedAt:string;completedAt?:string;workerPid?:number;currentTrialId?:string;error?:string;preparationStage?:string;preparationDone?:number;preparationTotal?:number;datasetKey?:string};
@@ -171,7 +172,7 @@ export default function ResearchStatus(){
     <Grid>
       <Card><Label>{campaign?.status==='preparing'?'Dataset acquisition':'Campaign progress'}</Label><Metric>{campaign?.status==='preparing'?`${campaign.preparationDone??0} / ${campaign.preparationTotal??0}`:`${finished} / ${total}`}</Metric><Small>{campaign?.status==='preparing'?'Unique pair/timeframe histories cached once':`${counts.running??0} running - ${counts.queued??0} queued - ${counts.failed??0} failed`}</Small></Card>
       <Card><Label>Trial trade observations</Label><Metric>{completedTrials.reduce((sum,trial)=>sum+Number(trial.metrics?.official?.sampleTrades??0),0)}</Metric><Small>Repeated strategy observations across completed configurations, not unique market trades</Small></Card>
-      <Card><Label>Best eligible expectancy</Label><Metric style={{color:Number(leader?.metrics?.official?.expectancyR??0)>=0?'#68efb3':'#ff8795'}}>{formatR(leader?.metrics?.official?.expectancyR,true)}</Metric><Small>{leader?`${leader.config.timeframeProfile==='higherTimeframe'?'D1/H4/H1':'H1/M15/M5'} - score ${leader.config.minimumScore}`:'Requires at least 100 trades in one configuration'}</Small></Card>
+      <Card><Label>Best eligible expectancy</Label><Metric style={{color:Number(leader?.metrics?.official?.expectancyR??0)>=0?'#68efb3':'#ff8795'}}>{formatR(leader?.metrics?.official?.expectancyR,true)}</Metric><Small>{leader?`${getGoldilocksTimeframeProfile(leader.config.timeframeProfile).label} - score ${leader.config.minimumScore}`:'Requires at least 100 trades in one configuration'}</Small></Card>
       <Card><Label>Candle archive</Label><Metric>{data?formatBytes(data.archive.usedBytes):'—'}</Metric><Small>{data?`${data.archive.percent.toFixed(1)}% of ${formatBytes(data.archive.maxBytes)} · ${formatBytes(data.archive.remainingBytes)} free`:'Loading storage…'}</Small></Card>
     </Grid>
 
@@ -202,7 +203,7 @@ export default function ResearchStatus(){
       <SectionHead><div><h2>Leading configurations</h2><p>Only configurations with at least 100 realized trades receive a rank. Expectancy leads; drawdown breaks ties. Click any row for every frozen input, gate, score component, diagnostic, manager, pair result, and trade audit.</p></div><div style={{color:'#718093',fontSize:11}}>{eligibleTrials.length} eligible / {completedTrials.length} completed</div></SectionHead>
       {completedTrials.length?<TableWrap><table><thead><tr><th>Rank</th><th>Evidence</th><th>Configuration</th><th>Stack</th><th>Score</th><th>Trades</th><th>Expectancy</th><th>Profit factor</th><th>Net R</th><th>Max DD</th><th>Best manager</th></tr></thead><tbody>
         {completedTrials.slice(0,24).map(trial=>{const metric=trial.metrics?.official;const policy=trial.metrics?.policies?.[0];const trades=Number(metric?.sampleTrades??0);const rank=eligibleTrials.findIndex(item=>item.id===trial.id);return <tr key={trial.id} style={{cursor:'pointer'}}>
-          <td><Link href={`/research/trials/${trial.id}`} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>{rank>=0?`#${rank+1}`:'--'}</Link></td><td>{sampleQuality(trades)}</td><td><Link href={`/research/trials/${trial.id}`} style={{color:'#dce8f4',textDecoration:'none'}}>{trial.config.label}</Link></td><td>{trial.config.timeframeProfile==='higherTimeframe'?'D1/H4/H1':'H1/M15/M5'}</td><td>{trial.config.minimumScore}/20</td><td>{trades}</td>
+          <td><Link href={`/research/trials/${trial.id}`} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>{rank>=0?`#${rank+1}`:'--'}</Link></td><td>{sampleQuality(trades)}</td><td><Link href={`/research/trials/${trial.id}`} style={{color:'#dce8f4',textDecoration:'none'}}>{trial.config.label}</Link></td><td>{getGoldilocksTimeframeProfile(trial.config.timeframeProfile).label}</td><td>{trial.config.minimumScore}/20</td><td>{trades}</td>
           <td className={Number(metric?.expectancyR??0)>=0?'good':'bad'}>{formatR(metric?.expectancyR,true)}</td><td>{formatFactor(metric?.profitFactor)}</td><td>{formatR(metric?.netR,true)}</td><td>{formatR(metric?.maxDrawdownR)}</td><td>{policy?.policyId??'--'}</td>
         </tr>})}
       </tbody></table></TableWrap>:<Empty>The leaderboard will populate after sealed-data trials finish.</Empty>}

@@ -1,6 +1,6 @@
 import type { GoldilocksTrend } from './goldilocksScanner.ts';
 import type { GoldilocksZone } from './goldilocksStrategy.ts';
-import { GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_SCORE_WEIGHTS, type GoldilocksTimeframeContract } from './goldilocksConfig.ts';
+import { GOLDILOCKS_DEMO_TIMEFRAMES, normalizeGoldilocksScoreWeights, type GoldilocksBacktestTweaks, type GoldilocksScoreWeights, type GoldilocksTimeframeContract } from './goldilocksConfig.ts';
 
 export interface GoldilocksGateResult {
   name: string;
@@ -15,10 +15,10 @@ export interface GoldilocksScoreContext {
   gates: GoldilocksGateResult[];
   minimumScore: number;
   purityTouches?: number;
-  purityMaxPenetration?: number;
-  availableRewardRisk?: number;
-  rangeAssessment?: {aligned:boolean|null;detail:string};
   timeframes?:GoldilocksTimeframeContract;
+  strategyTweaks?:GoldilocksBacktestTweaks;
+  scoreWeights?:GoldilocksScoreWeights;
+  adverseWarningCount?:number;
 }
 
 export interface GoldilocksScoreResult {
@@ -33,6 +33,7 @@ export interface GoldilocksScoreResult {
 
 export const scoreGoldilocksSetup = (context: GoldilocksScoreContext): GoldilocksScoreResult => {
   const timeframes=context.timeframes??GOLDILOCKS_DEMO_TIMEFRAMES;
+  const weights=normalizeGoldilocksScoreWeights(context.scoreWeights);
   const failedGate = context.gates.find(gate => !gate.passed);
   if (failedGate) {
     return {
@@ -47,49 +48,41 @@ export const scoreGoldilocksSetup = (context: GoldilocksScoreContext): Goldilock
   }
   const confluenceCount = context.zone.timeframeConfluence?.timeframeCount ?? 1;
   const purityTouches=context.purityTouches??context.zone.touches;
-  const purityMaxPenetration=context.purityMaxPenetration??context.zone.maxPenetration;
-  const availableRewardRisk=context.availableRewardRisk??0;
   const aligned = (context.tradeDirection === 'BUY' && context.trend === 'bullish')
     || (context.tradeDirection === 'SELL' && context.trend === 'bearish');
   const baseCandleCount=context.zone.baseCandleCount??1;
   const departureInsideCandleCount=context.zone.departureInsideCandleCount??0;
-  const rangePoints=context.rangeAssessment?.aligned===true?GOLDILOCKS_SCORE_WEIGHTS.rangeAlignment:0;
-  const baseCompactnessPoints=baseCandleCount===1
-    ?GOLDILOCKS_SCORE_WEIGHTS.departureSingleCandleBase
-    :baseCandleCount===2
-      ?GOLDILOCKS_SCORE_WEIGHTS.departureTwoCandleBase
-      :baseCandleCount===3
-        ?GOLDILOCKS_SCORE_WEIGHTS.departureThreeCandleBase
+  const formationCandleCount=baseCandleCount+departureInsideCandleCount;
+  const formationCompactnessPoints=formationCandleCount===1
+    ?weights.departureSingleCandleBase
+    :formationCandleCount===2
+      ?weights.departureTwoCandleBase
+      :formationCandleCount===3
+        ?weights.departureThreeCandleBase
         :0;
-  const departureImmediacyPoints=departureInsideCandleCount===0
-    ?GOLDILOCKS_SCORE_WEIGHTS.departureImmediate
-    :departureInsideCandleCount===1
-      ?GOLDILOCKS_SCORE_WEIGHTS.departureOneLingeringCandle
-      :0;
   const purityPoints=purityTouches===0
-    ?GOLDILOCKS_SCORE_WEIGHTS.purityFresh
-    :purityTouches===1&&purityMaxPenetration<0.5
-      ?GOLDILOCKS_SCORE_WEIGHTS.puritySingleShallowRetouch
+    ?weights.purityFresh
+    :purityTouches===1
+      ?weights.puritySingleRetouch
       :0;
-  const departurePoints=context.zone.departureMultiple>2?GOLDILOCKS_SCORE_WEIGHTS.departureStrength:0;
-  const reversalPoints=context.zone.brokeOppositeLegIn?GOLDILOCKS_SCORE_WEIGHTS.structuralReversal:0;
-  const departureQualityPoints=baseCompactnessPoints+departureImmediacyPoints+departurePoints+reversalPoints;
-  const rrrPoints=availableRewardRisk>5
-    ?GOLDILOCKS_SCORE_WEIGHTS.availableRrrExcellent
-    :availableRewardRisk>=3
-      ?GOLDILOCKS_SCORE_WEIGHTS.availableRrrGood
-      :0;
+  const departureStrengthTier=context.zone.departureMultiple<2
+    ?0
+    :context.zone.departureMultiple<4?1:2;
+  const departurePoints=(departureStrengthTier/2)*weights.departureStrength;
+  const adverseWarningCount=Math.max(0,Math.min(2,Math.floor(context.adverseWarningCount??0)));
+  const approachWarningFraction=[1,0.6,0][adverseWarningCount]??0;
+  const approachWarningPoints=approachWarningFraction*weights.approachNoWarnings;
+  const departureQualityPoints=formationCompactnessPoints+departurePoints;
   const zoneInsideZonePoints=confluenceCount>=3
-    ?GOLDILOCKS_SCORE_WEIGHTS.zoneInsideZoneThreeTimeframes
+    ?weights.zoneInsideZoneThreeTimeframes
     :confluenceCount>=2
-      ?GOLDILOCKS_SCORE_WEIGHTS.zoneInsideZoneTwoTimeframes
+      ?weights.zoneInsideZoneTwoTimeframes
       :0;
   const components = [
-    {name:`${timeframes.trend} range`,points:rangePoints,detail:`${context.rangeAssessment?.detail??`${timeframes.trend} range unavailable.`} Diagnostic only; no score points.`},
-    {name:`${timeframes.trend} trend`,points:aligned?GOLDILOCKS_SCORE_WEIGHTS.trendAlignment:0,detail:`${context.trend} ${timeframes.trend} trend versus ${context.tradeDirection}; neutral scoring is disabled.`},
-    {name:`${GOLDILOCKS_DEMO_TIMEFRAMES.zone} departure quality`,points:departureQualityPoints,detail:`${baseCandleCount}-candle base (${baseCompactnessPoints}/3); ${departureInsideCandleCount} lingering in-zone candle(s) before first outside (${departureImmediacyPoints}/2); ${context.zone.departureMultiple.toFixed(2)}x sustained close displacement (${departurePoints}/1); ${context.zone.brokeOppositeLegIn?'structural LL↔HH trend break':'no structural trend break'} (${reversalPoints}/2).`},
-    {name:`${timeframes.zone} purity`,points:purityPoints,detail:`${purityTouches} prior qualifying retouch(es); deepest prior penetration ${(purityMaxPenetration*100).toFixed(1)}%.`},
-    {name:'Available RRR',points:rrrPoints,detail:`${Number.isFinite(availableRewardRisk)?availableRewardRisk.toFixed(2):'unlimited'}R available before the stored opposing zone.`},
+    {name:`${timeframes.trend} trend`,points:aligned?weights.trendAlignment:0,detail:`${context.trend} ${timeframes.trend} trend versus ${context.tradeDirection}; neutral scoring is disabled.`},
+    {name:`${timeframes.zone} departure quality`,points:departureQualityPoints,detail:`${formationCandleCount} ${timeframes.zone} formation candle(s) from base through the candle before first fully outside (${formationCompactnessPoints}/3); ${context.zone.departureMultiple.toFixed(2)}x sustained close displacement, tier ${departureStrengthTier}/2 (${departurePoints}/${weights.departureStrength}).`},
+    {name:`${timeframes.confirmation} approach warnings`,points:approachWarningPoints,detail:`${adverseWarningCount}/2 adverse approach warning categories. Zero warnings earns 5 points; one earns 3; both earn none. The categories are a confirmed liquidity-pool sweep and a fast momentum approach into the zone. Compression is measured but not penalized.`},
+    {name:`${timeframes.confirmation} purity`,points:purityPoints,detail:`${purityTouches} prior qualifying confirmation-timeframe touch candle(s). Any candle that intersects the zone counts as one touch, regardless of depth.`},
     {name:'Zone inside zone',points:zoneInsideZonePoints,detail:`ZIZ ${Math.min(3,Math.max(1,confluenceCount))}/3: same-side zones overlap across ${Math.min(3,Math.max(1,confluenceCount))} of ${timeframes.confluence.join(', ')}.`},
   ];
   const total = components.reduce((sum, component) => sum + component.points, 0);

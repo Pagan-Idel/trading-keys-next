@@ -3,6 +3,7 @@ import { calculateScoreRisk, type RiskProfile } from './dynamicRisk.ts';
 export interface PortfolioTrade {
   id:string|number;pair:string;confirmationTime:number;outcomeTime:number;score:number;
   entry:number;stopLoss:number;outcome:'WIN'|'LOSS';realizedR:number|null;
+  direction?:'BUY'|'SELL';tradeId?:string;
 }
 
 export interface PortfolioConfig {startingBalance:number;leverage:number;riskProfile:RiskProfile;minimumScore:number;}
@@ -15,6 +16,7 @@ export const simulateBacktestPortfolio=(source:PortfolioTrade[],config:Portfolio
   let equity=initial,peak=initial,maxDrawdown=0,usedMargin=0,peakMargin=0,totalRisked=0,marginBlocked=0;
   const positions=new Map<string,{riskAmount:number;margin:number;trade:PortfolioTrade}>();
   const byPair=new Map<string,{pair:string;trades:number;wins:number;losses:number;net:number;totalR:number}>();
+  const trades:Array<{trade:PortfolioTrade;riskAmount:number;realizedR:number;pnl:number}>=[];
   const events=source.flatMap(trade=>[
     {time:Number(trade.confirmationTime),kind:'entry' as const,trade},
     {time:Number(trade.outcomeTime),kind:'exit' as const,trade},
@@ -38,9 +40,11 @@ export const simulateBacktestPortfolio=(source:PortfolioTrade[],config:Portfolio
     positions.delete(key);usedMargin=Math.max(0,usedMargin-position.margin);
     const realizedR=position.trade.realizedR==null?(position.trade.outcome==='WIN'?0:-1):Number(position.trade.realizedR);
     const pnl=position.riskAmount*realizedR;equity=Math.max(0,equity+pnl);peak=Math.max(peak,equity);
+    trades.push({trade:position.trade,riskAmount:position.riskAmount,realizedR,pnl});
     if(peak>0)maxDrawdown=Math.max(maxDrawdown,(peak-equity)/peak*100);
     const row=byPair.get(position.trade.pair)??{pair:position.trade.pair,trades:0,wins:0,losses:0,net:0,totalR:0};
     row.trades+=1;row.wins+=realizedR>0?1:0;row.losses+=realizedR<0?1:0;row.net+=pnl;row.totalR+=realizedR;byPair.set(position.trade.pair,row);
   }
-  return {initial,ending:equity,net:equity-initial,returnPercent:(equity-initial)/initial*100,maxDrawdown,totalRisked,marginBlocked,peakMargin,acceptedTrades:[...byPair.values()].reduce((sum,row)=>sum+row.trades,0),byPair:[...byPair.values()].sort((a,b)=>b.net-a.net)};
+  trades.sort((left,right)=>left.trade.confirmationTime-right.trade.confirmationTime);
+  return {initial,ending:equity,net:equity-initial,returnPercent:(equity-initial)/initial*100,maxDrawdown,totalRisked,marginBlocked,peakMargin,acceptedTrades:trades.length,trades,byPair:[...byPair.values()].sort((a,b)=>b.net-a.net)};
 };

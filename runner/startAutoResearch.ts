@@ -1,7 +1,9 @@
 import { startAutoResearch } from '../utils/autoResearchRunner.ts';
 
 const argumentsSet=new Set(process.argv.slice(2));
-const timeframeProfiles=argumentsSet.has('--higher-only')
+const timeframeProfiles=argumentsSet.has('--lower-only')
+  ?(['lowerTimeframe'] as const)
+  :argumentsSet.has('--higher-only')
   ?(['higherTimeframe'] as const)
   :argumentsSet.has('--intraday-only')
     ?(['intraday'] as const)

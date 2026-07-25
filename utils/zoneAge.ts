@@ -1,4 +1,15 @@
 export const GOLDILOCKS_ZONE_AGE_DAY_SECONDS=24*60*60;
+export const GOLDILOCKS_MAX_ZONE_AGE_DAYS=30;
+export const GOLDILOCKS_MAX_ZONE_AGE_SECONDS=
+  GOLDILOCKS_MAX_ZONE_AGE_DAYS*GOLDILOCKS_ZONE_AGE_DAY_SECONDS;
+
+export const getGoldilocksZoneExpiresAt=(zoneCandleTime:number)=>
+  zoneCandleTime+GOLDILOCKS_MAX_ZONE_AGE_SECONDS;
+
+export const isGoldilocksZoneAgeUsable=(
+  zoneCandleTime:number,
+  evaluationTime:number,
+)=>evaluationTime<=getGoldilocksZoneExpiresAt(zoneCandleTime);
 
 export const getGoldilocksZoneAgeSeconds=(
   zoneCandleTime:number,

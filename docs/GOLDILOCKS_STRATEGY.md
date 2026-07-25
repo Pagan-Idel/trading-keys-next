@@ -9,9 +9,9 @@ update both the code and this guide together.
 
 The original source reference is
 [`20-point-scoring-sheet.pdf`](reference/20-point-scoring-sheet.pdf). The code has
-deliberate adaptations agreed during development, including a four-point trend maximum,
-an eight-point departure-quality category, and a three-point multi-timeframe confluence
-category, while preserving a 20-point total.
+deliberate adaptations agreed during development, including a three-point trend maximum,
+a four-point departure-quality category, a five-point approach-warning category, and a
+four-point multi-timeframe confluence category, while preserving a 20-point total.
 
 The objective is not maximum raw profit. The research objective is higher
 out-of-sample expectancy and stability under bounded risk, drawdown, spread, and
@@ -19,37 +19,114 @@ execution constraints.
 
 ## Current demo timeframe stack
 
-| Role | Timeframe | Use |
-| --- | --- | --- |
-| Context | H1 | Swing trend and premium/discount range alignment |
-| Zone | M15 | Base and continuation demand/supply zones |
-| Zone lifecycle/purity | M15 | First outside candle and subsequent prior-touch ledger |
-| Trigger | M5 | Trade touch and later close-through confirmation |
-| Execution resolution | M1 | Post-entry stop, +1R, break-even, and target ordering only |
-| Confluence | M5/M15/H1 | Same-side overlapping zone count |
+| Role                  | Timeframe | Use                                                        |
+| --------------------- | --------- | ---------------------------------------------------------- |
+| Context               | H1        | Swing trend and premium/discount range alignment           |
+| Zone                  | M15       | Base and continuation demand/supply zones                  |
+| Zone lifecycle        | M15       | First outside candle and zone validity                     |
+| Prior-touch purity    | M5        | Every touching candle before the first trade trigger        |
+| Trigger               | M5        | Trade touch and later close-through confirmation           |
+| Execution resolution  | M1        | Post-entry stop, +1R, break-even, and target ordering only |
+| Confluence            | M5/M15/H1 | Same-side overlapping zone count                           |
 
 These are intentionally small for rapid practice testing. Keep them centralized in
 `utils/goldilocksConfig.ts` when moving to higher timeframes.
 
+Backtesting, automatic research, and Strategy Lab also expose the non-live
+`m15-m5-m1-research-v3` profile: M15 trend/range, M5 zones and first-outside
+lifecycle, and M1 prior-touch purity plus first-touch/later close-through
+confirmation. M1 is also the lowest available post-entry resolution. Entry becomes
+eligible only after the confirming M1 candle completes, and outcome simulation starts
+with the next candle at that close time; it never uses the confirming candle's
+already-completed range to resolve the trade. This profile does not change the
+live/demo worker.
+
+The Historical Trade Replay page is opened from recorded-trade `View chart` links and
+is locked to the production intraday stack: M5 confirmation, M15 zones,
+and H1 trend, with M1 retained only for touch and execution drill-down. Its chart can
+display M1, M5, M15, or H1 while preserving that role contract; it does not expose a
+timeframe-stack selector. A historical trade replay draws the selected stored trade,
+its entry/stop/target risk-reward area, its originating zone, and the nearest
+opposite-side zone that was active at entry. Generic historical context zones are omitted.
+Its permanent trade ID appears as a candy-styled copyable badge along the bottom of the
+chart so screenshots and visual audits retain the recorded-trade identity.
+The active indicator feed includes only setups whose current-version score is eligible.
+An older stored trade from a compatible H1/M15/M5 strategy version shows its stored
+trade, entry marker, risk-reward box, and reconstructed trade-zone overlay together
+with a legacy audit notice; the notice prevents the row from being mistaken for a
+current-version setup.
+Reaching either chart edge reveals an in-chart button for explicitly loading the next
+older or newer candle page. Loaded candles merge by stable candle time, the visible
+time range remains fixed without an automatic scroll jump, and the button moves to the
+new history boundary. Box and
+Fibonacci drawings persist locally per pair and visible timeframe, with optional OHLC
+light-magnet snapping. Clicking a displayed trade's touch candle switches to M1.
+The displayed prior-touch amount is measured as touching candles on M5, the confirmation
+timeframe. Purity arms on the first completed M5 candle fully outside the zone after its
+base. Every later completed M5 candle intersecting the zone counts individually,
+including consecutive touching candles. The trade-trigger M5 candle is excluded from
+prior history. M15 separately retains its originating departure for zone lifecycle and
+departure-quality evidence.
+Replay charts mark reconstructed prior-touch candles with orange dots only; they omit
+the timeframe and sequence label and do not render a per-touch audit list.
+They also anchor a `DEPARTURE` arrow to the first completed zone-timeframe candle
+fully outside the trade zone. That same candle supplies departure-quality scoring and
+the zone-formation news window. A departure rejected by the two-of-three shock gate keeps
+the same departure marker without displaying shock or wick-rejection diagnostics.
+For a current-version stored replay, the saved touch count remains authoritative. A
+legacy replay preserves its stored score but displays the current
+causal touch reconstruction so contract changes are visible.
+The replay audit separates entry proximity from purity: M5 touch-range and executable-
+entry percentages are hard-gate measurements, while the M5 prior-touch candle count
+alone determines the 0/2/4 purity score.
+The expanded audit begins with version-aware score components and hard gates. Component
+titles describe their strategy role rather than hardcoding a timeframe; the stored
+source name and evidence retain the actual timeframe used by that run. Each component
+and detailed measurement explains why it is checked, how to interpret it, and what
+characterizes stronger evidence without changing the stored trade retrospectively.
+Audit-card titles are unnumbered. The confirmation-timeframe warning card focuses on
+the two scored pre-touch categories: a confirmed liquidity-pool sweep and a fast
+momentum approach. Compression remains visible context but is not adverse and does
+not deduct points. Confirmation strength is omitted from this score explanation;
+the binary close-through confirmation remains the required entry trigger.
+Stored backtest rows keep their original immutable diagnostic JSON, while Historical
+Trade Replay causally recomputes the current diagnostic version from its archived
+pre-touch and confirmation candles so detector fixes are visible without rewriting the
+saved run.
+Diagnostic-only zero-maximum entries are omitted from the Score Components table so it
+contains only components capable of awarding points.
+The Score Components card leads with the stored total out of 20, its minimum threshold,
+and the resulting pass/fail status.
+
 The historical research runner also exposes a separate, non-live
-`d1-h4-h1-research-v1` profile. It mirrors the contract as D1 trend/range, H4 zones,
+`d1-h4-h1-research-v3` profile. It mirrors the contract as D1 trend/range, H4 zones,
 first-outside and prior-touch purity, H1 first touch plus a distinct later H1
 close-through confirmation, and M5 post-entry ordering. Confluence is H1/H4/D1.
-Selecting this profile on Backtesting does not change the live/demo worker, which
-remains locked to H1/M15/M5/M1.
+Selecting either research profile on Backtesting does not change the live/demo worker,
+which remains locked to H1/M15/M5/M1.
 
 ## Market structure and trend
 
 The swing labeler produces HH, HL, LH, and LL points. The scanner converts adjacent
-compatible swing points into bullish and bearish legs. The most recent structure
-label determines H1 trend:
+compatible swing points into bullish and bearish legs. H1 trend uses protected external
+structure rather than blindly following the newest internal label. In a bullish regime,
+a wick below the latest confirmed protected HL flips trend bearish and freezes the
+preceding external high as the bullish-reversal level. Internal HH or LH labels below
+that protected high cannot turn trend bullish. Supply and demand are mirrored: a bearish
+regime turns bullish only after price breaks its frozen external protected high; the
+preceding external low then becomes the bearish-reversal level. If no usable confirmed
+structure exists, trend is unknown. Live/demo scanning, Strategy Lab reconstruction,
+manual backtests, and automatic research campaigns all consume this same protected-
+structure timeline; long backtests merge overlapping swing-detection chunks before the
+timeline is evaluated.
 
-- HH or HL: bullish
-- LH or LL: bearish
-- no usable structure: unknown
-
-The chart displays arrows without verbose swing text, while the structure remains
-stored internally. A reversal-strength condition is recorded when a leg changes from
+Strategy Lab displays every confirmed swing on the currently selected chart timeframe
+as a native candle-anchored HH, HL, LH, or LL marker that remains attached through zoom
+and scroll changes. Switching timeframe redraws the structure from
+that timeframe's own candles rather than projecting another timeframe's labels. Older
+pagination pages merge structure points by candle time so previously loaded labels
+remain attached to their candles while chart history expands. A
+reversal-strength condition is recorded when a leg changes from
 LL to HH or from HH to LL rather than merely continuing the existing structure.
 
 ## Zone construction
@@ -94,7 +171,15 @@ A continuation must:
 
 If several candidates qualify, select the most discounted demand candidate or the
 most premium supply candidate. At most one base and one continuation are retained per
-leg.
+leg. Continuations remain detected and drawn as context for runway and confluence
+calculations, but cannot arm a touch, create a confirmation, receive a trade score, or
+become an entry zone. Only base zones can create trades.
+
+### Retired imbalance-balance-imbalance overlay
+
+The experimental purple IBI overlays are no longer drawn in Strategy Lab. They were
+research-only, never created live/demo entries, and never changed the 20-point score.
+Strategy Lab now displays only the original Goldilocks base and continuation zones.
 
 ## Zone lifecycle
 
@@ -102,16 +187,20 @@ A zone can be fresh, touched, invalidated, or expired.
 
 1. The originating leg must complete before the zone is available.
 2. Once the structural break identifies the zone, scan forward from its M15 base: the first completed M15 candle fully outside is the originating departure and arms touch counting, even when it predates `availableAt`.
-3. Every later completed M15 candle whose wick intersects the zone counts as a qualifying prior touch only while it completes before the first M5 trade-trigger touch.
+3. Purity arms on the first completed M5 candle fully outside the zone after its base. Every later completed M5 candle whose wick enters the zone counts as one qualifying prior touch, provided it completes before the first M5 trade-trigger touch. Consecutive touching M5 candles count individually.
 4. Equality with the proximal boundary counts as a touch.
-5. Penetration depth is stored as a fraction of zone width.
+5. Touch depth has no effect: any intersection with the zone counts as exactly one touch.
 6. The first M5 candle whose wick intersects the zone is frozen as the trade-trigger touch. Later touching M5 candles cannot replace it while the strategy waits for close-through confirmation.
-7. The M15 candle containing that first M5 trigger, and all M15 candles after the trigger, are excluded from prior-touch count and penetration. They belong to the pending trade trigger, not the pre-trigger purity ledger.
+7. The first M5 trigger candle and all later candles are excluded from prior-touch count. They belong to the pending trade trigger, not the pre-trigger purity ledger.
 8. A fourth qualifying touch invalidates the zone; three remains the maximum allowed.
 9. Demand invalidates when a wick trades below its distal low. Supply invalidates when
    a wick trades above its distal high.
 10. A continuation also invalidates if price reaches its same-side base.
-11. An otherwise active zone expires after two calendar years.
+11. An otherwise active zone expires after 30 calendar days. Historical records
+    remain available, but an older base cannot create a new setup.
+12. A zone is rejected when a high-impact event for either pair currency overlaps the
+    interval from its M15 base candle open through the end of its first completed M15
+    departure candle. Missing historical coverage fails closed.
 
 Invalid and expired zones remain historical records but cannot create new entries.
 Charts normally show only the nearest active demand and supply zones, plus historical
@@ -123,8 +212,8 @@ trade replay.
 
 ## Touch and confirmation
 
-M15 owns the first outside candle and prior-touch purity ledger. M5 supplies the first
-trade touch and later confirmation. M1 never creates a setup; it is retained only to resolve
+M15 owns the first outside candle. M5 owns prior-touch purity, the first trade touch,
+and later confirmation. M1 never creates a setup; it is retained only to resolve
 post-entry ordering inside completed M5 candles.
 
 For a demand setup:
@@ -161,30 +250,30 @@ the market order is submitted. This closes the gap between the worker's initial 
 and the quote used to calculate the submitted 2R target. Broker slippage after a market
 order is submitted remains an execution risk.
 
-The available RRR scoring measurement is the distance from entry to the nearest edge
-of the stored opposing zone divided by risk to the selected entry zone's stop. The 2R
-gate and RRR score are related but separate: less than 2R is a hard rejection; larger
-clearance can earn quality points.
+Available reward-to-risk is the distance from entry to the nearest edge of the stored
+opposing zone divided by risk to the selected entry zone's stop. It remains part of the
+2R runway gate and research record, but it awards no quality-score points.
 
 ## Hard gates
 
 All gates must pass before scoring and again where volatility can change the result:
 
-| Gate | Current rule |
-| --- | --- |
-| Market | Forex market open and configured holiday rules allow trading |
-| Weekly close/reopen | Reject entries from Friday 16:00 through Sunday 18:00 America/New_York; this includes the final hour before Friday close and first hour after Sunday reopen |
-| Weekend liquidation | At Friday 16:00 America/New_York, close every managed Goldilocks position and retry broker failures until the 17:00 close |
-| Holiday | Reject during configured holiday windows |
-| Session | At least one currency's local trading session is active |
-| News | Reject high-impact events for either currency from one hour before through one hour after; fail closed if news status is unavailable |
-| Existing trade | Only one open broker trade per pair |
-| Zone | Active, under two years old, no more than three touches, not broken |
-| Confirmation | Latest completed M5 close-through after a distinct M5 touch candle |
-| Entry proximity | First M5 touch range must be no more than 50% of M15 zone width; the M5 close-through and final executable entry must each remain no more than 50% of one zone width beyond the proximal edge |
-| Departure quality | Reject a zone when its wick-extreme M15 departure candle is at least 3x prior ATR(14), has at least a 50% rejection wick against the departure direction, and closes less than one zone width away |
-| Spread | Valid quote and no more than 3 pips |
-| Runway | Clear 2R at confirmation and current executable entry |
+| Gate                | Current rule                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Market              | Forex market open and configured holiday rules allow trading                                                                                                                                                                                                                                                                                                    |
+| Weekly close/reopen | Reject entries from Friday 16:00 through Sunday 18:00 America/New_York; this includes the final hour before Friday close and first hour after Sunday reopen                                                                                                                                                                                                     |
+| Weekend liquidation | At Friday 16:00 America/New_York, close every managed Goldilocks position and retry broker failures until the 17:00 close                                                                                                                                                                                                                                       |
+| Holiday             | Reject during configured holiday windows                                                                                                                                                                                                                                                                                                                        |
+| Session             | At least one currency's local trading session is active                                                                                                                                                                                                                                                                                                         |
+| News                | Reject high-impact events for either currency from one hour before through one hour after; fail closed if news status is unavailable                                                                                                                                                                                                                            |
+| Zone formation news | Reject a zone when either currency's high-impact news window overlaps its M15 base-through-completed-departure interval; fail closed if formation coverage is unavailable                                                                                                                                                                                       |
+| Existing trade      | Only one open broker trade per pair                                                                                                                                                                                                                                                                                                                             |
+| Zone                | Active, no more than 30 calendar days old, no more than three touches, not broken                                                                                                                                                                                                                                                                                |
+| Confirmation        | Latest completed M5 close-through after a distinct M5 touch candle                                                                                                                                                                                                                                                                                              |
+| Entry proximity     | First M5 touch range must be no more than 50% of M15 zone width; the fresh executable ask for BUY or bid for SELL must remain no more than 50% of one zone width beyond the proximal edge. The confirmation close has no separate distance gate. Historical backtests use that close as the modeled executable entry because historical bid/ask is unavailable. |
+| Adverse approach    | Reject when the final three completed M5 candles displace at least 1.5 prior M5 ATR toward the zone, the first-touch candle spans at least 1.5 ATR, and its close penetrates at least 50% of the zone. A touch candle that wicks through but closes back beyond the proximal edge is an absorption reclaim and explicitly passes this gate.                     |
+| Spread              | Valid quote and no more than 3 pips                                                                                                                                                                                                                                                                                                                             |
+| Runway              | Clear 2R at confirmation and current executable entry                                                                                                                                                                                                                                                                                                           |
 
 Gates receive no points. A failed gate prevents scoring and order submission.
 
@@ -193,19 +282,22 @@ Gates receive no points. A failed gate prevents scoring and order submission.
 The default threshold is 14/20. A score below the configured threshold is explicitly
 logged and skipped. Equal to the threshold passes.
 
-| Component | Maximum | Current rule |
-| --- | ---: | --- |
-| H1 range | 0 | Recorded as a diagnostic; zone selection already supplies the range location and it does not add points |
-| H1 trend | 4 | Trade direction aligned with current H1 swing trend |
-| M15 departure quality | 8 | Base compactness: 1 candle = 3, 2 = 2, 3 = 1, 4+ = 0. Immediacy: no lingering in-zone M15 candle before the first outside candle = 2, one = 1, two or more = 0. Sustained close displacement over 2 zone widths = 1. Structural opposite-leg break = 2. |
-| M15 purity | 4 | No prior M15 touch = 4; one prior touch under 50% depth = 2; otherwise 0 |
-| Available RRR | 1 | At least 3R available = 1; below 3R = 0 |
-| Zone inside zone (MTF confluence) | 3 | Same-side overlap: one timeframe = 0; two = 1; all three = 3. Chart label: `ZIZ n/3 · timeframes`. |
+| Component                         | Maximum | Current rule                                                                                                                                                                                                                                            |
+| --------------------------------- | ------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H1 trend                          |       3 | Trade direction aligned with current H1 swing trend                                                                                                                                                                                                     |
+| M15 departure quality             |       4 | Combined M15 formation count: 1 candle = 3, 2 = 2, 3 = 1, 4+ = 0. Sustained close displacement: below 2x = 0, 2x or greater = 0.5, 4x+ = 1. |
+| M5 approach warnings              |       5 | Zero warnings = 5, one = 3, both = 0. The categories are a confirmed liquidity-pool sweep and a fast momentum approach into the zone. Compression is not penalized. |
+| M5 purity                         |       4 | No prior M5 touch candle = 4; one prior touch = 2; otherwise 0                                                                                                                                                                                          |
+| Zone inside zone (MTF confluence) |       4 | Same-side overlap: one timeframe = 0; two = 2; all three = 4. Chart label: `ZIZ n/3 · timeframes`.                                                                                                                                                      |
 
-The departure-quality score deliberately gives five of its eight points to formation
-compactness and immediacy. A one-candle base followed immediately by the first fully
-outside M15 candle earns all five formation points. A lingering candle is any completed
-M15 candle after the selected base candle and before that first outside candle whose
+Score-audit tables distinguish awarded points from the confluence count: for example,
+`ZIZ 2/3` displays as `2 pts (max 4)`, keeping awarded score separate from the
+timeframe confluence count.
+
+The departure-quality score gives three points to formation compactness and one to
+sustained close displacement. A one-candle base followed immediately by the first M15
+candle that closes beyond the zone earns all three compactness points. A lingering candle
+is any completed M15 candle after the selected base candle and before that first close-away candle whose
 wick still overlaps the zone. Too many base or lingering candles therefore carry the
 largest quality penalty. Wick-only excursion never earns the displacement point.
 
@@ -223,11 +315,11 @@ Position size uses current OANDA account equity (NAV), the selected zone stop di
 and a score-derived risk percentage. Scores between the eligible threshold and 20 are
 linearly interpolated:
 
-| Profile | Risk at 14/20 | Risk at 20/20 |
-| --- | ---: | ---: |
-| Easy | 0.10% | 0.25% |
-| Default | 0.25% | 0.50% |
-| Aggressive | 0.50% | 1.00% |
+| Profile    | Risk at 14/20 | Risk at 20/20 |
+| ---------- | ------------: | ------------: |
+| Easy       |         0.10% |         0.25% |
+| Default    |         0.25% |         0.50% |
+| Aggressive |         0.50% |         1.00% |
 
 If the configured minimum score changes, that minimum becomes the lower endpoint of
 the curve. The profile can be changed without restarting workers. Every new trade
@@ -290,27 +382,90 @@ The manual dashboard at `/backtesting` stores a label for every strategy tweak,
 minimum score, lookback, selected pairs, aggregate outcomes, per-pair results, trades,
 and progress events. The detached worker publishes stage-level heartbeats and overall
 progress and can be cancelled from the dashboard without stopping live/demo workers.
-The new-run label is derived from the current strategy version and relevant configured
-research weights, so it advances with those settings instead of retaining a stale
-baseline name. A restored historical run keeps its stored label when prepared for a rerun.
+Its Backtest rule controls are organized into three saved groups: enable/disable
+switches for historically simulated hard gates, editable score-component weights, and
+numeric touch-count, entry-proximity, adverse-approach, departure-shock,
+departure-strength, and available-RRR thresholds. These controls affect backtests only
+and never alter the live/demo worker. Starting a run immediately inserts its queued row into Backtest runs while
+the detached worker starts, and every saved run retains the complete normalized tweak
+snapshot in its configuration JSON. Loading a prior run restores those inputs into
+the editor. Zone-edge stops and exact 2R target placement remain fixed execution
+contracts; disabling the runway gate changes research eligibility only.
+The editor presents score weights as five plain-language categories: trend, departure,
+purity, approach warnings, and zone-inside-zone. They always total exactly 20. Moving
+one category proportionally rebalances the other four; internal
+partial-credit tiers (such as one-touch purity and two-of-three ZIZ) scale
+automatically. The entire controls area is collapsed by default, and hovering or
+focusing any editable card exposes its plain-language explanation.
+Its history shows one clickable row per complete backtest run rather than duplicating a
+run into pair rows. Loading a row restores the saved account, leverage, risk, timeframe,
+score, lookback, and pair configuration together with that run's account projection,
+trades, replay links, and event log. A dedicated run-configuration table and the history
+row's hover/focus details expose the saved tweaks for the selected run.
+The Run column stays compact by showing only the `View tweaks` button; its hover/focus
+details include the long saved label and compact numeric tweak snapshot. The separate
+selected-run tweaks table was removed because it duplicated the active editor.
+The new-run label contains only the selected strategy version and UTC run date
+(`strategy-version · YYYY-MM-DD`). Detailed weights and settings remain in the saved
+run configuration instead of cluttering the label. A restored historical run keeps its
+stored label when prepared for a rerun.
 Dashboard edge reporting is calculated from each trade's final realized R. It leads
 with expectancy per trade and profit factor, and also reports average positive R,
 average absolute loss R, payoff ratio, profitable-trade rate, break-even trades, net R,
 maximum drawdown in R, and longest losing streak. A protected break-even remains a
 reached-1R diagnostic but contributes 0R and is not counted as a profitable trade.
+Profit factor is gross positive R divided by gross negative R: an all-winning sample
+displays infinity, while a run containing only break-even trades (or no realized-R
+trades) displays `No P/L` because the ratio is undefined.
 Pair/tweak rows rank by realized-R expectancy rather than win rate and flag samples
 below 50 trades as early evidence; 100 or more is the preferred initial review size.
 Every stored trade also receives a deterministic `GL-PAIR-YYYYMMDD-HHMM-HASH` ID that
 survives progress rewrites and can be searched globally from the dashboard.
 New backtest and live/demo trade records store zone age as exact seconds from the
 originating M15 base candle to M5 entry eligibility; dashboards display the same value in days.
-Approach pressure is also recorded as a causal research diagnostic. It uses only completed
-M5 candles available by confirmation and keeps four measurements separate: reclaimed
-liquidity sweeps against the later approach, recovery displacement in pre-touch ATRs,
-compression into the M15 zone, and confirmation-candle strength. Supply and demand use
-exactly mirrored definitions. A provisional `adversePressureScore` counts the four research
-flags from zero to four, but neither that count nor any component changes eligibility,
-risk, stops, targets, the minimum threshold, or the 20-point score. New backtest trades
+Approach pressure uses only completed candles available before the first touch. Its
+causal leg begins with the first confirmation-timeframe candle that
+closes away from the zone and ends with the candle immediately before first touch; there
+is no fixed candle-count window. When that span contains more than 500 source candles,
+the same start/end interval is aggregated to the smallest standard higher resolution
+that produces at most 500 candles for whole-leg approach-shape analysis; the warning
+scope never moves. Liquidity sweeps and their required opposite reaction use the same
+confirmation-timeframe candles as approach shape. If the full interval exceeds 500
+candles, both use the same smallest standard higher resolution. At first touch, both
+warning categories are narrowed to the actual return leg: supply starts at the latest
+lowest low between departure and touch, while demand starts at the latest highest high.
+It keeps four measurements separate:
+confirmed liquidity-pool sweeps, reaction displacement in pre-touch confirmation-timeframe ATRs, the whole-leg approach shape, and
+confirmation-candle research fields. Approach shape classifies the return leg as
+tightening compression, orderly approach, momentum drive, or mixed/unclear.
+The leg is directional when at least half its candles close toward the zone or at
+least half its successive adverse edges step toward the zone. Tightening compression
+requires that directional condition plus a composite score of at least 60%: range
+contraction contributes 30%, body contraction 20%, adjacent-candle overlap 25%, low
+net-progress efficiency 15%, and directional consistency 10%. Compression is descriptive
+only. Fast approach uses a simpler per-candle rule: an attacking confirmation-timeframe
+candle must close toward the zone, have a body at least 1.2 times its prior ATR(14),
+and have that body occupy at least 60% of its full range. Two such candles anywhere
+on the return leg create the warning; one candle is enough when its body reaches
+2 ATR. Each qualifying candle is marked `FAST ATTACK` on replay charts. A directional
+return without those impulses is orderly and earns no warning; a non-directional return
+is mixed/unclear and also earns no warning. A pre-touch
+liquidity sweep is a complete three-stage pattern on the confirmation timeframe. First,
+at least four contiguous candles must form a sideways liquidity pool: their adverse
+edges stay within 0.25 local ATR, their total range stays within 1.5 ATR, close drift
+stays within 0.75 ATR, and adjacent candles retain meaningful range overlap. Second,
+a later candle must wick strictly through the shared adverse edge and close back
+inside it. Third, that candle or a later pre-touch candle must react at least one local
+ATR in the opposite direction and close through the pool midpoint. Demand uses the
+upside mirror and supply uses the downside definition. A breach without the pool or
+without the completed opposite reaction is not a sweep. The breach and reaction are
+one combined warning, never two separate deductions. Only sweep candles at or after
+the return-leg extreme can qualify; earlier departure-side sweeps are ignored. Pool
+context immediately before that extreme may still establish a sweep occurring exactly
+at the turn. The detector does not use a fixed lookback count. One or more completed patterns
+create one warning category; additional markers do not stack score deductions. The
+`adversePressureScore` counts the two adverse warning
+categories from zero to two and drives the five-point approach-warning score. New backtest trades
 persist the structured measurement; live/demo workers emit `approach_pressure_measured`
 and retain the same object in the trade journal. Existing records display `Legacy`.
 New runs also persist a causal M5/M15/H1 supply-demand corridor snapshot and a shared
@@ -326,22 +481,28 @@ Long replay ranges are split into bounded OANDA requests so a delayed stored exi
 not exceed the broker's per-request candle limit.
 Stored-trade replays begin before the recorded M15 zone base and initially frame that
 source candle together with the entry and exit, even when the first touch occurs months later.
+Switching to a different stored trade clears the previous replay's visible-time-range
+memory before framing the new zone base, entry, and exit, so its selected trade zone and
+trade markers cannot remain off-screen in the prior trade's viewport.
 When the replay also projects contextual M15 zones onto M5, M15, or H1, its visible
 start expands to include the earliest displayed zone's originating base candle. A zone
 must not be clamped to the first chart candle and appear as a floating rectangle without
-its price source. The selected entry zone is labeled `HISTORY TRADE ZONE`; other zones
-drawn from the same historical snapshot are labeled `HISTORY CONTEXT ZONE`. The selected
-trade zone's ZIZ count comes from its stored entry-time backtest score, because a bounded
+its price source. The selected entry zone is labeled `HISTORY TRADE ZONE`; the retained
+opposing zone remains intentionally unlabeled to reduce chart noise. The selected trade
+zone's ZIZ count comes from its stored entry-time backtest score, because a bounded
 visual replay may not contain the older source zones needed to reconstruct that count.
 
 Historical simulation currently:
 
-- Uses archived H1/M15/M5 signal candles and M1 post-entry execution candles
+- Uses the selected profile's archived trend/zone/confirmation candles and its
+  configured post-entry resolution; the M15/M5/M1 profile uses M1 for both
+  confirmation and the lowest available outcome resolution
 - Reconstructs zones without future eligibility at the setup timestamp
 - Applies zone validity, close-through confirmation, 2R runway, scoring, and one open
   simulated trade per pair
 - Freezes the first M5 zone overlap as the trigger, excludes its containing M15 candle
-  from prior-touch purity, and applies the 50%-of-zone-width entry-proximity gate
+  from prior-touch purity, and applies the 50%-of-zone-width touch-range and modeled
+  executable-entry proximity gates
 - Applies the DST-aware weekly entry blackout and closes unresolved simulated trades
   at the first M1 open at or after Friday 16:00 America/New_York
 - Applies the shared DST-aware pair-session helper at historical entry eligibility;
@@ -355,7 +516,8 @@ Historical simulation currently:
 - Imports Forex Factory high-impact calendar events into SQLite with their original
   currency, source-local date/time, exact UTC timestamp, and inclusive one-hour block
   window on each side. A confirmed setup for either currency in the pair is rejected
-  inside that window. Missing calendar coverage fails closed instead of being treated
+  inside that window. A zone whose M15 base-through-departure formation interval overlaps
+  that window is also rejected. Missing calendar coverage fails closed instead of being treated
   as a news-free day.
 - Tracks the trade beyond +1R and stores one final realized-R result for money simulation
 - Fails closed when the first available M1 execution candle is more than 60 seconds
@@ -381,8 +543,12 @@ and abandoned runs to reduce selection bias.
 ## Automatic research campaigns
 
 The Backtesting dashboard can start a detached, resumable research campaign stored in
-`data/goldilocks-research.sqlite`. The initial search enumerates minimum scores 10-18
-for both timeframe profiles and records all 22 management-policy outcomes
+`data/goldilocks-research.sqlite`. The default bounded search evaluates score cutoffs
+10, 12, 14, 16, and 18 across all three timeframe profiles and eight interpretable
+strategy families: baseline, freshness-first, structure-first, confluence/runway-first,
+balanced context, and isolated session, entry-proximity, and adverse-approach gate
+ablations. Core market-hours, holiday, news, and 2R-runway safety gates stay enabled
+in every family. This produces 120 trials and records all 22 management-policy outcomes
 for every stored trade. Each unique configuration and dataset manifest is hashed, so
 an interrupted worker can resume without treating an identical trial as new evidence.
 
@@ -397,22 +563,25 @@ campaign queue from the currently active deterministic backtest. It reports work
 process health, campaign and backtest progress, the latest heartbeat and stage, candle
 storage, completed-trial leaders, and recent research events. It can start, pause,
 resume, or stop a campaign, but it cannot change live/demo risk or strategy settings.
+Historical scans pre-index each zone's first completed outside candle once and then
+advance causally through confirmation candles. They must not rescan the complete zone
+timeframe archive for every active-zone/confirmation-candle combination.
 
 ## Code map
 
-| Area | Primary files |
-| --- | --- |
-| Strategy configuration | `utils/goldilocksConfig.ts` |
-| Zone lifecycle and runway | `utils/goldilocksStrategy.ts` |
-| Swing conversion, trend, range, confluence | `utils/goldilocksScanner.ts` |
-| 20-point calculation | `utils/goldilocksScoring.ts` |
-| Live/demo orchestration | `workers/goldilocksWorker.ts`, `runner/startRunner.ts`, `runner/strategyRunner.ts` |
-| Spread/session/news/market gates | `utils/spreadGuard.ts`, `utils/sessionUtils.ts`, `utils/newsGuard.ts`, `utils/marketCloseGuard.ts` |
-| Position sizing and broker order | `utils/placeTrade.ts`, `utils/oanda/api/` |
-| Persistent logs and trades | `utils/automationLogger.ts`, `utils/automationStore.ts`, `utils/tradeHistory.ts` |
-| Historical simulation | `utils/goldilocksBacktest.ts`, `utils/backtestRunner.ts`, `utils/backtestStore.ts`, `workers/backtestWorker.ts` |
-| Dashboards | `pages/automation.tsx`, `pages/strategy-lab.tsx`, `pages/backtesting.tsx`, `pages/research.tsx` |
-| Regression specification | `tests/goldilocksStrategy.test.ts` |
+| Area                                       | Primary files                                                                                                   |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Strategy configuration                     | `utils/goldilocksConfig.ts`                                                                                     |
+| Zone lifecycle and runway                  | `utils/goldilocksStrategy.ts`                                                                                   |
+| Swing conversion, trend, range, confluence | `utils/goldilocksScanner.ts`                                                                                    |
+| 20-point calculation                       | `utils/goldilocksScoring.ts`                                                                                    |
+| Live/demo orchestration                    | `workers/goldilocksWorker.ts`, `runner/startRunner.ts`, `runner/strategyRunner.ts`                              |
+| Spread/session/news/market gates           | `utils/spreadGuard.ts`, `utils/sessionUtils.ts`, `utils/newsGuard.ts`, `utils/marketCloseGuard.ts`              |
+| Position sizing and broker order           | `utils/placeTrade.ts`, `utils/oanda/api/`                                                                       |
+| Persistent logs and trades                 | `utils/automationLogger.ts`, `utils/automationStore.ts`, `utils/tradeHistory.ts`                                |
+| Historical simulation                      | `utils/goldilocksBacktest.ts`, `utils/backtestRunner.ts`, `utils/backtestStore.ts`, `workers/backtestWorker.ts` |
+| Dashboards                                 | `pages/automation.tsx`, `pages/strategy-lab.tsx`, `pages/backtesting.tsx`, `pages/research.tsx`                 |
+| Regression specification                   | `tests/goldilocksStrategy.test.ts`                                                                              |
 
 ## Safe change procedure
 

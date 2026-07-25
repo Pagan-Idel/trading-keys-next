@@ -6,8 +6,9 @@ import { modifyTrade } from '../utils/oanda/api/modifyTrade.ts';
 import { closeTrade } from '../utils/oanda/api/closeTrade.ts';
 import { ACTION } from '../utils/oanda/api/order.ts';
 import { placeTrade } from '../utils/placeTrade.ts';
-import { annotateConfluenceAt, buildGoldilocksHistory, buildGoldilocksHistoryChunked, findFreshGoldilocksConfirmations, getGoldilocksRangeAssessment, getGoldilocksTrend, toStrategyCandles } from '../utils/goldilocksScanner.ts';
-import { validateFinalEntryAfterEngulf, validateGoldilocksDepartureQuality, validateGoldilocksEntryProximity, validateGoldilocksFinalExecutableEntry } from '../utils/goldilocksStrategy.ts';
+import { annotateConfluenceAt, buildGoldilocksHistory, buildGoldilocksHistoryChunked, findFreshGoldilocksConfirmations, getGoldilocksTrend, toStrategyCandles } from '../utils/goldilocksScanner.ts';
+import { getGoldilocksZoneFormationWindow, validateFinalEntryAfterEngulf, validateGoldilocksDepartureQuality, validateGoldilocksEntryProximity, validateGoldilocksFinalExecutableEntry } from '../utils/goldilocksStrategy.ts';
+import { getHistoricalNewsGateForRange } from '../utils/historicalNewsStore.ts';
 import { evaluateSpread } from '../utils/spreadGuard.ts';
 import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 import { isInHighImpactNewsWindow, getActiveNewsEvent, getNewsGuardError } from '../utils/newsGuard.ts';
@@ -360,7 +361,6 @@ const loadScoringContext = async (zone: Parameters<typeof annotateConfluenceAt>[
   return {
     zone: annotateConfluenceAt(zone, ZONE_TIMEFRAME, time, snapshots),
     trend: getGoldilocksTrend(trendCandles.slice(-5_000), time),
-    rangeAssessment:getGoldilocksRangeAssessment(trendCandles.slice(-5_000),time,entry,direction),
     zoneCorridors:snapshots.map(snapshot=>measureZoneCorridor({pair,timeframe:snapshot.timeframe,measuredAt:time+CONFIRMATION_SECONDS,entry,stopLoss,takeProfit,zones:snapshot.history.zones,candles:snapshot.strategyCandles})),
   };
 };
@@ -417,6 +417,14 @@ const scan = async () => {
         departureQuality:departureQuality.quality,
       }, {pair,level:'warn',fileName:'goldilocksWorker',step:'departure_quality_rejected'});
       updateWorkerStatus(pair,'waiting','departure_quality_rejected',departureQuality.reason,mode);
+      continue;
+    }
+    const formationWindow=getGoldilocksZoneFormationWindow(confirmation.zone,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME]);
+    const formationNewsGate=getHistoricalNewsGateForRange(pair,formationWindow.start,formationWindow.end);
+    if(!formationNewsGate.allowed){
+      attemptedConfirmations.add(key);
+      logMessage(`ZONE FORMATION NEWS REJECTED · ${pair} · ${formationNewsGate.reason}`,{zoneId:confirmation.zone.id,formationWindow,event:formationNewsGate.event},{pair,level:'warn',fileName:'goldilocksWorker',step:'zone_formation_news_rejected'});
+      updateWorkerStatus(pair,'waiting','zone_formation_news_rejected',formationNewsGate.reason,mode);
       continue;
     }
     if (!confirmation.proximity.allowed) {
@@ -478,7 +486,12 @@ const scan = async () => {
     const touchIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.touchCandle.time);
     const confirmationIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.confirmationCandle.time);
     const approachPressure=touchIndex>=0&&confirmationIndex>touchIndex
-      ?measureGoldilocksApproachPressure(scoringContext.zone,confirmationCandles,touchIndex,confirmationIndex)
+      ?measureGoldilocksApproachPressure(
+        scoringContext.zone,
+        confirmationCandles,
+        touchIndex,
+        confirmationIndex,
+      )
       :undefined;
     const score = scoreGoldilocksSetup({
       zone: scoringContext.zone,
@@ -486,26 +499,24 @@ const scan = async () => {
       trend: scoringContext.trend,
       minimumScore,
       purityTouches:confirmation.priorTouches,
-      purityMaxPenetration:confirmation.priorMaxPenetration,
-      availableRewardRisk:finalCheck.availableRatio,
-      rangeAssessment:scoringContext.rangeAssessment,
+      adverseWarningCount:approachPressure?.adversePressureScore??0,
       gates: [
         { name: 'Zone validity', passed: true, reason: 'Zone is active, unbroken, unexpired, and within the touch limit.' },
         { name: 'Confirmation freshness', passed: true, reason: `${CONFIRMATION_TIMEFRAME} confirmation is the latest completed candle.` },
         { name: 'Entry proximity', passed: true, reason: liveProximity.reason },
-        { name: 'Departure quality', passed: true, reason: departureQuality.reason },
+        { name: 'Zone formation news', passed: true, reason: formationNewsGate.reason },
         { name: '2:1 runway', passed: true, reason: finalCheck.reason },
         { name: 'Spread', passed: true, reason: spread.reason },
         { name: 'Session and news', passed: true, reason: 'Session is active and no news/market safety window is blocking.' },
         { name: 'One trade per pair', passed: true, reason: 'Broker confirms no open trade for this pair.' },
       ],
     });
-    logMessage(`PURITY CHECK · ${pair} · ${scoringContext.zone.touches} qualifying retouch(es) · deepest penetration ${(scoringContext.zone.maxPenetration*100).toFixed(1)}%.`, { zoneId:scoringContext.zone.id,touches:scoringContext.zone.touches,maxPenetration:scoringContext.zone.maxPenetration }, { pair, fileName:'goldilocksWorker', step:'purity_measured' });
+    logMessage(`PURITY CHECK · ${pair} · ${scoringContext.zone.touches} qualifying prior touch candle(s).`, { zoneId:scoringContext.zone.id,touches:scoringContext.zone.touches }, { pair, fileName:'goldilocksWorker', step:'purity_measured' });
     logMessage(`ZONE AGE · ${pair} · ${formatGoldilocksZoneAge(zoneAgeSeconds)} from M15 base to entry eligibility.`, { zoneId:scoringContext.zone.id,zoneCandleTime:scoringContext.zone.candleTime,confirmationTime:confirmation.confirmationCandle.time,entryEligibilityTime,zoneAgeSeconds,zoneAgeDays:getGoldilocksZoneAgeDays(zoneAgeSeconds) }, { pair, fileName:'goldilocksWorker', step:'zone_age_measured' });
     logMessage(`AVAILABLE RRR · ${pair} · ${Number.isFinite(finalCheck.availableRatio)?finalCheck.availableRatio.toFixed(2):'unlimited'}R before the stored opposing zone.`, { zoneId:scoringContext.zone.id,availableReward:finalCheck.availableReward,availableRatio:finalCheck.availableRatio,entry:finalCheck.entry,stopLoss:finalCheck.stopLoss }, { pair, fileName:'goldilocksWorker', step:'available_rrr_measured' });
     logMessage(`POINT CHECK · ${pair} scored ${score.total}/${score.minimumScore} · ZIZ ${scoringContext.zone.timeframeConfluence?.timeframeCount ?? 1}/3 · ${TREND_TIMEFRAME} trend ${scoringContext.trend}.`, score, { pair, fileName: 'goldilocksWorker', step: 'score_complete' });
     if(approachPressure)logMessage(
-      `APPROACH PRESSURE · ${pair} · ${approachPressure.adversePressureScore}/4 adverse signals · ${approachPressure.adversePressureFlags.join(', ')||'none'}.`,
+      `APPROACH PRESSURE · ${pair} · ${approachPressure.adversePressureScore}/2 adverse signals · confirmation ${approachPressure.weakConfirmation?'FAIL':'PASS'} at ${(approachPressure.confirmationStrengthScore*100).toFixed(1)}% · ${approachPressure.adversePressureFlags.join(', ')||'none'}.`,
       {zoneId:scoringContext.zone.id,touchTime:confirmation.touchCandle.time,confirmationTime:confirmation.confirmationCandle.time,approachPressure},
       {pair,fileName:'goldilocksWorker',step:'approach_pressure_measured'},
     );

@@ -29,12 +29,12 @@ strategy guide and should be treated as the executable specification.
 
 ## Main screens
 
-| Route | Purpose |
-| --- | --- |
-| `/` | Trading keyboard and lazily loaded automation candylog |
-| `/automation` | Worker state, active trades, structured logs, and trade history |
-| `/strategy-lab` | Goldilocks zones, swing markers, trend, and historical 2R drawings |
-| `/backtesting` | Manual research runs, tweak history, per-pair results, and trades |
+| Route           | Purpose                                                                        |
+| --------------- | ------------------------------------------------------------------------------ |
+| `/`             | Trading keyboard and lazily loaded automation candylog                         |
+| `/automation`   | Worker state, active trades, structured logs, and trade history                |
+| `/strategy-lab` | Focused historical trade replay opened from a recorded trade's View chart link |
+| `/backtesting`  | Manual research runs, tweak history, per-pair results, and trades              |
 
 The development server listens on `http://localhost:4000`.
 
@@ -86,10 +86,10 @@ can cancel the active worker without stopping the dashboard or trading automatio
 
 ## Runtime configuration
 
-| Variable | Default | Meaning |
-| --- | ---: | --- |
-| `GOLDILOCKS_MIN_SCORE` | `14` | Minimum score from 0 through 20; lower setups are logged and skipped |
-| `GOLDILOCKS_RISK_PERCENT` | `0.25` | Percent risk per order; code clamps it to a maximum of 1% |
+| Variable                  | Default | Meaning                                                              |
+| ------------------------- | ------: | -------------------------------------------------------------------- |
+| `GOLDILOCKS_MIN_SCORE`    |    `14` | Minimum score from 0 through 20; lower setups are logged and skipped |
+| `GOLDILOCKS_RISK_PERCENT` |  `0.25` | Percent risk per order; code clamps it to a maximum of 1%            |
 
 Hard risk and execution gates remain independent from scoring. Raising a score does
 not bypass spread, session, news, zone, runway, freshness, or one-trade-per-pair rules.

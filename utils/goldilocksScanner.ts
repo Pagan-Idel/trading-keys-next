@@ -1,11 +1,14 @@
 import type { Candle } from './swingLabeler.ts';
 import { GOLDILOCKS_DEMO_TIMEFRAMES } from './goldilocksConfig.ts';
-import { determineSwingPoints } from './swingLabeler.ts';
+import { getGoldilocksZoneExpiresAt } from './zoneAge.ts';
+import { determineSwingPoints, type SwingResult } from './swingLabeler.ts';
 import {
   annotateTimeframeConfluence,
   detectGoldilocksZoneHistory,
   summarizeZoneTimeframeTouches,
+  summarizeConfirmationTimeframeTouches,
   validateGoldilocksEntryProximity,
+  validateGoldilocksZoneApproach,
   type GoldilocksEntryProximityCheck,
   type GoldilocksDirection,
   type GoldilocksZone,
@@ -16,30 +19,74 @@ import {
 
 export type GoldilocksTrend = 'bullish' | 'bearish' | 'unknown';
 
-export interface GoldilocksRangeAssessment {
-  aligned: boolean | null;
-  low?: number;
-  high?: number;
-  midpoint?: number;
-  detail: string;
-}
+export const buildProtectedStructureTrendTimeline = (candles:Candle[], swings:SwingResult[]):GoldilocksTrend[] => {
+  const timeline:GoldilocksTrend[]=candles.map(()=>'unknown');
+  const structure=swings
+    .filter(swing=>['H','L','HH','HL','LH','LL'].includes(swing.swing))
+    .sort((left,right)=>left.candleIndex-right.candleIndex);
+  const firstMajorIndex=structure.findIndex(swing=>swing.swing==='HH'||swing.swing==='LL');
+  if(firstMajorIndex<0)return timeline;
+  const firstMajor=structure[firstMajorIndex];
+  let trend:GoldilocksTrend=firstMajor.swing==='HH'?'bullish':'bearish';
+  let externalHigh=firstMajor.swing==='HH'?firstMajor.price:Number.NEGATIVE_INFINITY;
+  let externalLow=firstMajor.swing==='LL'?firstMajor.price:Number.POSITIVE_INFINITY;
+  let protectedLow=trend==='bullish'
+    ? structure.slice(0,firstMajorIndex).filter(swing=>swing.swing==='L'||swing.swing==='HL'||swing.swing==='LL').at(-1)?.price
+    : undefined;
+  let protectedHigh=trend==='bearish'
+    ? structure.slice(0,firstMajorIndex).filter(swing=>swing.swing==='H'||swing.swing==='LH'||swing.swing==='HH').at(-1)?.price
+    : undefined;
+  const swingsByIndex=new Map<number,SwingResult[]>();
+  for(const swing of structure.slice(firstMajorIndex)){
+    const entries=swingsByIndex.get(swing.candleIndex)??[];
+    entries.push(swing);
+    swingsByIndex.set(swing.candleIndex,entries);
+  }
+  for(let index=firstMajor.candleIndex;index<candles.length;index+=1){
+    for(const swing of swingsByIndex.get(index)??[]){
+      if(trend==='bullish'){
+        if(swing.swing==='HH')externalHigh=Math.max(externalHigh,swing.price);
+        if(swing.swing==='HL')protectedLow=swing.price;
+      }else{
+        if(swing.swing==='LL')externalLow=Math.min(externalLow,swing.price);
+      }
+    }
+    const candle=candles[index];
+    if(trend==='bullish'&&protectedLow!==undefined&&candle.low<protectedLow){
+      trend='bearish';
+      protectedHigh=Number.isFinite(externalHigh)?externalHigh:candle.high;
+      externalLow=candle.low;
+      protectedLow=undefined;
+      timeline[index]=trend;
+      continue;
+    }
+    if(trend==='bearish'){
+      externalLow=Math.min(externalLow,candle.low);
+      if(protectedHigh!==undefined&&candle.high>protectedHigh){
+        trend='bullish';
+        protectedLow=Number.isFinite(externalLow)?externalLow:candle.low;
+        externalHigh=candle.high;
+        protectedHigh=undefined;
+      }
+    }
+    timeline[index]=trend;
+  }
+  return timeline;
+};
+
+export const getProtectedStructureTrend = (candles:Candle[], swings:SwingResult[]):GoldilocksTrend => {
+  return buildProtectedStructureTrendTimeline(candles,swings).at(-1)??'unknown';
+};
 
 export const getGoldilocksTrend = (candles: Candle[], atTime = Number.POSITIVE_INFINITY): GoldilocksTrend => {
   const available = candles.filter(candle => new Date(candle.time).getTime() / 1000 <= atTime);
-  const latest = determineSwingPoints(available).filter(swing => ['HH', 'HL', 'LH', 'LL'].includes(swing.swing)).at(-1);
-  return latest?.swing === 'HH' || latest?.swing === 'HL'
-    ? 'bullish'
-    : latest?.swing === 'LH' || latest?.swing === 'LL'
-      ? 'bearish'
-      : 'unknown';
+  return getProtectedStructureTrend(available,determineSwingPoints(available));
 };
 
 export const zoneUsableAt = (zone: GoldilocksZone, time: number) => {
-  const expiry = new Date(zone.candleTime * 1000);
-  expiry.setUTCFullYear(expiry.getUTCFullYear() + 2);
   return (zone.availableAt ?? zone.candleTime) <= time
     && (!zone.invalidatedAt || zone.invalidatedAt > time)
-    && time <= expiry.getTime() / 1000;
+    && time <= getGoldilocksZoneExpiresAt(zone.candleTime);
 };
 
 export const annotateConfluenceAt = (
@@ -103,24 +150,6 @@ export const buildGoldilocksLegs = (candles: Candle[]): SwingLeg[] => {
   return legs;
 };
 
-export const getGoldilocksRangeAssessment = (
-  candles: Candle[],
-  atTime: number,
-  entry: number,
-  tradeDirection: 'BUY'|'SELL',
-):GoldilocksRangeAssessment=>{
-  const known=candles.filter(candle=>Math.floor(new Date(candle.time).getTime()/1000)<=atTime);
-  const legs=buildGoldilocksLegs(known);
-  const leg=legs.at(-1);
-  if(!leg)return {aligned:null,detail:`No completed ${GOLDILOCKS_DEMO_TIMEFRAMES.trend} swing range was available.`};
-  const rangeCandles=known.slice(leg.startIndex,leg.endIndex+1);
-  const low=Math.min(...rangeCandles.map(candle=>candle.low));
-  const high=Math.max(...rangeCandles.map(candle=>candle.high));
-  const midpoint=low+(high-low)/2;
-  const aligned=tradeDirection==='BUY'?entry<=midpoint:entry>=midpoint;
-  return {aligned,low,high,midpoint,detail:`${tradeDirection} entry ${entry} is ${aligned?'in the correct':'in the opposite'} half of ${GOLDILOCKS_DEMO_TIMEFRAMES.trend} range ${low}-${high} (midpoint ${midpoint}).`};
-};
-
 export const buildGoldilocksHistory = (candles: Candle[], options: { trackTouches?: boolean } = {}): {
   candles: StrategyCandle[];
   legs: SwingLeg[];
@@ -170,7 +199,6 @@ export const buildGoldilocksHistoryChunked = (
     zone.invalidatedAt = undefined;
     zone.expiredAt = undefined;
     zone.maxPenetration = 0;
-    zone.touchPenetrations = [];
   }
   for (let candleIndex = 0; candleIndex < strategyCandles.length; candleIndex += 1) {
     const candle = strategyCandles[candleIndex];
@@ -180,9 +208,7 @@ export const buildGoldilocksHistoryChunked = (
       pendingIndex += 1;
     }
     for (const zone of active) {
-      const expires = new Date(zone.candleTime * 1000);
-      expires.setUTCFullYear(expires.getUTCFullYear() + 2);
-      if (candle.time > expires.getTime() / 1000) {
+      if (candle.time > getGoldilocksZoneExpiresAt(zone.candleTime)) {
         zone.state = 'expired';
         zone.expiredAt = candle.time;
         active.delete(zone);
@@ -205,11 +231,6 @@ export const buildGoldilocksHistoryChunked = (
         zone.state = 'touched';
         zone.touches += 1;
         zone.firstTouchIndex ??= candleIndex;
-        const penetration = zone.side === 'demand'
-          ? (zone.high - candle.low) / zone.width
-          : (candle.high - zone.low) / zone.width;
-        zone.maxPenetration = Math.max(zone.maxPenetration, Math.max(0, penetration));
-        zone.touchPenetrations?.push(Math.max(0, penetration));
         if (zone.touches > 3) {
           zone.state = 'invalidated';
           zone.invalidatedAt = candle.time;
@@ -230,7 +251,6 @@ export interface FreshGoldilocksConfirmation {
   touchCandle: StrategyCandle;
   confirmationCandle: StrategyCandle;
   priorTouches: number;
-  priorMaxPenetration: number;
   proximity: GoldilocksEntryProximityCheck;
 }
 
@@ -251,30 +271,32 @@ export const findFreshGoldilocksConfirmations = (
   // A completed candle remains actionable only until the next candle completes.
   if (nowMs >= (confirmationCandle.time + confirmationSeconds * 2) * 1000) return [];
 
-  return history.activeZones.flatMap((zone) => {
+  return history.activeZones.filter((zone)=>zone.kind==="base").flatMap((zone) => {
     if ((zone.availableAt ?? zone.candleTime) >= confirmationCandle.time) return [];
     const armed=summarizeZoneTimeframeTouches(zone,zoneCandles,zoneSeconds,confirmationCandle.time);
     if(armed.firstOutsideTime===undefined)return [];
     let touchCandle:StrategyCandle|undefined;
+    let touchIndex=-1;
     for (let index=0;index<candles.length;index+=1) {
       const candle=candles[index];
       if (candle.time < armed.firstOutsideTime || candle.time >= confirmationCandle.time) continue;
       if (breaks(zone, candle)) {touchCandle=undefined;break}
-      if(!touchCandle&&candle.high>=zone.low&&candle.low<=zone.high)touchCandle=candle;
+      if(!touchCandle&&candle.high>=zone.low&&candle.low<=zone.high){touchCandle=candle;touchIndex=index}
     }
     if (!touchCandle || breaks(zone, confirmationCandle)) return [];
-    const purity=summarizeZoneTimeframeTouches(zone,zoneCandles,zoneSeconds,touchCandle.time);
+    const purity=summarizeConfirmationTimeframeTouches(zone,candles,confirmationSeconds,touchCandle.time);
     if(purity.invalidated)return [];
     const direction: GoldilocksDirection = zone.side === 'demand' ? 'bullish' : 'bearish';
     const confirmed = direction === 'bullish'
       ? confirmationCandle.close > confirmationCandle.open && confirmationCandle.close > touchCandle.high
       : confirmationCandle.close < confirmationCandle.open && confirmationCandle.close < touchCandle.low;
     const proximity=validateGoldilocksEntryProximity(zone,touchCandle,confirmationCandle.close);
+    const approachGate=validateGoldilocksZoneApproach(zone,candles,touchIndex);
+    if(!approachGate.allowed){proximity.allowed=false;proximity.reason=approachGate.reason}
     return confirmed ? [{
-      zone:{...zone,touches:purity.touches,maxPenetration:purity.maxPenetration,departureInsideCandleCount:purity.departureInsideCandleCount},
+      zone:{...zone,touches:purity.touches,maxPenetration:0},
       direction,firstOutsideTime:purity.firstOutsideTime!,touchCandle,confirmationCandle,
       priorTouches:purity.touches,
-      priorMaxPenetration:purity.maxPenetration,
       proximity,
     }] : [];
   }).sort((a, b) => b.zone.candleTime - a.zone.candleTime);

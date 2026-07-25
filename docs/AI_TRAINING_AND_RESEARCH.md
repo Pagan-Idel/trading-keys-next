@@ -91,15 +91,16 @@ exporter should include:
 - Zone ID, side, kind, age in exact seconds from the originating M15 base to M5 entry eligibility, width, ATR ratio, leg ratio, and prior touches
 - Departure candle range/ATR, body and rejection-wick fractions, close-based and
   wick-based displacement multiples, and M1 concentration when available
-- Every penetration depth observed before the trigger
+- Every qualifying prior-touch candle observed before the trigger
 - Trend, range half, base candle count, M15 candles lingering inside the zone before
   the first outside candle, sustained close-departure multiple, and structural reversal flag
 - MTF confluence relationships
 - Available opposing-zone distance and RRR
-- Pre-touch M5 approach-pressure fields: liquidity-sweep count/time/depth, recovery
+- Pre-touch confirmation-timeframe approach-pressure fields measured from the latest
+  opposite extreme back toward the zone: liquidity-sweep count/time/depth, reaction
   displacement in causal ATRs, directional step/close fractions, progress in zone widths,
   compression score, confirmation body/close-through/rejection-wick fractions, confirmation
-  strength, and the provisional zero-to-four adverse flag count
+  strength, and the zero-to-two adverse warning-category count
 - Every hard gate and its reason
 - Score component vector, total, and configured threshold
 - Executable bid/ask spread where available
@@ -146,6 +147,10 @@ rows expose all policies side by side instead of hiding that mismatch.
 - Version every strategy change and retain failed experiments.
 - Treat the D1/H4/H1 profile as a separate strategy version; never merge its rows with
   H1/M15/M5 as though the setup detector were unchanged.
+- Treat M15/M5/M1 as its own `m15-m5-m1-research-v3` strategy version as well.
+  Its confirmation and execution-resolution inputs are both M1, but simulation begins
+  only after the confirming M1 candle completes; never reuse that completed candle's
+  range as post-entry evidence.
 
 ## Metrics
 

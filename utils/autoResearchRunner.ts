@@ -5,7 +5,15 @@ import { calculateBacktestPerformance } from './backtestAnalytics.ts';
 import { BACKTEST_CANDLE_LIMITS, cancelBacktest, executeBacktestInline, normalizeBacktestConfig } from './backtestRunner.ts';
 import { getActiveBacktestRun, getBacktestDashboard, getBacktestRuntime, getBacktestTrainingData, type BacktestRunConfig } from './backtestStore.ts';
 import { checkpointCandleArchive, getCandleArchiveStorageUsage, getCandleArchiveSummary } from './candleArchive.ts';
-import { GOLDILOCKS_RESEARCH_VERSION, GOLDILOCKS_TIMEFRAME_SECONDS, getGoldilocksTimeframeProfile, type GoldilocksTimeframeProfileId } from './goldilocksConfig.ts';
+import {
+  GOLDILOCKS_RESEARCH_VERSION,
+  GOLDILOCKS_TIMEFRAME_SECONDS,
+  expandGoldilocksScoreCategoryWeights,
+  getGoldilocksTimeframeProfile,
+  normalizeGoldilocksBacktestGates,
+  type GoldilocksScoreCategoryWeights,
+  type GoldilocksTimeframeProfileId,
+} from './goldilocksConfig.ts';
 import { buildGoldilocksResearchManifest } from './goldilocksResearchManifest.ts';
 import { fetchCandleHistory } from './oanda/api/fetchCandleHistory.ts';
 import {
@@ -29,19 +37,43 @@ const archiveDatasetKey=(datasetEndTime?:number)=>{
   return `${new Date(latest*1000).toISOString().replace(/[:.]/g,'-')}-${digest}`;
 };
 
+interface AutoResearchStrategyFamily {
+  id:string;
+  label:string;
+  scoreCategories:GoldilocksScoreCategoryWeights;
+  disabledGate?:'pairSession'|'entryProximity'|'adverseApproach';
+}
+
+export const AUTO_RESEARCH_STRATEGY_FAMILIES:AutoResearchStrategyFamily[]=[
+  {id:'baseline',label:'Baseline',scoreCategories:{trend:3,departure:4,approachWarnings:5,purity:4,zoneInsideZone:4}},
+  {id:'freshness',label:'Freshness first',scoreCategories:{trend:2,departure:3,approachWarnings:4,purity:7,zoneInsideZone:4}},
+  {id:'structure',label:'Structure first',scoreCategories:{trend:4,departure:5,approachWarnings:5,purity:2,zoneInsideZone:4}},
+  {id:'confluence-runway',label:'Confluence and approach',scoreCategories:{trend:2,departure:2,approachWarnings:6,purity:3,zoneInsideZone:7}},
+  {id:'balanced-context',label:'Balanced context',scoreCategories:{trend:4,departure:4,approachWarnings:6,purity:3,zoneInsideZone:3}},
+  {id:'session-ablation',label:'Research: session gate off',scoreCategories:{trend:3,departure:4,approachWarnings:5,purity:4,zoneInsideZone:4},disabledGate:'pairSession'},
+  {id:'proximity-ablation',label:'Research: proximity gate off',scoreCategories:{trend:3,departure:4,approachWarnings:5,purity:4,zoneInsideZone:4},disabledGate:'entryProximity'},
+  {id:'approach-ablation',label:'Research: adverse approach gate off',scoreCategories:{trend:3,departure:4,approachWarnings:5,purity:4,zoneInsideZone:4},disabledGate:'adverseApproach'},
+];
+
 export const buildAutoResearchConfigurations=(input:StartAutoResearchInput={}):BacktestRunConfig[]=>{
   const pairs=[...new Set((input.pairs??forexPairs).filter(pair=>forexPairs.includes(pair)))];
   if(!pairs.length)throw new Error('Auto research requires at least one supported pair.');
-  const profiles:GoldilocksTimeframeProfileId[]=[...new Set(input.timeframeProfiles??(['intraday','higherTimeframe'] as GoldilocksTimeframeProfileId[]))];
-  const scores=[...new Set((input.minimumScores??[10,11,12,13,14,15,16,17,18]).map(value=>Math.min(20,Math.max(0,Math.floor(value)))))].sort((a,b)=>a-b);
+  const profiles:GoldilocksTimeframeProfileId[]=[...new Set(input.timeframeProfiles??(['lowerTimeframe','intraday','higherTimeframe'] as GoldilocksTimeframeProfileId[]))];
+  const scores=[...new Set((input.minimumScores??[10,12,14,16,18]).map(value=>Math.min(20,Math.max(0,Math.floor(value)))))].sort((a,b)=>a-b);
   return profiles.flatMap(timeframeProfile=>{
     const profile=getGoldilocksTimeframeProfile(timeframeProfile);
-    return scores.map(minimumScore=>normalizeBacktestConfig({
-      pairs,timeframeProfile,minimumScore,lookbackDays:profile.defaultLookbackDays,
-      backfillPages:0,
-      label:`${profile.label} | strategy ${profile.strategyVersion} | score ${minimumScore}`,
-      riskProfile:'default',startingBalance:1000,leverage:30,
-    }));
+    return AUTO_RESEARCH_STRATEGY_FAMILIES.flatMap(family=>
+      scores.map(minimumScore=>normalizeBacktestConfig({
+        pairs,timeframeProfile,minimumScore,lookbackDays:profile.defaultLookbackDays,
+        backfillPages:0,
+        label:`${profile.label} | ${family.label} | score ${minimumScore}`,
+        riskProfile:'default',startingBalance:1000,leverage:30,
+        scoreWeights:expandGoldilocksScoreCategoryWeights(family.scoreCategories),
+        gateSettings:normalizeGoldilocksBacktestGates(
+          family.disabledGate?{[family.disabledGate]:false}:undefined,
+        ),
+      })),
+    );
   });
 };
 

@@ -68,13 +68,13 @@ export const getActiveAutoResearchCampaign=()=>database().prepare(`SELECT id,sta
   WHERE status IN ('queued','preparing','running','waiting','paused') ORDER BY created_at DESC LIMIT 1`).get() as {id:string;status:AutoResearchStatus}|undefined;
 
 export const enqueueAutoResearchCycle=(campaignId:string,datasetKey:string,configurations:BacktestRunConfig[])=>{
-  const db=database(),createdAt=now();
+  const db=database(),createdAt=Date.now();
   const insert=db.prepare(`INSERT OR IGNORE INTO research_trials(id,campaign_id,dataset_key,config_hash,config_json,status,created_at)
     VALUES(?,?,?,?,?,'queued',?)`);
   let added=0;
   db.transaction(()=>{
-    for(const config of configurations){
-      const result=insert.run(randomUUID(),campaignId,datasetKey,researchConfigHash(config),json(config),createdAt);
+    for(const [index,config] of configurations.entries()){
+      const result=insert.run(randomUUID(),campaignId,datasetKey,researchConfigHash(config),json(config),new Date(createdAt+index).toISOString());
       added+=result.changes;
     }
   })();

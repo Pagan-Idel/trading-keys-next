@@ -1,8 +1,17 @@
-import { GOLDILOCKS_DEPARTURE_QUALITY, GOLDILOCKS_ENTRY_PROXIMITY } from './goldilocksConfig';
+import {
+  GOLDILOCKS_BALANCE_DETECTION,
+  GOLDILOCKS_DEPARTURE_QUALITY,
+  GOLDILOCKS_ENTRY_PROXIMITY,
+  type GoldilocksBacktestTweaks,
+} from "./goldilocksConfig";
+import {
+  GOLDILOCKS_MAX_ZONE_AGE_SECONDS,
+} from "./zoneAge";
 
-export type GoldilocksDirection = 'bullish' | 'bearish';
-export type GoldilocksZoneKind = 'base' | 'continuation';
-export type GoldilocksZoneState = 'fresh' | 'touched' | 'invalidated' | 'expired';
+export type GoldilocksDirection = "bullish" | "bearish";
+export type GoldilocksZoneKind = "base" | "continuation";
+export type GoldilocksZoneState =
+  "fresh" | "touched" | "invalidated" | "expired";
 
 export interface StrategyCandle {
   time: number;
@@ -12,6 +21,18 @@ export interface StrategyCandle {
   close: number;
 }
 
+export const isZoneAtOrBelowLegMidpoint = (
+  zone: Pick<GoldilocksZone, "low" | "high">,
+  candles: StrategyCandle[],
+  leg: SwingLeg,
+): boolean => {
+  const legCandles = candles.slice(leg.startIndex, leg.endIndex + 1);
+  if (!legCandles.length) return false;
+  const legLow = Math.min(...legCandles.map((candle) => candle.low));
+  const legHigh = Math.max(...legCandles.map((candle) => candle.high));
+  return (zone.low + zone.high) / 2 <= (legLow + legHigh) / 2;
+};
+
 export interface GoldilocksEntryProximityCheck {
   allowed: boolean;
   touchRange: number;
@@ -20,6 +41,7 @@ export interface GoldilocksEntryProximityCheck {
   confirmationDistanceZoneFraction: number;
   executableDistance: number;
   executableDistanceZoneFraction: number;
+  executableChecked: boolean;
   maxTouchRangeZoneFraction: number;
   maxEntryDistanceZoneFraction: number;
   reason: string;
@@ -33,23 +55,91 @@ export interface GoldilocksFirstTouchCheck {
   reason: string;
 }
 
+export interface GoldilocksApproachGateCheck {
+  allowed: boolean;
+  reclaimed: boolean;
+  approachDisplacementAtr: number;
+  touchRangeAtr: number;
+  reason: string;
+}
+
+export const validateGoldilocksZoneApproach = (
+  zone: GoldilocksZone,
+  candles: StrategyCandle[],
+  touchIndex: number,
+  thresholds: Pick<
+    GoldilocksBacktestTweaks,
+    | "adverseApproachCandles"
+    | "minimumFastApproachAtr"
+    | "minimumFastTouchRangeAtr"
+  > = GOLDILOCKS_ENTRY_PROXIMITY,
+): GoldilocksApproachGateCheck => {
+  const touch = candles[touchIndex];
+  const priorAtr = atrAt(candles, touchIndex - 1) ?? 0;
+  if (!touch || priorAtr <= 0)
+    return {
+      allowed: true,
+      reclaimed: false,
+      approachDisplacementAtr: 0,
+      touchRangeAtr: 0,
+      reason:
+        "Insufficient completed M5 history for the adverse-approach ATR gate.",
+    };
+  const approachStart = Math.max(
+    0,
+    touchIndex - Math.floor(thresholds.adverseApproachCandles),
+  );
+  const startPrice = candles[approachStart]?.open ?? touch.open;
+  const adverseDisplacement =
+    zone.side === "demand"
+      ? Math.max(0, startPrice - touch.close)
+      : Math.max(0, touch.close - startPrice);
+  const approachDisplacementAtr = adverseDisplacement / priorAtr;
+  const touchRangeAtr = Math.max(0, touch.high - touch.low) / priorAtr;
+  const reclaimed =
+    zone.side === "demand" ? touch.close > zone.high : touch.close < zone.low;
+  const adverse =
+    approachDisplacementAtr >=
+      thresholds.minimumFastApproachAtr &&
+    touchRangeAtr >= thresholds.minimumFastTouchRangeAtr;
+  const allowed = reclaimed || !adverse;
+  return {
+    allowed,
+    reclaimed,
+    approachDisplacementAtr,
+    touchRangeAtr,
+    reason: reclaimed
+      ? `Fast M5 wick sweep reclaimed the ${zone.side} proximal edge on the touch close; absorption exception passed.`
+      : allowed
+        ? `M5 approach passed: ${approachDisplacementAtr.toFixed(2)} ATR approach and ${touchRangeAtr.toFixed(2)} ATR touch.`
+        : `Adverse M5 approach rejected: ${approachDisplacementAtr.toFixed(2)} ATR approach and ${touchRangeAtr.toFixed(2)} ATR touch without a proximal reclaim.`,
+  };
+};
+
 export const validateGoldilocksFirstTouchCandle = (
   zone: GoldilocksZone,
   touchCandle: StrategyCandle,
+  thresholds: Pick<
+    GoldilocksBacktestTweaks,
+    "maxTouchRangeZoneFraction"
+  > = GOLDILOCKS_ENTRY_PROXIMITY,
 ): GoldilocksFirstTouchCheck => {
-  const width=Math.max(Number.EPSILON,zone.width);
-  const touchRange=Math.max(0,touchCandle.high-touchCandle.low);
-  const touchRangeZoneFraction=touchRange/width;
-  const allowed=touchRangeZoneFraction<=GOLDILOCKS_ENTRY_PROXIMITY.maxTouchRangeZoneFraction;
-  const percent=(value:number)=>(value*100).toFixed(1);
+  const width = Math.max(Number.EPSILON, zone.width);
+  const touchRange = Math.max(0, touchCandle.high - touchCandle.low);
+  const touchRangeZoneFraction = touchRange / width;
+  const allowed =
+    touchRangeZoneFraction <=
+    thresholds.maxTouchRangeZoneFraction;
+  const percent = (value: number) => (value * 100).toFixed(1);
   return {
     allowed,
     touchRange,
     touchRangeZoneFraction,
-    maxTouchRangeZoneFraction:GOLDILOCKS_ENTRY_PROXIMITY.maxTouchRangeZoneFraction,
-    reason:allowed
-      ?`First M5 touch range ${percent(touchRangeZoneFraction)}% of the M15 zone width.`
-      :`The first M5 touch candle spans ${percent(touchRangeZoneFraction)}% of the M15 zone; maximum ${percent(GOLDILOCKS_ENTRY_PROXIMITY.maxTouchRangeZoneFraction)}%.`,
+    maxTouchRangeZoneFraction:
+      thresholds.maxTouchRangeZoneFraction,
+    reason: allowed
+      ? `First M5 touch range ${percent(touchRangeZoneFraction)}% of the M15 zone width.`
+      : `The first M5 touch candle spans ${percent(touchRangeZoneFraction)}% of the M15 zone; maximum ${percent(thresholds.maxTouchRangeZoneFraction)}%.`,
   };
 };
 
@@ -57,36 +147,53 @@ export const validateGoldilocksEntryProximity = (
   zone: GoldilocksZone,
   touchCandle: StrategyCandle,
   confirmationClose: number,
-  executableEntry = confirmationClose,
+  executableEntry?: number,
+  thresholds: Pick<
+    GoldilocksBacktestTweaks,
+    "maxTouchRangeZoneFraction" | "maxEntryDistanceZoneFraction"
+  > = GOLDILOCKS_ENTRY_PROXIMITY,
 ): GoldilocksEntryProximityCheck => {
-  const width=Math.max(Number.EPSILON,zone.width);
-  const firstTouch=validateGoldilocksFirstTouchCandle(zone,touchCandle);
-  const touchRange=firstTouch.touchRange;
-  const outsideDistance=(price:number)=>zone.side==='demand'
-    ?Math.max(0,price-zone.high)
-    :Math.max(0,zone.low-price);
-  const confirmationDistance=outsideDistance(confirmationClose);
-  const executableDistance=outsideDistance(executableEntry);
-  const touchRangeZoneFraction=firstTouch.touchRangeZoneFraction;
-  const confirmationDistanceZoneFraction=confirmationDistance/width;
-  const executableDistanceZoneFraction=executableDistance/width;
-  const touchAllowed=firstTouch.allowed;
-  const confirmationAllowed=confirmationDistanceZoneFraction<=GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction;
-  const executableAllowed=executableDistanceZoneFraction<=GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction;
-  const allowed=touchAllowed&&confirmationAllowed&&executableAllowed;
-  const percent=(value:number)=>(value*100).toFixed(1);
-  const reason=!touchAllowed
-    ?firstTouch.reason
-    :!confirmationAllowed
-      ?`The M5 close-through finished ${percent(confirmationDistanceZoneFraction)}% of one M15 zone width beyond the proximal edge; maximum ${percent(GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction)}%.`
-      :!executableAllowed
-        ?`The executable entry moved ${percent(executableDistanceZoneFraction)}% of one M15 zone width beyond the proximal edge; maximum ${percent(GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction)}%.`
-        :`First M5 touch range ${percent(touchRangeZoneFraction)}%; close-through distance ${percent(confirmationDistanceZoneFraction)}%; executable-entry distance ${percent(executableDistanceZoneFraction)}% of the M15 zone width.`;
+  const width = Math.max(Number.EPSILON, zone.width);
+  const firstTouch = validateGoldilocksFirstTouchCandle(zone, touchCandle, thresholds);
+  const touchRange = firstTouch.touchRange;
+  const outsideDistance = (price: number) =>
+    zone.side === "demand"
+      ? Math.max(0, price - zone.high)
+      : Math.max(0, zone.low - price);
+  const confirmationDistance = outsideDistance(confirmationClose);
+  const executableChecked = Number.isFinite(executableEntry);
+  const executableDistance = executableChecked
+    ? outsideDistance(executableEntry!)
+    : 0;
+  const touchRangeZoneFraction = firstTouch.touchRangeZoneFraction;
+  const confirmationDistanceZoneFraction = confirmationDistance / width;
+  const executableDistanceZoneFraction = executableDistance / width;
+  const touchAllowed = firstTouch.allowed;
+  const executableAllowed =
+    executableDistanceZoneFraction <=
+    thresholds.maxEntryDistanceZoneFraction;
+  const allowed = touchAllowed && (!executableChecked || executableAllowed);
+  const percent = (value: number) => (value * 100).toFixed(1);
+  const reason = !touchAllowed
+    ? firstTouch.reason
+    : executableChecked && !executableAllowed
+      ? `The executable entry moved ${percent(executableDistanceZoneFraction)}% of one M15 zone width beyond the proximal edge; maximum ${percent(thresholds.maxEntryDistanceZoneFraction)}%.`
+      : executableChecked
+        ? `First M5 touch range ${percent(touchRangeZoneFraction)}%; executable-entry distance ${percent(executableDistanceZoneFraction)}% of the M15 zone width.`
+        : `First M5 touch range ${percent(touchRangeZoneFraction)}% of the M15 zone width; executable bid/ask will be checked immediately before entry.`;
   return {
-    allowed,touchRange,touchRangeZoneFraction,confirmationDistance,confirmationDistanceZoneFraction,
-    executableDistance,executableDistanceZoneFraction,
-    maxTouchRangeZoneFraction:GOLDILOCKS_ENTRY_PROXIMITY.maxTouchRangeZoneFraction,
-    maxEntryDistanceZoneFraction:GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction,
+    allowed,
+    touchRange,
+    touchRangeZoneFraction,
+    confirmationDistance,
+    confirmationDistanceZoneFraction,
+    executableDistance,
+    executableDistanceZoneFraction,
+    executableChecked,
+    maxTouchRangeZoneFraction:
+      thresholds.maxTouchRangeZoneFraction,
+    maxEntryDistanceZoneFraction:
+      thresholds.maxEntryDistanceZoneFraction,
     reason,
   };
 };
@@ -103,7 +210,7 @@ export interface SwingLeg {
 export interface GoldilocksZone {
   id: string;
   kind: GoldilocksZoneKind;
-  side: 'demand' | 'supply';
+  side: "demand" | "supply";
   candleIndex: number;
   candleTime: number;
   availableAt?: number;
@@ -122,7 +229,9 @@ export interface GoldilocksZone {
   departureInsideCandleCount?: number;
   brokeOppositeLegIn?: boolean;
   touches: number;
+  /** @deprecated Retained only to deserialize legacy stored runs. */
   maxPenetration: number;
+  /** @deprecated Retained only to deserialize legacy stored runs. */
   touchPenetrations?: number[];
   state: GoldilocksZoneState;
   invalidatedAt?: number;
@@ -130,67 +239,179 @@ export interface GoldilocksZone {
   firstTouchIndex?: number;
   reasons: string[];
   timeframeConfluence?: ZoneTimeframeConfluence;
+  zoneFamily?: "swing" | "imbalance-balance";
+  imbalancePattern?:
+    | "up-balance-up"
+    | "down-balance-down"
+    | "up-balance-down"
+    | "down-balance-up";
+  balanceMetrics?: {
+    candleCount: number;
+    bodyWidthAtr: number;
+    wickWidthAtr: number;
+    closeContainmentFraction: number;
+    medianBodyOverlapFraction: number;
+    driftAtr: number;
+    arrivalDirection: GoldilocksDirection;
+    departureDirection: GoldilocksDirection;
+    arrivalRangeAtr: number;
+    departureRangeAtr: number;
+    departureBodyFraction: number;
+    departureCloseLocation: number;
+  };
 }
 
 export interface GoldilocksDepartureQuality {
-  departureCandleTime:number;
-  departureCandleIndex:number;
-  candleRange:number;
-  priorAtr14?:number;
-  rangeAtrMultiple?:number;
-  bodyFraction:number;
-  rejectionWickFraction:number;
-  closeDepartureZoneMultiple:number;
-  wickDepartureZoneMultiple:number;
-  shockRejected:boolean;
-  reason:string;
+  departureCandleTime: number;
+  departureCandleIndex: number;
+  candleRange: number;
+  priorAtr14?: number;
+  rangeAtrMultiple?: number;
+  bodyFraction: number;
+  rejectionWickFraction: number;
+  closeDepartureZoneMultiple: number;
+  wickDepartureZoneMultiple: number;
+  shockRejected: boolean;
+  reason: string;
 }
 
 export interface GoldilocksDepartureQualityCheck {
-  allowed:boolean;
-  reason:string;
-  quality?:GoldilocksDepartureQuality;
+  allowed: boolean;
+  reason: string;
+  quality?: GoldilocksDepartureQuality;
 }
 
-export const validateGoldilocksDepartureQuality=(zone:GoldilocksZone):GoldilocksDepartureQualityCheck=>{
-  const quality=zone.departureQuality;
-  if(!quality||quality.rangeAtrMultiple===undefined){
-    return {allowed:true,quality,reason:'Departure shock metrics are unavailable; no shock-rejection pattern was identified.'};
+const countDepartureShockWarnings = (
+  rangeAtrMultiple: number,
+  rejectionWickFraction: number,
+  closeDepartureZoneMultiple: number,
+  thresholds: Pick<
+    GoldilocksBacktestTweaks,
+    | "shockRangeAtrMultiple"
+    | "rejectionWickFraction"
+    | "minimumShockCloseDepartureZoneMultiple"
+  >,
+) =>
+  Number(rangeAtrMultiple >= thresholds.shockRangeAtrMultiple) +
+  Number(rejectionWickFraction >= thresholds.rejectionWickFraction) +
+  Number(
+    closeDepartureZoneMultiple <
+      thresholds.minimumShockCloseDepartureZoneMultiple,
+  );
+
+export const getGoldilocksZoneFormationWindow = (
+  zone: GoldilocksZone,
+  zoneTimeframeSeconds: number,
+) => ({
+  start: zone.candleTime,
+  end:
+    (zone.departureQuality?.departureCandleTime ??
+      zone.availableAt ??
+      zone.candleTime) + Math.max(1, zoneTimeframeSeconds),
+});
+
+export const findGoldilocksZoneDistalBreakTime = (
+  zone: Pick<GoldilocksZone, "side" | "low" | "high" | "candleTime">,
+  candles: StrategyCandle[],
+) =>
+  candles.find(
+    (candle) =>
+      candle.time > zone.candleTime &&
+      (zone.side === "demand"
+        ? candle.low < zone.low
+        : candle.high > zone.high),
+  )?.time;
+
+export const validateGoldilocksDepartureQuality = (
+  zone: GoldilocksZone,
+  thresholds: Pick<
+    GoldilocksBacktestTweaks,
+    | "shockRangeAtrMultiple"
+    | "rejectionWickFraction"
+    | "minimumShockCloseDepartureZoneMultiple"
+  > = GOLDILOCKS_DEPARTURE_QUALITY,
+): GoldilocksDepartureQualityCheck => {
+  const quality = zone.departureQuality;
+  if (!quality || quality.rangeAtrMultiple === undefined) {
+    return {
+      allowed: true,
+      quality,
+      reason:
+        "Departure shock metrics are unavailable; no shock-rejection pattern was identified.",
+    };
   }
-  return {allowed:!quality.shockRejected,quality,reason:quality.reason};
+  const warningCount = countDepartureShockWarnings(
+    quality.rangeAtrMultiple,
+    quality.rejectionWickFraction,
+    quality.closeDepartureZoneMultiple,
+    thresholds,
+  );
+  const warned = warningCount >= 2;
+  return {
+    allowed: true,
+    quality: { ...quality, shockRejected: warned },
+    reason: warned
+      ? `Departure warning diagnostic: ${warningCount}/3 conditions matched · ${quality.rangeAtrMultiple.toFixed(2)}x ATR range · ${(quality.rejectionWickFraction * 100).toFixed(1)}% rejection wick · ${quality.closeDepartureZoneMultiple.toFixed(2)}x zone-width close displacement. This is scored evidence, not a hard rejection.`
+      : quality.reason,
+  };
 };
 
 export interface GoldilocksIntrabarDepartureSpeed {
-  fastestCandleTime:number;
-  fastestCandleRange:number;
-  priorAtr14?:number;
-  rangeAtrMultiple?:number;
-  departureRangeFraction:number;
+  fastestCandleTime: number;
+  fastestCandleRange: number;
+  priorAtr14?: number;
+  rangeAtrMultiple?: number;
+  departureRangeFraction: number;
 }
 
-export const measureGoldilocksIntrabarDepartureSpeed=(
-  zone:GoldilocksZone,
-  intrabarCandles:StrategyCandle[],
-  zoneTimeframeSeconds=15*60,
-):GoldilocksIntrabarDepartureSpeed|undefined=>{
-  const quality=zone.departureQuality;
-  if(!quality)return undefined;
-  const ordered=[...intrabarCandles].sort((left,right)=>left.time-right.time);
-  const inside=ordered.filter(candle=>candle.time>=quality.departureCandleTime&&candle.time<quality.departureCandleTime+zoneTimeframeSeconds);
-  if(!inside.length)return undefined;
-  const fastest=inside.reduce((best,candle)=>candle.high-candle.low>best.high-best.low?candle:best);
-  const before=ordered.filter(candle=>candle.time<quality.departureCandleTime).slice(-14);
-  const priorAtr14=before.length===14?before.reduce((total,candle,index)=>{
-    const previousClose=index>0?before[index-1].close:candle.open;
-    return total+Math.max(candle.high-candle.low,Math.abs(candle.high-previousClose),Math.abs(candle.low-previousClose));
-  },0)/14:undefined;
-  const fastestCandleRange=fastest.high-fastest.low;
+export const measureGoldilocksIntrabarDepartureSpeed = (
+  zone: GoldilocksZone,
+  intrabarCandles: StrategyCandle[],
+  zoneTimeframeSeconds = 15 * 60,
+): GoldilocksIntrabarDepartureSpeed | undefined => {
+  const quality = zone.departureQuality;
+  if (!quality) return undefined;
+  const ordered = [...intrabarCandles].sort(
+    (left, right) => left.time - right.time,
+  );
+  const inside = ordered.filter(
+    (candle) =>
+      candle.time >= quality.departureCandleTime &&
+      candle.time < quality.departureCandleTime + zoneTimeframeSeconds,
+  );
+  if (!inside.length) return undefined;
+  const fastest = inside.reduce((best, candle) =>
+    candle.high - candle.low > best.high - best.low ? candle : best,
+  );
+  const before = ordered
+    .filter((candle) => candle.time < quality.departureCandleTime)
+    .slice(-14);
+  const priorAtr14 =
+    before.length === 14
+      ? before.reduce((total, candle, index) => {
+          const previousClose =
+            index > 0 ? before[index - 1].close : candle.open;
+          return (
+            total +
+            Math.max(
+              candle.high - candle.low,
+              Math.abs(candle.high - previousClose),
+              Math.abs(candle.low - previousClose),
+            )
+          );
+        }, 0) / 14
+      : undefined;
+  const fastestCandleRange = fastest.high - fastest.low;
   return {
-    fastestCandleTime:fastest.time,
+    fastestCandleTime: fastest.time,
     fastestCandleRange,
     priorAtr14,
-    rangeAtrMultiple:priorAtr14&&priorAtr14>0?fastestCandleRange/priorAtr14:undefined,
-    departureRangeFraction:quality.candleRange>0?fastestCandleRange/quality.candleRange:0,
+    rangeAtrMultiple:
+      priorAtr14 && priorAtr14 > 0
+        ? fastestCandleRange / priorAtr14
+        : undefined,
+    departureRangeFraction:
+      quality.candleRange > 0 ? fastestCandleRange / quality.candleRange : 0,
   };
 };
 
@@ -200,7 +421,7 @@ export interface ZoneTimeframeConfluence {
   overlaps: Array<{
     timeframe: string;
     zoneId: string;
-    relationship: 'inside' | 'contains' | 'overlaps';
+    relationship: "inside" | "contains" | "overlaps";
     low: number;
     high: number;
   }>;
@@ -210,24 +431,43 @@ export const annotateTimeframeConfluence = (
   zones: GoldilocksZone[],
   zoneTimeframe: string,
   timeframeZones: Array<{ timeframe: string; zones: GoldilocksZone[] }>,
-): GoldilocksZone[] => zones.map(zone=>{
-  const overlaps=timeframeZones.flatMap(group=>group.zones
-    .filter(other=>other.state!=='invalidated'&&other.state!=='expired'&&other.side===zone.side&&other.high>=zone.low&&other.low<=zone.high)
-    .map(other=>({
-      timeframe:group.timeframe,
-      zoneId:other.id,
-      relationship:(zone.low>=other.low&&zone.high<=other.high
-        ?'inside'
-        :other.low>=zone.low&&other.high<=zone.high
-          ?'contains'
-          :'overlaps') as 'inside'|'contains'|'overlaps',
-      low:other.low,
-      high:other.high,
-    })));
-  const timeframes=[zoneTimeframe,...overlaps.map(item=>item.timeframe)]
-    .filter((item,index,items)=>items.indexOf(item)===index);
-  return {...zone,timeframeConfluence:{timeframes,timeframeCount:timeframes.length,overlaps}};
-});
+): GoldilocksZone[] =>
+  zones.map((zone) => {
+    const overlaps = timeframeZones.flatMap((group) =>
+      group.zones
+        .filter(
+          (other) =>
+            other.state !== "invalidated" &&
+            other.state !== "expired" &&
+            other.side === zone.side &&
+            other.high >= zone.low &&
+            other.low <= zone.high,
+        )
+        .map((other) => ({
+          timeframe: group.timeframe,
+          zoneId: other.id,
+          relationship: (zone.low >= other.low && zone.high <= other.high
+            ? "inside"
+            : other.low >= zone.low && other.high <= zone.high
+              ? "contains"
+              : "overlaps") as "inside" | "contains" | "overlaps",
+          low: other.low,
+          high: other.high,
+        })),
+    );
+    const timeframes = [
+      zoneTimeframe,
+      ...overlaps.map((item) => item.timeframe),
+    ].filter((item, index, items) => items.indexOf(item) === index);
+    return {
+      ...zone,
+      timeframeConfluence: {
+        timeframes,
+        timeframeCount: timeframes.length,
+        overlaps,
+      },
+    };
+  });
 
 export interface GoldilocksDetection {
   leg: SwingLeg;
@@ -253,7 +493,7 @@ export interface EngulfingConfirmation {
 
 export interface TradeRunwayCheck {
   allowed: boolean;
-  direction: 'buy' | 'sell';
+  direction: "buy" | "sell";
   entry: number;
   stopLoss: number;
   takeProfit: number;
@@ -275,42 +515,31 @@ export interface FinalEntryCheck extends TradeRunwayCheck {
 export const getMostRecentActiveOpposingZone = (
   entryZone: GoldilocksZone,
   knownZones: GoldilocksZone[],
-  knownZonesUsableAtEntry=false,
-) => knownZones
-  .filter((zone) =>
-    zone.id !== entryZone.id &&
-    zone.side !== entryZone.side &&
-    (knownZonesUsableAtEntry || (zone.state !== 'invalidated' && zone.state !== 'expired')),
-  )
-  .sort((a, b) => b.candleTime - a.candleTime)[0];
+  knownZonesUsableAtEntry = false,
+) =>
+  knownZones
+    .filter(
+      (zone) =>
+        zone.id !== entryZone.id &&
+        zone.side !== entryZone.side &&
+        (knownZonesUsableAtEntry ||
+          (zone.state !== "invalidated" && zone.state !== "expired")),
+    )
+    .sort((a, b) => b.candleTime - a.candleTime)[0];
 
 const isOpposite = (candle: StrategyCandle, direction: GoldilocksDirection) =>
-  direction === 'bullish' ? candle.close < candle.open : candle.close > candle.open;
+  direction === "bullish"
+    ? candle.close < candle.open
+    : candle.close > candle.open;
 
 const rangesOverlap = (a: StrategyCandle, b: StrategyCandle) =>
   Math.max(a.low, b.low) <= Math.min(a.high, b.high);
 
 const bodiesOverlap = (a: StrategyCandle, b: StrategyCandle) =>
-  Math.max(Math.min(a.open,a.close),Math.min(b.open,b.close)) <
-  Math.min(Math.max(a.open,a.close),Math.max(b.open,b.close));
+  Math.max(Math.min(a.open, a.close), Math.min(b.open, b.close)) <
+  Math.min(Math.max(a.open, a.close), Math.max(b.open, b.close));
 
 const candleRange = (candle: StrategyCandle) => candle.high - candle.low;
-
-const twoCalendarYearsBefore = (timestamp: number) => {
-  const date = new Date(timestamp * 1000);
-  const rawMonth = date.getUTCMonth() - 24;
-  const year = date.getUTCFullYear() + Math.floor(rawMonth / 12);
-  const month = ((rawMonth % 12) + 12) % 12;
-  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  return Math.floor(Date.UTC(
-    year,
-    month,
-    Math.min(date.getUTCDate(), lastDay),
-    date.getUTCHours(),
-    date.getUTCMinutes(),
-    date.getUTCSeconds(),
-  ) / 1000);
-};
 
 const atrAt = (candles: StrategyCandle[], candleIndex: number, period = 14) => {
   if (candleIndex < period - 1) return undefined;
@@ -325,6 +554,526 @@ const atrAt = (candles: StrategyCandle[], candleIndex: number, period = 14) => {
     );
   }
   return total / period;
+};
+
+const median = (values: number[]) => {
+  if (!values.length) return 0;
+  const ordered = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+  return ordered.length % 2
+    ? ordered[middle]
+    : (ordered[middle - 1] + ordered[middle]) / 2;
+};
+
+export const annotateResearchZoneLifecycleAt = (
+  zone: GoldilocksZone,
+  candles: StrategyCandle[],
+  completedBefore: number,
+  candleSeconds = 15 * 60,
+): GoldilocksZone => {
+  const copy: GoldilocksZone = {
+    ...zone,
+    touches: 0,
+    maxPenetration: 0,
+    state: "fresh",
+    invalidatedAt: undefined,
+    firstTouchIndex: undefined,
+  };
+  const availableAt = copy.availableAt ?? copy.candleTime;
+  let startIndex = 0;
+  let insideVisit = false;
+  while (startIndex < candles.length && candles[startIndex].time < availableAt)
+    startIndex += 1;
+  for (let index = startIndex; index < candles.length; index += 1) {
+    const candle = candles[index];
+    if (candle.time + candleSeconds > completedBefore) break;
+    const invalid =
+      copy.side === "demand" ? candle.low < copy.low : candle.high > copy.high;
+    if (invalid) {
+      copy.state = "invalidated";
+      copy.invalidatedAt = candle.time;
+      break;
+    }
+    if (candle.high < copy.low || candle.low > copy.high) {
+      insideVisit = false;
+      continue;
+    }
+    if (insideVisit) continue;
+    insideVisit = true;
+    copy.state = "touched";
+    copy.touches += 1;
+    copy.firstTouchIndex ??= index;
+    if (copy.touches > 3) {
+      copy.state = "invalidated";
+      copy.invalidatedAt = candle.time;
+      break;
+    }
+  }
+  return copy;
+};
+
+const measureImbalanceCandle = (
+  candles: StrategyCandle[],
+  candleIndex: number,
+):
+  | {
+      direction: GoldilocksDirection;
+      rangeAtr: number;
+      bodyFraction: number;
+      closeLocation: number;
+    }
+  | undefined => {
+  const candle = candles[candleIndex];
+  const atr = candleIndex > 0 ? atrAt(candles, candleIndex - 1) : undefined;
+  const range = candle.high - candle.low;
+  if (!atr || atr <= 0 || range <= 0) return undefined;
+  const bodyFraction = Math.abs(candle.close - candle.open) / range;
+  const closeLocation = (candle.close - candle.low) / range;
+  const direction: GoldilocksDirection =
+    candle.close > candle.open
+      ? "bullish"
+      : candle.close < candle.open
+        ? "bearish"
+        : undefined!;
+  if (
+    !direction ||
+    range / atr < GOLDILOCKS_BALANCE_DETECTION.minimumImbalanceRangeAtr ||
+    bodyFraction < GOLDILOCKS_BALANCE_DETECTION.minimumImbalanceBodyFraction
+  )
+    return undefined;
+  const directionalClose =
+    direction === "bullish"
+      ? closeLocation >=
+        GOLDILOCKS_BALANCE_DETECTION.minimumDirectionalCloseLocation
+      : closeLocation <=
+        1 - GOLDILOCKS_BALANCE_DETECTION.minimumDirectionalCloseLocation;
+  return directionalClose
+    ? { direction, rangeAtr: range / atr, bodyFraction, closeLocation }
+    : undefined;
+};
+
+const measureImbalanceSequence = (
+  candles: StrategyCandle[],
+  startIndex: number,
+  referenceAtr: number,
+) => {
+  const first = candles[startIndex];
+  if (!first || referenceAtr <= 0) return undefined;
+  const direction: GoldilocksDirection =
+    first.close > first.open
+      ? "bullish"
+      : first.close < first.open
+        ? "bearish"
+        : undefined!;
+  if (!direction) return undefined;
+  let high = first.high,
+    low = first.low;
+  for (let endIndex = startIndex; endIndex < candles.length; endIndex += 1) {
+    const candle = candles[endIndex];
+    const candleDirection =
+      candle.close > candle.open
+        ? "bullish"
+        : candle.close < candle.open
+          ? "bearish"
+          : undefined;
+    if (candleDirection !== direction) break;
+    high = Math.max(high, candle.high);
+    low = Math.min(low, candle.low);
+    const range = high - low;
+    if (range <= 0) continue;
+    const bodyFraction = Math.abs(candle.close - first.open) / range;
+    const closeLocation = (candle.close - low) / range;
+    const directionalClose =
+      direction === "bullish"
+        ? closeLocation >=
+          GOLDILOCKS_BALANCE_DETECTION.minimumDirectionalCloseLocation
+        : closeLocation <=
+          1 - GOLDILOCKS_BALANCE_DETECTION.minimumDirectionalCloseLocation;
+    if (
+      range / referenceAtr >=
+        GOLDILOCKS_BALANCE_DETECTION.minimumImbalanceRangeAtr &&
+      bodyFraction >=
+        GOLDILOCKS_BALANCE_DETECTION.minimumImbalanceBodyFraction &&
+      directionalClose
+    ) {
+      return {
+        direction,
+        rangeAtr: range / referenceAtr,
+        bodyFraction,
+        closeLocation,
+        endIndex,
+        open: first.open,
+        high,
+        low,
+        close: candle.close,
+      };
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Finds research-only imbalance -> adaptive balance -> imbalance zones without
+ * waiting for a swing/structure break. The balance may contain any number of
+ * candles; it survives only while price acceptance remains compact relative to ATR.
+ */
+export const detectGoldilocksImbalanceBalanceZones = (
+  candles: StrategyCandle[],
+  candleSeconds = 15 * 60,
+): GoldilocksZone[] => {
+  const timeframeLabel =
+    candleSeconds % 3600 === 0
+      ? `H${candleSeconds / 3600}`
+      : `M${candleSeconds / 60}`;
+  const zones: GoldilocksZone[] = [];
+  for (
+    let arrivalIndex = 14;
+    arrivalIndex <
+    candles.length - GOLDILOCKS_BALANCE_DETECTION.minimumBalanceCandles - 1;
+    arrivalIndex += 1
+  ) {
+    const arrival = measureImbalanceCandle(candles, arrivalIndex);
+    if (!arrival) continue;
+    const referenceAtr = atrAt(candles, arrivalIndex - 1);
+    if (!referenceAtr || referenceAtr <= 0) continue;
+    const balanceIndices: number[] = [];
+    let acceptedInside = 0;
+    let departureIndex = -1;
+    let departureEndIndex = -1;
+    let departure: ReturnType<typeof measureImbalanceSequence>;
+
+    for (let index = arrivalIndex + 1; index < candles.length; index += 1) {
+      const candle = candles[index];
+      if (
+        balanceIndices.length >=
+        GOLDILOCKS_BALANCE_DETECTION.minimumBalanceCandles
+      ) {
+        const candidateDeparture = measureImbalanceSequence(
+          candles,
+          index,
+          referenceAtr,
+        );
+        const bodyLow = Math.min(
+          ...balanceIndices.map((item) =>
+            Math.min(candles[item].open, candles[item].close),
+          ),
+        );
+        const bodyHigh = Math.max(
+          ...balanceIndices.map((item) =>
+            Math.max(candles[item].open, candles[item].close),
+          ),
+        );
+        const startsBeyond =
+          candidateDeparture?.direction === "bullish"
+            ? candle.close > bodyHigh
+            : candidateDeparture?.direction === "bearish"
+              ? candle.close < bodyLow
+              : false;
+        const closesBeyond =
+          candidateDeparture?.direction === "bullish"
+            ? candidateDeparture.close >=
+              bodyHigh +
+                referenceAtr *
+                  GOLDILOCKS_BALANCE_DETECTION.minimumDepartureCloseBeyondBodyAtr
+            : candidateDeparture?.direction === "bearish"
+              ? candidateDeparture.close <=
+                bodyLow -
+                  referenceAtr *
+                    GOLDILOCKS_BALANCE_DETECTION.minimumDepartureCloseBeyondBodyAtr
+              : false;
+        if (candidateDeparture && startsBeyond && closesBeyond) {
+          departureIndex = index;
+          departureEndIndex = candidateDeparture.endIndex;
+          departure = candidateDeparture;
+          break;
+        }
+      }
+
+      if (!balanceIndices.length) {
+        balanceIndices.push(index);
+        acceptedInside += 1;
+        continue;
+      }
+      const existingBodyLow = Math.min(
+        ...balanceIndices.map((item) =>
+          Math.min(candles[item].open, candles[item].close),
+        ),
+      );
+      const existingBodyHigh = Math.max(
+        ...balanceIndices.map((item) =>
+          Math.max(candles[item].open, candles[item].close),
+        ),
+      );
+      const bodyLow = Math.min(candle.open, candle.close);
+      const bodyHigh = Math.max(candle.open, candle.close);
+      const bodySize = Math.max(Number.EPSILON, bodyHigh - bodyLow);
+      const overlap = Math.max(
+        0,
+        Math.min(existingBodyHigh, bodyHigh) -
+          Math.max(existingBodyLow, bodyLow),
+      );
+      const overlapFraction =
+        overlap /
+        Math.min(
+          bodySize,
+          Math.max(Number.EPSILON, existingBodyHigh - existingBodyLow),
+        );
+      const closeAccepted =
+        candle.close >=
+          existingBodyLow -
+            referenceAtr *
+              GOLDILOCKS_BALANCE_DETECTION.closeAcceptanceToleranceAtr &&
+        candle.close <=
+          existingBodyHigh +
+            referenceAtr *
+              GOLDILOCKS_BALANCE_DETECTION.closeAcceptanceToleranceAtr;
+      const prospective = [...balanceIndices, index];
+      const prospectiveBodyLow = Math.min(
+        ...prospective.map((item) =>
+          Math.min(candles[item].open, candles[item].close),
+        ),
+      );
+      const prospectiveBodyHigh = Math.max(
+        ...prospective.map((item) =>
+          Math.max(candles[item].open, candles[item].close),
+        ),
+      );
+      const prospectiveWickLow = Math.min(
+        ...prospective.map((item) => candles[item].low),
+      );
+      const prospectiveWickHigh = Math.max(
+        ...prospective.map((item) => candles[item].high),
+      );
+      const drift = Math.abs(candle.close - candles[balanceIndices[0]].close);
+      const remainsBalanced =
+        (overlapFraction >=
+          GOLDILOCKS_BALANCE_DETECTION.minimumBodyOverlapFraction ||
+          closeAccepted) &&
+        (prospectiveBodyHigh - prospectiveBodyLow) / referenceAtr <=
+          GOLDILOCKS_BALANCE_DETECTION.maximumBalanceBodyWidthAtr &&
+        (prospectiveWickHigh - prospectiveWickLow) / referenceAtr <=
+          GOLDILOCKS_BALANCE_DETECTION.maximumBalanceWickWidthAtr &&
+        drift / referenceAtr <=
+          GOLDILOCKS_BALANCE_DETECTION.maximumBalanceDriftAtr;
+      if (!remainsBalanced) break;
+      balanceIndices.push(index);
+      if (closeAccepted) acceptedInside += 1;
+    }
+
+    if (departureIndex < 0 || !departure) continue;
+    const balanceCandles = balanceIndices.map((index) => candles[index]);
+    const bodyLow = Math.min(
+      ...balanceCandles.map((candle) => Math.min(candle.open, candle.close)),
+    );
+    const bodyHigh = Math.max(
+      ...balanceCandles.map((candle) => Math.max(candle.open, candle.close)),
+    );
+    const wickLow = Math.min(...balanceCandles.map((candle) => candle.low));
+    const wickHigh = Math.max(...balanceCandles.map((candle) => candle.high));
+    if (
+      balanceCandles.length === 1 &&
+      ((bodyHigh - bodyLow) / referenceAtr >
+        GOLDILOCKS_BALANCE_DETECTION.maximumSingleBalanceBodyWidthAtr ||
+        (wickHigh - wickLow) / referenceAtr >
+          GOLDILOCKS_BALANCE_DETECTION.maximumSingleBalanceWickWidthAtr)
+    )
+      continue;
+    const side =
+      departure.direction === "bullish"
+        ? ("demand" as const)
+        : ("supply" as const);
+    const low = side === "demand" ? wickLow : bodyLow;
+    const high = side === "demand" ? bodyHigh : wickHigh;
+    const width = high - low;
+    if (width <= 0) continue;
+    const arrivalSideOutside =
+      arrival.direction === "bullish"
+        ? candles[arrivalIndex - 1]?.high < low
+        : candles[arrivalIndex - 1]?.low > high;
+    const exitIndex = departureEndIndex + 1;
+    const exitCandle = candles[exitIndex];
+    const holdIndex = exitIndex + 1;
+    const holdCandle = candles[holdIndex];
+    const departureSideOutside =
+      departure.direction === "bullish"
+        ? exitCandle?.low > high
+        : exitCandle?.high < low;
+    const departureSideHeld =
+      departure.direction === "bullish"
+        ? holdCandle?.low > high
+        : holdCandle?.high < low;
+    const arrivalCloseStrength =
+      arrival.direction === "bullish"
+        ? arrival.closeLocation
+        : 1 - arrival.closeLocation;
+    const departureCloseStrength =
+      departure.direction === "bullish"
+        ? departure.closeLocation
+        : 1 - departure.closeLocation;
+    const matchingImpulseSignature =
+      departure.rangeAtr / arrival.rangeAtr >=
+        GOLDILOCKS_BALANCE_DETECTION.minimumDepartureArrivalRangeRatio &&
+      departure.rangeAtr / arrival.rangeAtr <=
+        GOLDILOCKS_BALANCE_DETECTION.maximumDepartureArrivalRangeRatio &&
+      departure.bodyFraction >=
+        arrival.bodyFraction -
+          GOLDILOCKS_BALANCE_DETECTION.maximumDepartureBodyFractionDeficit &&
+      departureCloseStrength >=
+        arrivalCloseStrength -
+          GOLDILOCKS_BALANCE_DETECTION.maximumDepartureCloseStrengthDeficit;
+    if (
+      !arrivalSideOutside ||
+      !departureSideOutside ||
+      !departureSideHeld ||
+      !matchingImpulseSignature
+    )
+      continue;
+    const pattern =
+      `${arrival.direction === "bullish" ? "up" : "down"}-balance-${departure.direction === "bullish" ? "up" : "down"}` as NonNullable<
+        GoldilocksZone["imbalancePattern"]
+      >;
+    const departureCandle = {
+      time: candles[departureEndIndex].time,
+      open: candles[departureIndex].open,
+      high: departure.high,
+      low: departure.low,
+      close: candles[departureEndIndex].close,
+    };
+    const departureDistance =
+      side === "demand"
+        ? Math.max(0, exitCandle.close - high)
+        : Math.max(0, low - exitCandle.close);
+    const wickDepartureDistance =
+      side === "demand"
+        ? Math.max(0, exitCandle.high - high)
+        : Math.max(0, low - exitCandle.low);
+    let state: GoldilocksZoneState = "fresh";
+    let invalidatedAt: number | undefined;
+    let firstTouchIndex: number | undefined;
+    let touches = 0;
+    let insideVisit = false;
+    for (let index = holdIndex + 1; index < candles.length; index += 1) {
+      const candle = candles[index];
+      const invalid = side === "demand" ? candle.low < low : candle.high > high;
+      if (invalid) {
+        state = "invalidated";
+        invalidatedAt = candle.time;
+        break;
+      }
+      const touched = candle.high >= low && candle.low <= high;
+      if (!touched) {
+        insideVisit = false;
+        continue;
+      }
+      if (insideVisit) continue;
+      insideVisit = true;
+      touches += 1;
+      state = "touched";
+      firstTouchIndex ??= index;
+      if (touches > 3) {
+        state = "invalidated";
+        invalidatedAt = candle.time;
+        break;
+      }
+    }
+    const departureRange = departureCandle.high - departureCandle.low;
+    const rejectionWick =
+      side === "demand"
+        ? departureCandle.high -
+          Math.max(departureCandle.open, departureCandle.close)
+        : Math.min(departureCandle.open, departureCandle.close) -
+          departureCandle.low;
+    const bodyOverlaps = balanceIndices.slice(1).map((index, offset) => {
+      const candle = candles[index];
+      const previous = candles[balanceIndices[offset]];
+      const candleLow = Math.min(candle.open, candle.close),
+        candleHigh = Math.max(candle.open, candle.close);
+      const previousLow = Math.min(previous.open, previous.close),
+        previousHigh = Math.max(previous.open, previous.close);
+      const overlap = Math.max(
+        0,
+        Math.min(candleHigh, previousHigh) - Math.max(candleLow, previousLow),
+      );
+      return (
+        overlap /
+        Math.max(
+          Number.EPSILON,
+          Math.min(candleHigh - candleLow, previousHigh - previousLow),
+        )
+      );
+    });
+    zones.push({
+      id: `ibi-${pattern}-${candles[balanceIndices[0]].time}`,
+      kind: arrival.direction === departure.direction ? "continuation" : "base",
+      side,
+      candleIndex: balanceIndices[0],
+      candleTime: candles[balanceIndices[0]].time,
+      availableAt: holdCandle.time + candleSeconds,
+      low,
+      high,
+      width,
+      legMidpoint: (wickLow + wickHigh) / 2,
+      legRange: Math.max(
+        Number.EPSILON,
+        Math.max(candles[arrivalIndex].high, departureCandle.high) -
+          Math.min(candles[arrivalIndex].low, departureCandle.low),
+      ),
+      departureMultiple: departureDistance / width,
+      wickDepartureMultiple: wickDepartureDistance / width,
+      departureQuality: {
+        departureCandleTime: departureCandle.time,
+        departureCandleIndex: departureEndIndex,
+        candleRange: departureRange,
+        priorAtr14: referenceAtr,
+        rangeAtrMultiple: departure.rangeAtr,
+        bodyFraction: departure.bodyFraction,
+        rejectionWickFraction:
+          departureRange > 0 ? Math.max(0, rejectionWick) / departureRange : 0,
+        closeDepartureZoneMultiple: departureDistance / width,
+        wickDepartureZoneMultiple: wickDepartureDistance / width,
+        shockRejected: false,
+        reason:
+          "Research IBI departure passed the adaptive range, body, close-location, and balance-exit measurements.",
+      },
+      strength2x: departureDistance / width >= 2,
+      baseCandleCount: balanceIndices.length,
+      brokeOppositeLegIn: false,
+      touches,
+      maxPenetration: 0,
+      state,
+      invalidatedAt,
+      firstTouchIndex,
+      zoneFamily: "imbalance-balance",
+      imbalancePattern: pattern,
+      balanceMetrics: {
+        candleCount: balanceIndices.length,
+        bodyWidthAtr: (bodyHigh - bodyLow) / referenceAtr,
+        wickWidthAtr: (wickHigh - wickLow) / referenceAtr,
+        closeContainmentFraction: acceptedInside / balanceIndices.length,
+        medianBodyOverlapFraction: median(bodyOverlaps),
+        driftAtr:
+          Math.abs(balanceCandles.at(-1)!.close - balanceCandles[0].close) /
+          referenceAtr,
+        arrivalDirection: arrival.direction,
+        departureDirection: departure.direction,
+        arrivalRangeAtr: arrival.rangeAtr,
+        departureRangeAtr: departure.rangeAtr,
+        departureBodyFraction: departure.bodyFraction,
+        departureCloseLocation: departure.closeLocation,
+      },
+      reasons: [
+        `Research IBI ${pattern.toUpperCase()} zone drawn from ${balanceIndices.length} adaptively accepted ${timeframeLabel} balance candle(s); no maximum duration is used.`,
+        `Balance body width ${((bodyHigh - bodyLow) / referenceAtr).toFixed(2)} ATR; wick width ${((wickHigh - wickLow) / referenceAtr).toFixed(2)} ATR; close containment ${((acceptedInside / balanceIndices.length) * 100).toFixed(1)}%.`,
+        `Departure ${departure.rangeAtr.toFixed(2)} ATR with ${(departure.bodyFraction * 100).toFixed(1)}% body and ${(departure.closeLocation * 100).toFixed(1)}% close location; two following ${timeframeLabel} candles completed fully outside the balance.`,
+        `Impulse signature retained ${((departure.rangeAtr / arrival.rangeAtr) * 100).toFixed(1)}% of arrival range strength with comparable body efficiency and directional close strength.`,
+        "Research display only: this zone does not create live/demo entries or alter the 20-point score.",
+      ],
+    });
+    // A strong candle may depart one balance and simultaneously arrive into the
+    // next compact continuation balance, so resume from the end of the impulse.
+    arrivalIndex = departureEndIndex - 1;
+  }
+  return zones;
 };
 
 const selectLargestOpposite = (
@@ -343,16 +1092,16 @@ const getZoneBounds = (
   legLow: number,
   legHigh: number,
 ) =>
-  direction === 'bullish'
+  direction === "bullish"
     ? {
-        low: kind === 'base' ? legLow : candle.low,
+        low: kind === "base" ? legLow : candle.low,
         high: candle.open,
-        side: 'demand' as const,
+        side: "demand" as const,
       }
     : {
         low: candle.open,
-        high: kind === 'base' ? legHigh : candle.high,
-        side: 'supply' as const,
+        high: kind === "base" ? legHigh : candle.high,
+        side: "supply" as const,
       };
 
 const getOverlappingContinuationCluster = (
@@ -363,10 +1112,7 @@ const getOverlappingContinuationCluster = (
 ) => {
   const group = [seedIndex];
   let left = seedIndex - 1;
-  while (
-    left >= minIndex &&
-    bodiesOverlap(candles[left], candles[left + 1])
-  ) {
+  while (left >= minIndex && bodiesOverlap(candles[left], candles[left + 1])) {
     group.unshift(left);
     left -= 1;
   }
@@ -395,141 +1141,170 @@ const evaluateZone = (
   const legRange = legHigh - legLow;
   const midpoint = legLow + legRange / 2;
   const width = bounds.high - bounds.low;
-  const atr14 = kind === 'continuation' ? atrAt(candles, candleIndex) : undefined;
-  const minimumContinuationWidth = atr14 === undefined
-    ? undefined
-    : Math.max(legRange * 0.02, atr14 * 0.5);
+  const atr14 =
+    kind === "continuation" ? atrAt(candles, candleIndex) : undefined;
+  const minimumContinuationWidth =
+    atr14 === undefined ? undefined : Math.max(legRange * 0.02, atr14 * 0.5);
 
-  if (width <= 0) return { rejected: 'Zone has no measurable width.' };
+  if (width <= 0) return { rejected: "Zone has no measurable width." };
   if (width > legRange * 0.25) {
-    return { rejected: 'Zone width is greater than 25% of the swing leg.' };
+    return { rejected: "Zone width is greater than 25% of the swing leg." };
   }
-  if (minimumContinuationWidth !== undefined && width < minimumContinuationWidth) {
+  if (
+    minimumContinuationWidth !== undefined &&
+    width < minimumContinuationWidth
+  ) {
     return {
       rejected: `Continuation zone is too thin: ${((width / atr14!) * 100).toFixed(1)}% of ATR(14); minimum width is the greater of 50% ATR(14) or 2% of the swing leg.`,
     };
   }
   if (
-    kind === 'continuation' &&
-    ((leg.direction === 'bullish' && bounds.high > midpoint) ||
-      (leg.direction === 'bearish' && bounds.low < midpoint))
+    kind === "continuation" &&
+    ((leg.direction === "bullish" && bounds.high > midpoint) ||
+      (leg.direction === "bearish" && bounds.low < midpoint))
   ) {
     return {
       rejected:
-        leg.direction === 'bullish'
-          ? 'Continuation demand is not fully below the 50% discount line.'
-          : 'Continuation supply is not fully above the 50% premium line.',
+        leg.direction === "bullish"
+          ? "Continuation demand is not fully below the 50% discount line."
+          : "Continuation supply is not fully above the 50% premium line.",
     };
   }
 
-  const futureIndices=Array.from({length:Math.max(0,leg.endIndex-candleIndex)},(_,offset)=>candleIndex+1+offset);
-  const future = futureIndices.map(index=>candles[index]);
+  const futureIndices = Array.from(
+    { length: Math.max(0, leg.endIndex - candleIndex) },
+    (_, offset) => candleIndex + 1 + offset,
+  );
+  const future = futureIndices.map((index) => candles[index]);
   const wickDepartureDistance =
-    leg.direction === 'bullish'
+    leg.direction === "bullish"
       ? Math.max(...future.map((item) => item.high), bounds.high) - bounds.high
       : bounds.low - Math.min(...future.map((item) => item.low), bounds.low);
-  const closeDepartureDistance=leg.direction==='bullish'
-    ?Math.max(...future.map(item=>item.close),bounds.high)-bounds.high
-    :bounds.low-Math.min(...future.map(item=>item.close),bounds.low);
-  const departureMultiple=closeDepartureDistance/width;
-  const wickDepartureMultiple=wickDepartureDistance/width;
-  const departureCandleIndex=futureIndices.reduce((best,index)=>{
-    if(best<0)return index;
-    return leg.direction==='bullish'
-      ?candles[index].high>candles[best].high?index:best
-      :candles[index].low<candles[best].low?index:best;
-  },-1);
-  const departureCandle=departureCandleIndex>=0?candles[departureCandleIndex]:candle;
-  const candleRange=Math.max(0,departureCandle.high-departureCandle.low);
-  const priorAtr14=departureCandleIndex>0?atrAt(candles,departureCandleIndex-1):undefined;
-  const rangeAtrMultiple=priorAtr14&&priorAtr14>0?candleRange/priorAtr14:undefined;
-  const bodyFraction=candleRange>0?Math.abs(departureCandle.close-departureCandle.open)/candleRange:0;
-  const rejectionWick=leg.direction==='bullish'
-    ?departureCandle.high-Math.max(departureCandle.open,departureCandle.close)
-    :Math.min(departureCandle.open,departureCandle.close)-departureCandle.low;
-  const rejectionWickFraction=candleRange>0?Math.max(0,rejectionWick)/candleRange:0;
-  const closeDepartureZoneMultiple=leg.direction==='bullish'
-    ?Math.max(0,departureCandle.close-bounds.high)/width
-    :Math.max(0,bounds.low-departureCandle.close)/width;
-  const shockRejected=rangeAtrMultiple!==undefined&&
-    rangeAtrMultiple>=GOLDILOCKS_DEPARTURE_QUALITY.shockRangeAtrMultiple&&
-    rejectionWickFraction>=GOLDILOCKS_DEPARTURE_QUALITY.rejectionWickFraction&&
-    closeDepartureZoneMultiple<GOLDILOCKS_DEPARTURE_QUALITY.minimumShockCloseDepartureZoneMultiple;
-  const departureQuality:GoldilocksDepartureQuality={
-    departureCandleTime:departureCandle.time,
+  const closeDepartureDistance =
+    leg.direction === "bullish"
+      ? Math.max(...future.map((item) => item.close), bounds.high) - bounds.high
+      : bounds.low - Math.min(...future.map((item) => item.close), bounds.low);
+  const departureMultiple = closeDepartureDistance / width;
+  const wickDepartureMultiple = wickDepartureDistance / width;
+  const departureCandleIndex =
+    futureIndices.find((index) =>
+      leg.direction === "bullish"
+        ? candles[index].close > bounds.high
+        : candles[index].close < bounds.low,
+    ) ?? -1;
+  const departureCandle =
+    departureCandleIndex >= 0 ? candles[departureCandleIndex] : candle;
+  const candleRange = Math.max(0, departureCandle.high - departureCandle.low);
+  const priorAtr14 =
+    departureCandleIndex > 0
+      ? atrAt(candles, departureCandleIndex - 1)
+      : undefined;
+  const rangeAtrMultiple =
+    priorAtr14 && priorAtr14 > 0 ? candleRange / priorAtr14 : undefined;
+  const bodyFraction =
+    candleRange > 0
+      ? Math.abs(departureCandle.close - departureCandle.open) / candleRange
+      : 0;
+  const rejectionWick =
+    leg.direction === "bullish"
+      ? departureCandle.high -
+        Math.max(departureCandle.open, departureCandle.close)
+      : Math.min(departureCandle.open, departureCandle.close) -
+        departureCandle.low;
+  const rejectionWickFraction =
+    candleRange > 0 ? Math.max(0, rejectionWick) / candleRange : 0;
+  const closeDepartureZoneMultiple =
+    leg.direction === "bullish"
+      ? Math.max(0, departureCandle.close - bounds.high) / width
+      : Math.max(0, bounds.low - departureCandle.close) / width;
+  const shockWarningCount =
+    rangeAtrMultiple === undefined
+      ? 0
+      : countDepartureShockWarnings(
+          rangeAtrMultiple,
+          rejectionWickFraction,
+          closeDepartureZoneMultiple,
+          GOLDILOCKS_DEPARTURE_QUALITY,
+        );
+  const shockRejected = shockWarningCount >= 2;
+  const departureQuality: GoldilocksDepartureQuality = {
+    departureCandleTime: departureCandle.time,
     departureCandleIndex,
-    candleRange,priorAtr14,rangeAtrMultiple,bodyFraction,rejectionWickFraction,
-    closeDepartureZoneMultiple,wickDepartureZoneMultiple:wickDepartureMultiple,shockRejected,
-    reason:rangeAtrMultiple===undefined
-      ?'Departure quality has insufficient completed M15 history for a prior ATR(14) shock comparison.'
-      :shockRejected
-        ?`Shock/rejection departure rejected: ${rangeAtrMultiple.toFixed(2)}x ATR range, ${(rejectionWickFraction*100).toFixed(1)}% rejection wick, and only ${closeDepartureZoneMultiple.toFixed(2)}x zone-width close displacement.`
-        :`Departure quality passed: ${rangeAtrMultiple.toFixed(2)}x ATR range, ${(rejectionWickFraction*100).toFixed(1)}% rejection wick, and ${closeDepartureZoneMultiple.toFixed(2)}x zone-width close displacement.`,
+    candleRange,
+    priorAtr14,
+    rangeAtrMultiple,
+    bodyFraction,
+    rejectionWickFraction,
+    closeDepartureZoneMultiple,
+    wickDepartureZoneMultiple: wickDepartureMultiple,
+    shockRejected,
+    reason:
+      rangeAtrMultiple === undefined
+        ? "Departure quality has insufficient completed M15 history for a prior ATR(14) shock comparison."
+        : shockRejected
+          ? `Shock/rejection departure rejected: ${shockWarningCount}/3 warnings matched · ${rangeAtrMultiple.toFixed(2)}x ATR range · ${(rejectionWickFraction * 100).toFixed(1)}% rejection wick · ${closeDepartureZoneMultiple.toFixed(2)}x zone-width close displacement.`
+          : `Departure quality passed: ${rangeAtrMultiple.toFixed(2)}x ATR range, ${(rejectionWickFraction * 100).toFixed(1)}% rejection wick, and ${closeDepartureZoneMultiple.toFixed(2)}x zone-width close displacement.`,
   };
   const strength2x = departureMultiple >= 2;
   let departureConfirmed = false;
   let touchCountingStarted = false;
   let touches = 0;
-  let maxPenetration = 0;
-  const touchPenetrations:number[]=[];
-  let state: GoldilocksZoneState = 'fresh';
+  let state: GoldilocksZoneState = "fresh";
   let invalidatedAt: number | undefined;
   let firstTouchIndex: number | undefined;
+  let insideVisit = false;
 
   for (let index = candleIndex + 1; index <= leg.endIndex; index += 1) {
     const current = candles[index];
     const invalid =
-      leg.direction === 'bullish'
+      leg.direction === "bullish"
         ? current.low < bounds.low
         : current.high > bounds.high;
     if (invalid) {
-      state = 'invalidated';
+      state = "invalidated";
       invalidatedAt = current.time;
       break;
     }
     const moveAway =
-      leg.direction === 'bullish'
+      leg.direction === "bullish"
         ? current.high - bounds.high
         : bounds.low - current.low;
     const outside =
-      leg.direction === 'bullish'
+      leg.direction === "bullish"
         ? current.low > bounds.high
         : current.high < bounds.low;
     if (outside) {
       touchCountingStarted = true;
-      if (!departureConfirmed && moveAway >= width * 2) departureConfirmed = true;
+      insideVisit = false;
+      if (!departureConfirmed && moveAway >= width * 2)
+        departureConfirmed = true;
       continue;
     }
 
     if (!departureConfirmed && moveAway >= width * 2) departureConfirmed = true;
 
     const touched =
-      leg.direction === 'bullish'
+      leg.direction === "bullish"
         ? current.low <= bounds.high
         : current.high >= bounds.low;
-    if (touched && touchCountingStarted) {
+    if (touched && touchCountingStarted && !insideVisit) {
+      insideVisit = true;
       touches += 1;
-      state = 'touched';
+      state = "touched";
       firstTouchIndex ??= index;
-      const penetration =
-        leg.direction === 'bullish'
-          ? (bounds.high - current.low) / width
-          : (current.high - bounds.low) / width;
-      maxPenetration = Math.max(maxPenetration, Math.max(0, penetration));
-      touchPenetrations.push(Math.max(0,penetration));
     }
   }
 
   const reasons = [
-    kind === 'base'
-      ? leg.direction === 'bullish'
-        ? 'Body boundary comes from the selected opposite candle; distal boundary uses the leg low.'
-        : 'Body boundary comes from the selected opposite candle; distal boundary uses the leg high.'
-      : leg.direction === 'bullish'
-        ? 'Lowest qualifying opposite-direction continuation candle in discount.'
-        : 'Highest qualifying opposite-direction continuation candle in premium.',
+    kind === "base"
+      ? leg.direction === "bullish"
+        ? "Body boundary comes from the selected opposite candle; distal boundary uses the leg low."
+        : "Body boundary comes from the selected opposite candle; distal boundary uses the leg high."
+      : leg.direction === "bullish"
+        ? "Lowest qualifying opposite-direction continuation candle in discount."
+        : "Highest qualifying opposite-direction continuation candle in premium.",
     `Zone width is ${((width / legRange) * 100).toFixed(1)}% of the swing leg.`,
-    ...(kind === 'continuation' && atr14 !== undefined
+    ...(kind === "continuation" && atr14 !== undefined
       ? [`Zone width is ${((width / atr14) * 100).toFixed(1)}% of ATR(14).`]
       : []),
     strength2x
@@ -557,8 +1332,7 @@ const evaluateZone = (
     baseCandleCount,
     brokeOppositeLegIn: leg.brokeOppositeLegIn ?? false,
     touches,
-    maxPenetration,
-    touchPenetrations,
+    maxPenetration: 0,
     state,
     invalidatedAt,
     firstTouchIndex,
@@ -570,22 +1344,31 @@ export const detectGoldilocksZones = (
   candles: StrategyCandle[],
   leg: SwingLeg,
 ): GoldilocksDetection => {
-  if (leg.startIndex < 0 || leg.endIndex >= candles.length || leg.startIndex >= leg.endIndex) {
-    throw new Error('Invalid swing leg indices.');
+  if (
+    leg.startIndex < 0 ||
+    leg.endIndex >= candles.length ||
+    leg.startIndex >= leg.endIndex
+  ) {
+    throw new Error("Invalid swing leg indices.");
   }
 
   const legCandles = candles.slice(leg.startIndex, leg.endIndex + 1);
   const legLow = Math.min(...legCandles.map((candle) => candle.low));
   const legHigh = Math.max(...legCandles.map((candle) => candle.high));
   const midpoint = legLow + (legHigh - legLow) / 2;
-  const rejected: GoldilocksDetection['rejected'] = [];
+  const rejected: GoldilocksDetection["rejected"] = [];
   const zones: GoldilocksZone[] = [];
 
-  let baseSeed=leg.startIndex;
-  while(baseSeed>=0&&!isOpposite(candles[baseSeed],leg.direction))baseSeed-=1;
-  const baseGroup = baseSeed>=0?[baseSeed]:[leg.startIndex];
-  for(let index=baseSeed-1;index>=0;index-=1){
-    if(!isOpposite(candles[index],leg.direction)||!bodiesOverlap(candles[index],candles[index+1]))break;
+  let baseSeed = leg.startIndex;
+  while (baseSeed >= 0 && !isOpposite(candles[baseSeed], leg.direction))
+    baseSeed -= 1;
+  const baseGroup = baseSeed >= 0 ? [baseSeed] : [leg.startIndex];
+  for (let index = baseSeed - 1; index >= 0; index -= 1) {
+    if (
+      !isOpposite(candles[index], leg.direction) ||
+      !bodiesOverlap(candles[index], candles[index + 1])
+    )
+      break;
     baseGroup.unshift(index);
   }
   for (let index = baseSeed + 1; index < leg.endIndex; index += 1) {
@@ -595,10 +1378,22 @@ export const detectGoldilocksZones = (
   }
   const baseIndex = selectLargestOpposite(candles, baseGroup, leg.direction);
   if (baseIndex === undefined) {
-    rejected.push({ candleIndex: leg.startIndex, reason: 'Swing base has no opposite-direction candle.' });
+    rejected.push({
+      candleIndex: leg.startIndex,
+      reason: "Swing base has no opposite-direction candle.",
+    });
   } else {
-    const base = evaluateZone(candles, leg, 'base', baseIndex, legLow, legHigh, baseGroup.length);
-    if ('rejected' in base) rejected.push({ candleIndex: baseIndex, reason: base.rejected });
+    const base = evaluateZone(
+      candles,
+      leg,
+      "base",
+      baseIndex,
+      legLow,
+      legHigh,
+      baseGroup.length,
+    );
+    if ("rejected" in base)
+      rejected.push({ candleIndex: baseIndex, reason: base.rejected });
     else zones.push(base);
   }
 
@@ -606,7 +1401,8 @@ export const detectGoldilocksZones = (
   const consumed = new Set<number>();
   const continuationStart = Math.max(...baseGroup) + 1;
   for (let index = continuationStart; index < leg.endIndex; index += 1) {
-    if (consumed.has(index) || !isOpposite(candles[index], leg.direction)) continue;
+    if (consumed.has(index) || !isOpposite(candles[index], leg.direction))
+      continue;
     const group = getOverlappingContinuationCluster(
       candles,
       index,
@@ -616,43 +1412,54 @@ export const detectGoldilocksZones = (
     group.forEach((item) => consumed.add(item));
     const selected = selectLargestOpposite(candles, group, leg.direction);
     if (selected === undefined) continue;
-    const result = evaluateZone(candles, leg, 'continuation', selected, legLow, legHigh, group.length);
-    if ('rejected' in result) {
+    const result = evaluateZone(
+      candles,
+      leg,
+      "continuation",
+      selected,
+      legLow,
+      legHigh,
+      group.length,
+    );
+    if ("rejected" in result) {
       rejected.push({ candleIndex: selected, reason: result.rejected });
-    } else if (result.state === 'invalidated') {
+    } else if (result.state === "invalidated") {
       rejected.push({
         candleIndex: selected,
-        reason: 'Continuation broke through its distal boundary before it could remain an active zone.',
+        reason:
+          "Continuation broke through its distal boundary before it could remain an active zone.",
       });
     } else {
-      const position = ((result.low + result.high) / 2 - legLow) / (legHigh - legLow);
+      const position =
+        ((result.low + result.high) / 2 - legLow) / (legHigh - legLow);
       const inContinuationBand =
-        leg.direction === 'bullish'
+        leg.direction === "bullish"
           ? position >= 0.25 && position <= 0.49
           : position >= 0.51 && position <= 0.75;
-      const baseZone = zones.find((zone) => zone.kind === 'base');
+      const baseZone = zones.find((zone) => zone.kind === "base");
       const minimumGap = (legHigh - legLow) * 0.05;
       const separatedFromBase =
         !baseZone ||
-        (leg.direction === 'bullish'
+        (leg.direction === "bullish"
           ? result.low - baseZone.high >= minimumGap
           : baseZone.low - result.high >= minimumGap);
       if (!inContinuationBand) {
         rejected.push({
           candleIndex: selected,
           reason:
-            leg.direction === 'bullish'
-              ? 'Continuation demand midpoint is outside the 25%-49% leg band.'
-              : 'Continuation supply midpoint is outside the mirrored 51%-75% leg band.',
+            leg.direction === "bullish"
+              ? "Continuation demand midpoint is outside the 25%-49% leg band."
+              : "Continuation supply midpoint is outside the mirrored 51%-75% leg band.",
         });
       } else if (!separatedFromBase) {
         rejected.push({
           candleIndex: selected,
-          reason: 'Continuation zone overlaps the base or is within 5% of the leg from it.',
+          reason:
+            "Continuation zone overlaps the base or is within 5% of the leg from it.",
         });
       } else {
         result.reasons.unshift(
-          leg.direction === 'bullish'
+          leg.direction === "bullish"
             ? `Zone midpoint is at ${(position * 100).toFixed(1)}% of the leg (25%-49% discount band).`
             : `Zone midpoint is at ${(position * 100).toFixed(1)}% of the leg (51%-75% premium band).`,
         );
@@ -662,23 +1469,26 @@ export const detectGoldilocksZones = (
   }
 
   candidates.sort((a, b) =>
-    leg.direction === 'bullish' ? a.low - b.low : b.high - a.high,
+    leg.direction === "bullish" ? a.low - b.low : b.high - a.high,
   );
   if (candidates[0]) {
     const continuation = candidates[0];
-    const baseZone = zones.find((zone) => zone.kind === 'base');
+    const baseZone = zones.find((zone) => zone.kind === "base");
     if (baseZone) {
-      const baseReachedAt = candles.findIndex((candle, index) =>
-        index > continuation.candleIndex &&
-        index <= leg.endIndex &&
-        (leg.direction === 'bullish'
-          ? candle.low <= baseZone.high
-          : candle.high >= baseZone.low),
+      const baseReachedAt = candles.findIndex(
+        (candle, index) =>
+          index > continuation.candleIndex &&
+          index <= leg.endIndex &&
+          (leg.direction === "bullish"
+            ? candle.low <= baseZone.high
+            : candle.high >= baseZone.low),
       );
       if (baseReachedAt >= 0) {
-        continuation.state = 'invalidated';
+        continuation.state = "invalidated";
         continuation.invalidatedAt = candles[baseReachedAt].time;
-        continuation.reasons.push('Price later reached the same-side base, so this continuation is no longer active.');
+        continuation.reasons.push(
+          "Price later reached the same-side base, so this continuation is no longer active.",
+        );
       }
     }
     zones.push(continuation);
@@ -692,94 +1502,130 @@ export const detectGoldilocksZoneHistory = (
   legs: SwingLeg[],
   options: { trackTouches?: boolean } = {},
 ): GoldilocksZoneHistory => {
-  const trackTouches=options.trackTouches??true;
+  const trackTouches = options.trackTouches ?? true;
   const byId = new Map<string, GoldilocksZone>();
   const baseByLeg = new Map<string, GoldilocksZone>();
 
-  for (const leg of [...legs].sort((a,b)=>a.endIndex-b.endIndex)) {
+  for (const leg of [...legs].sort((a, b) => a.endIndex - b.endIndex)) {
     const detection = detectGoldilocksZones(candles, leg);
     const legKey = `${leg.direction}-${leg.startIndex}-${leg.endIndex}`;
-    const base = detection.zones.find(zone=>zone.kind==='base');
+    const base = detection.zones.find((zone) => zone.kind === "base");
     if (base) baseByLeg.set(legKey, base);
     for (const detected of detection.zones) {
-      const zone:GoldilocksZone={...detected,reasons:[...detected.reasons]};
-      if(zone.state==='touched')zone.state='fresh';
-      zone.touches=0;
-      zone.firstTouchIndex=undefined;
-      zone.maxPenetration=0;
-      zone.touchPenetrations=[];
-      const relatedBase=baseByLeg.get(legKey);
-      let touchCountingStarted=candles
-        .slice(zone.candleIndex+1,leg.endIndex+1)
-        .some(candle=>zone.side==='demand'?candle.low>zone.high:candle.high<zone.low);
-      for(let index=leg.endIndex+1;index<candles.length;index+=1){
-        const candle=candles[index];
-        const invalid=zone.side==='demand'?candle.low<zone.low:candle.high>zone.high;
-        const continuationBaseReached=zone.kind==='continuation'&&relatedBase&&(
-          zone.side==='demand'?candle.low<=relatedBase.high:candle.high>=relatedBase.low
+      const zone: GoldilocksZone = {
+        ...detected,
+        reasons: [...detected.reasons],
+      };
+      if (zone.state === "touched") zone.state = "fresh";
+      zone.touches = 0;
+      zone.firstTouchIndex = undefined;
+      zone.maxPenetration = 0;
+      const relatedBase = baseByLeg.get(legKey);
+      let touchCountingStarted = candles
+        .slice(zone.candleIndex + 1, leg.endIndex + 1)
+        .some((candle) =>
+          zone.side === "demand"
+            ? candle.low > zone.high
+            : candle.high < zone.low,
         );
-        if(invalid||continuationBaseReached){
-          zone.state='invalidated';
-          zone.invalidatedAt=candle.time;
-          zone.reasons.push(invalid
-            ?'A later candle traded through the distal boundary.'
-            :'Price later reached the same-side base, invalidating this continuation.');
+      let insideVisit = false;
+      for (let index = leg.endIndex + 1; index < candles.length; index += 1) {
+        const candle = candles[index];
+        const invalid =
+          zone.side === "demand"
+            ? candle.low < zone.low
+            : candle.high > zone.high;
+        const continuationBaseReached =
+          zone.kind === "continuation" &&
+          relatedBase &&
+          (zone.side === "demand"
+            ? candle.low <= relatedBase.high
+            : candle.high >= relatedBase.low);
+        if (invalid || continuationBaseReached) {
+          zone.state = "invalidated";
+          zone.invalidatedAt = candle.time;
+          zone.reasons.push(
+            invalid
+              ? "A later candle traded through the distal boundary."
+              : "Price later reached the same-side base, invalidating this continuation.",
+          );
           break;
         }
-        const outside=zone.side==='demand'?candle.low>zone.high:candle.high<zone.low;
-        if(outside){touchCountingStarted=true;continue}
-        const touched=zone.side==='demand'?candle.low<=zone.high:candle.high>=zone.low;
-        if(trackTouches&&touched&&touchCountingStarted){
-          zone.state='touched';
-          zone.touches+=1;
-          zone.firstTouchIndex??=index;
-          const penetration=zone.side==='demand'
-            ?(zone.high-candle.low)/zone.width
-            :(candle.high-zone.low)/zone.width;
-          zone.maxPenetration=Math.max(zone.maxPenetration,Math.max(0,penetration));
-          zone.touchPenetrations?.push(Math.max(0,penetration));
-          if(zone.touches>3){
-            zone.state='invalidated';
-            zone.invalidatedAt=candle.time;
-            zone.reasons.push('Zone invalidated on its fourth qualifying touch; the maximum is three touches.');
+        const outside =
+          zone.side === "demand"
+            ? candle.low > zone.high
+            : candle.high < zone.low;
+        if (outside) {
+          touchCountingStarted = true;
+          insideVisit = false;
+          continue;
+        }
+        const touched =
+          zone.side === "demand"
+            ? candle.low <= zone.high
+            : candle.high >= zone.low;
+        if (trackTouches && touched && touchCountingStarted && !insideVisit) {
+          insideVisit = true;
+          zone.state = "touched";
+          zone.touches += 1;
+          zone.firstTouchIndex ??= index;
+          if (zone.touches > 3) {
+            zone.state = "invalidated";
+            zone.invalidatedAt = candle.time;
+            zone.reasons.push(
+              "Zone invalidated on its fourth qualifying touch; the maximum is three touches.",
+            );
             break;
           }
         }
       }
-      byId.set(`${legKey}-${zone.id}`,{...zone,id:`${legKey}-${zone.id}`});
+      byId.set(`${legKey}-${zone.id}`, { ...zone, id: `${legKey}-${zone.id}` });
     }
   }
 
-  const zones=[...byId.values()].sort((a,b)=>a.candleTime-b.candleTime);
-  const latestCandleTime=candles[candles.length-1]?.time;
-  if(latestCandleTime!==undefined){
-    const cutoff=twoCalendarYearsBefore(latestCandleTime);
-    for(const zone of zones){
-      if(zone.state!=='invalidated'&&zone.candleTime<cutoff){
-        zone.state='expired';
-        zone.expiredAt=latestCandleTime;
-        zone.reasons.push('Zone expired because it is more than two calendar years old.');
+  const zones = [...byId.values()].sort((a, b) => a.candleTime - b.candleTime);
+  const latestCandleTime = candles[candles.length - 1]?.time;
+  if (latestCandleTime !== undefined) {
+    const cutoff = latestCandleTime-GOLDILOCKS_MAX_ZONE_AGE_SECONDS;
+    for (const zone of zones) {
+      if (zone.state !== "invalidated" && zone.candleTime < cutoff) {
+        zone.state = "expired";
+        zone.expiredAt = latestCandleTime;
+        zone.reasons.push(
+          "Zone expired because it is more than 30 calendar days old.",
+        );
       }
     }
   }
-  const activeZones=zones.filter(zone=>zone.state!=='invalidated'&&zone.state!=='expired');
-  const newest=(side:GoldilocksZone['side'])=>activeZones
-    .filter(zone=>zone.side===side)
-    .sort((a,b)=>b.candleTime-a.candleTime)[0];
-  return {zones,activeZones,activeDemand:newest('demand'),activeSupply:newest('supply')};
+  const activeZones = zones.filter(
+    (zone) => zone.state !== "invalidated" && zone.state !== "expired",
+  );
+  const newest = (side: GoldilocksZone["side"]) =>
+    activeZones
+      .filter((zone) => zone.side === side)
+      .sort((a, b) => b.candleTime - a.candleTime)[0];
+  return {
+    zones,
+    activeZones,
+    activeDemand: newest("demand"),
+    activeSupply: newest("supply"),
+  };
 };
 
 export const validateTwoToOneRunway = (
   entryZone: GoldilocksZone,
   knownZones: GoldilocksZone[],
   confirmedEntryPrice?: number,
-  options?:{knownZonesUsableAtEntry?:boolean},
+  options?: { knownZonesUsableAtEntry?: boolean },
 ): TradeRunwayCheck => {
-  const direction: TradeRunwayCheck['direction'] = entryZone.side === 'demand' ? 'buy' : 'sell';
-  const entry = confirmedEntryPrice ?? (direction === 'buy' ? entryZone.high : entryZone.low);
-  const stopLoss = direction === 'buy' ? entryZone.low : entryZone.high;
-  const risk = direction === 'buy' ? entry - stopLoss : stopLoss - entry;
-  const takeProfit = direction === 'buy' ? entry + risk * 2 : entry - risk * 2;
+  const direction: TradeRunwayCheck["direction"] =
+    entryZone.side === "demand" ? "buy" : "sell";
+  const entry =
+    confirmedEntryPrice ??
+    (direction === "buy" ? entryZone.high : entryZone.low);
+  const stopLoss = direction === "buy" ? entryZone.low : entryZone.high;
+  const risk = direction === "buy" ? entry - stopLoss : stopLoss - entry;
+  const takeProfit = direction === "buy" ? entry + risk * 2 : entry - risk * 2;
   if (risk <= 0) {
     return {
       allowed: false,
@@ -792,23 +1638,40 @@ export const validateTwoToOneRunway = (
       ratio: 0,
       availableReward: 0,
       availableRatio: 0,
-      reason: 'Rejected: engulfing close is beyond the wrong side of the zone stop.',
+      reason:
+        "Rejected: engulfing close is beyond the wrong side of the zone stop.",
     };
   }
-  const opposingZone = getMostRecentActiveOpposingZone(entryZone, knownZones,options?.knownZonesUsableAtEntry);
+  const opposingZone = getMostRecentActiveOpposingZone(
+    entryZone,
+    knownZones,
+    options?.knownZonesUsableAtEntry,
+  );
   const availableReward = opposingZone
-    ? direction === 'buy'
+    ? direction === "buy"
       ? Math.max(0, opposingZone.low - entry)
       : Math.max(0, entry - opposingZone.high)
     : Number.POSITIVE_INFINITY;
   const availableRatio = availableReward / risk;
-  const blockingZone = opposingZone && (
-    direction === 'buy'
+  const blockingZone =
+    opposingZone &&
+    (direction === "buy"
       ? opposingZone.high > entry && opposingZone.low <= takeProfit
-      : opposingZone.low < entry && opposingZone.high >= takeProfit
-  ) ? opposingZone : undefined;
+      : opposingZone.low < entry && opposingZone.high >= takeProfit)
+      ? opposingZone
+      : undefined;
 
-  const common = { direction, entry, stopLoss, takeProfit, risk, reward: risk * 2, ratio: 2, availableReward, availableRatio };
+  const common = {
+    direction,
+    entry,
+    stopLoss,
+    takeProfit,
+    risk,
+    reward: risk * 2,
+    ratio: 2,
+    availableReward,
+    availableRatio,
+  };
   return blockingZone
     ? {
         ...common,
@@ -821,7 +1684,7 @@ export const validateTwoToOneRunway = (
         allowed: true,
         reason: opposingZone
           ? `Clear 2:1 runway: the most recent active ${opposingZone.kind} ${opposingZone.side} zone begins beyond target.`
-          : 'Clear 2:1 runway: no active opposing Goldilocks zone is currently stored.',
+          : "Clear 2:1 runway: no active opposing Goldilocks zone is currently stored.",
       };
 };
 
@@ -831,28 +1694,40 @@ export const validateFinalEntryAfterEngulf = (
   engulfClose: number,
   actualEntryPrice: number,
 ): FinalEntryCheck => {
-  if (entryZone.state === 'invalidated' || entryZone.state === 'expired') {
-    const direction:TradeRunwayCheck['direction']=entryZone.side==='demand'?'buy':'sell';
+  if (entryZone.state === "invalidated" || entryZone.state === "expired") {
+    const direction: TradeRunwayCheck["direction"] =
+      entryZone.side === "demand" ? "buy" : "sell";
     return {
-      allowed:false,direction,entry:actualEntryPrice,actualEntryPrice,engulfClose,
-      stopLoss:direction==='buy'?entryZone.low:entryZone.high,takeProfit:actualEntryPrice,
-      risk:0,reward:0,ratio:0,availableReward:0,availableRatio:0,priceMoved:actualEntryPrice!==engulfClose,
-      reason:entryZone.state==='expired'
-        ?'MISSED - DO NOT CHASE: the entry zone expired after two years.'
-        :'MISSED - DO NOT CHASE: the entry zone broke after confirmation.',
+      allowed: false,
+      direction,
+      entry: actualEntryPrice,
+      actualEntryPrice,
+      engulfClose,
+      stopLoss: direction === "buy" ? entryZone.low : entryZone.high,
+      takeProfit: actualEntryPrice,
+      risk: 0,
+      reward: 0,
+      ratio: 0,
+      availableReward: 0,
+      availableRatio: 0,
+      priceMoved: actualEntryPrice !== engulfClose,
+      reason:
+        entryZone.state === "expired"
+          ? "MISSED - DO NOT CHASE: the entry zone expired after 30 calendar days."
+          : "MISSED - DO NOT CHASE: the entry zone broke after confirmation.",
     };
   }
-  const check=validateTwoToOneRunway(entryZone,knownZones,actualEntryPrice);
+  const check = validateTwoToOneRunway(entryZone, knownZones, actualEntryPrice);
   return {
     ...check,
     engulfClose,
     actualEntryPrice,
-    priceMoved:actualEntryPrice!==engulfClose,
-    reason:check.allowed
-      ? actualEntryPrice===engulfClose
-        ?'Final 2:1 check passed at the engulf close.'
-        :'Final 2:1 check passed again at the current market price.'
-      :`MISSED - DO NOT CHASE: ${check.reason}`,
+    priceMoved: actualEntryPrice !== engulfClose,
+    reason: check.allowed
+      ? actualEntryPrice === engulfClose
+        ? "Final 2:1 check passed at the engulf close."
+        : "Final 2:1 check passed again at the current market price."
+      : `MISSED - DO NOT CHASE: ${check.reason}`,
   };
 };
 
@@ -870,13 +1745,23 @@ export const validateGoldilocksFinalExecutableEntry = (
   confirmationClose: number,
   executableEntry: number,
 ): GoldilocksFinalExecutableEntryCheck => {
-  const proximity=validateGoldilocksEntryProximity(zone,touchCandle,confirmationClose,executableEntry);
-  const runway=validateFinalEntryAfterEngulf(zone,knownZones,confirmationClose,executableEntry);
+  const proximity = validateGoldilocksEntryProximity(
+    zone,
+    touchCandle,
+    confirmationClose,
+    executableEntry,
+  );
+  const runway = validateFinalEntryAfterEngulf(
+    zone,
+    knownZones,
+    confirmationClose,
+    executableEntry,
+  );
   return {
-    allowed:proximity.allowed&&runway.allowed,
+    allowed: proximity.allowed && runway.allowed,
     proximity,
     runway,
-    reason:!proximity.allowed?proximity.reason:runway.reason,
+    reason: !proximity.allowed ? proximity.reason : runway.reason,
   };
 };
 
@@ -886,41 +1771,51 @@ export const countZoneTouchesBefore = (
   stopBeforeIndex: number,
 ): number => {
   let countingStarted = false;
+  let insideVisit = false;
   let touches = 0;
   const availableAt = zone.availableAt ?? zone.candleTime;
-  for (let index = Math.max(0, zone.candleIndex + 1); index < Math.min(stopBeforeIndex, candles.length); index += 1) {
+  for (
+    let index = Math.max(0, zone.candleIndex + 1);
+    index < Math.min(stopBeforeIndex, candles.length);
+    index += 1
+  ) {
     const candle = candles[index];
     if (candle.time <= availableAt) continue;
-    const invalid = zone.side === 'demand' ? candle.low < zone.low : candle.high > zone.high;
+    const invalid =
+      zone.side === "demand" ? candle.low < zone.low : candle.high > zone.high;
     if (invalid) break;
-    const outside = zone.side === 'demand' ? candle.low > zone.high : candle.high < zone.low;
-    if (outside) {
-      countingStarted = true;
+    const outside =
+      zone.side === "demand"
+        ? candle.close > zone.high
+        : candle.close < zone.low;
+    if (!countingStarted) {
+      if (outside) countingStarted = true;
       continue;
     }
     const touched = candle.high >= zone.low && candle.low <= zone.high;
-    if (touched && countingStarted) touches += 1;
+    if (touched && countingStarted && !insideVisit) {
+      touches += 1;
+      insideVisit = true;
+    }
   }
   return touches;
 };
 
 export interface HistoricalZoneTouchState {
   armed: boolean;
+  insideVisit: boolean;
   touchCandleIndex: number;
   totalTouches: number;
-  maxPenetration: number;
   touchesBeforeTouch: number;
-  maxPenetrationBeforeTouch: number;
   invalidated: boolean;
 }
 
 export const createHistoricalZoneTouchState = (): HistoricalZoneTouchState => ({
   armed: false,
+  insideVisit: false,
   touchCandleIndex: -1,
   totalTouches: 0,
-  maxPenetration: 0,
   touchesBeforeTouch: 0,
-  maxPenetrationBeforeTouch: 0,
   invalidated: false,
 });
 
@@ -928,8 +1823,7 @@ export interface ZoneTimeframeTouchSummary {
   firstOutsideTime?: number;
   departureInsideCandleCount: number;
   touches: number;
-  maxPenetration: number;
-  touchDetails: Array<{time:number;penetration:number;price:number}>;
+  touchDetails: Array<{ time: number; price: number }>;
   invalidated: boolean;
 }
 
@@ -939,25 +1833,104 @@ export const summarizeZoneTimeframeTouches = (
   candleSeconds: number,
   completedBefore = Number.POSITIVE_INFINITY,
 ): ZoneTimeframeTouchSummary => {
-  const summary:ZoneTimeframeTouchSummary={departureInsideCandleCount:0,touches:0,maxPenetration:0,touchDetails:[],invalidated:false};
-  for(const candle of candles){
-    if(candle.time<=zone.candleTime||candle.time+candleSeconds>completedBefore)continue;
-    const broken=zone.side==='demand'?candle.low<zone.low:candle.high>zone.high;
-    if(broken){summary.invalidated=true;break}
-    const outside=zone.side==='demand'?candle.low>zone.high:candle.high<zone.low;
-    if(summary.firstOutsideTime===undefined){
-      if(outside)summary.firstOutsideTime=candle.time;
-      else if(candle.high>=zone.low&&candle.low<=zone.high)summary.departureInsideCandleCount+=1;
+  const summary: ZoneTimeframeTouchSummary = {
+    departureInsideCandleCount: 0,
+    touches: 0,
+    touchDetails: [],
+    invalidated: false,
+  };
+  let insideVisit = false;
+  for (const candle of candles) {
+    if (
+      candle.time <= zone.candleTime ||
+      candle.time + candleSeconds > completedBefore
+    )
+      continue;
+    const broken =
+      zone.side === "demand" ? candle.low < zone.low : candle.high > zone.high;
+    if (broken) {
+      summary.invalidated = true;
+      break;
+    }
+    const outside =
+      zone.side === "demand"
+        ? candle.close > zone.high
+        : candle.close < zone.low;
+    if (summary.firstOutsideTime === undefined) {
+      if (outside) {
+        summary.firstOutsideTime = candle.time;
+        insideVisit = false;
+      } else if (candle.high >= zone.low && candle.low <= zone.high)
+        summary.departureInsideCandleCount += 1;
       continue;
     }
-    const touched=candle.high>=zone.low&&candle.low<=zone.high;
-    if(!touched)continue;
-    const raw=zone.side==='demand'?(zone.high-candle.low)/zone.width:(candle.high-zone.low)/zone.width;
-    summary.touches+=1;
-    const penetration=Math.max(0,Math.min(1,raw));
-    summary.maxPenetration=Math.max(summary.maxPenetration,penetration);
-    summary.touchDetails.push({time:candle.time,penetration,price:zone.side==='demand'?candle.low:candle.high});
-    if(summary.touches>3){summary.invalidated=true;break}
+    const touched = candle.high >= zone.low && candle.low <= zone.high;
+    if (!touched) {
+      insideVisit = false;
+      continue;
+    }
+    if (insideVisit) continue;
+    insideVisit = true;
+    summary.touches += 1;
+    summary.touchDetails.push({
+      time: candle.time,
+      price: zone.side === "demand" ? candle.low : candle.high,
+    });
+    if (summary.touches > 3) {
+      summary.invalidated = true;
+      break;
+    }
+  }
+  return summary;
+};
+
+/**
+ * Finds the first completed confirmation-timeframe candle that closes beyond the
+ * zone, then counts every later completed confirmation candle intersecting it.
+ * Consecutive touching candles count individually. The trigger candle is
+ * excluded by passing its open time as completedBefore.
+ */
+export const summarizeConfirmationTimeframeTouches = (
+  zone: GoldilocksZone,
+  candles: StrategyCandle[],
+  candleSeconds: number,
+  completedBefore = Number.POSITIVE_INFINITY,
+  maximumTouches = 3,
+): ZoneTimeframeTouchSummary => {
+  const summary: ZoneTimeframeTouchSummary = {
+    departureInsideCandleCount: 0,
+    touches: 0,
+    touchDetails: [],
+    invalidated: false,
+  };
+  for (const candle of candles) {
+    if (
+      candle.time <= zone.candleTime ||
+      candle.time + candleSeconds > completedBefore
+    )
+      continue;
+    const broken =
+      zone.side === "demand" ? candle.low < zone.low : candle.high > zone.high;
+    if (broken) {
+      summary.invalidated = true;
+      break;
+    }
+    const outside =
+      zone.side === "demand"
+        ? candle.close > zone.high
+        : candle.close < zone.low;
+    if (summary.firstOutsideTime === undefined) {
+      if (outside) summary.firstOutsideTime = candle.time;
+      continue;
+    }
+    const touched = candle.high >= zone.low && candle.low <= zone.high;
+    if (!touched) continue;
+    summary.touches += 1;
+    summary.touchDetails.push({
+      time: candle.time,
+      price: zone.side === "demand" ? candle.low : candle.high,
+    });
+    if (summary.touches > maximumTouches) summary.invalidated = true;
   }
   return summary;
 };
@@ -973,20 +1946,19 @@ export const observeHistoricalZoneCandle = (
   candleIndex: number,
   state: HistoricalZoneTouchState,
 ): HistoricalZoneTouchState => {
-  const outside=zone.side==='demand'?candle.low>zone.high:candle.high<zone.low;
-  const touched=candle.high>=zone.low&&candle.low<=zone.high;
-  if(outside)state.armed=true;
-  if(!touched||!state.armed)return state;
-  const rawPenetration=zone.side==='demand'
-    ?(zone.high-candle.low)/zone.width
-    :(candle.high-zone.low)/zone.width;
-  const penetration=Math.max(0,Math.min(1,rawPenetration));
-  state.touchesBeforeTouch=state.totalTouches;
-  state.maxPenetrationBeforeTouch=state.maxPenetration;
-  state.totalTouches+=1;
-  state.maxPenetration=Math.max(state.maxPenetration,penetration);
-  state.touchCandleIndex=candleIndex;
-  state.invalidated=state.totalTouches>3;
+  const outside =
+    zone.side === "demand" ? candle.low > zone.high : candle.high < zone.low;
+  const touched = candle.high >= zone.low && candle.low <= zone.high;
+  if (outside) {
+    state.armed = true;
+    state.insideVisit = false;
+  }
+  if (!touched || !state.armed || state.insideVisit) return state;
+  state.insideVisit = true;
+  state.touchesBeforeTouch = state.totalTouches;
+  state.totalTouches += 1;
+  state.touchCandleIndex = candleIndex;
+  state.invalidated = state.totalTouches > 3;
   return state;
 };
 
@@ -995,31 +1967,46 @@ export const findFullCandleEngulfing = (
   direction: GoldilocksDirection,
   startIndex = 1,
 ): EngulfingConfirmation => {
-  for (let index = Math.max(1, startIndex); index < candles.length; index += 1) {
+  for (
+    let index = Math.max(1, startIndex);
+    index < candles.length;
+    index += 1
+  ) {
     const previous = candles[index - 1];
     const current = candles[index];
     if (
-      direction === 'bullish' &&
+      direction === "bullish" &&
       previous.close < previous.open &&
       current.close > current.open &&
       current.high > previous.high &&
       current.low < previous.low &&
       current.close > previous.high
     ) {
-      return { confirmed: true, candleIndex: index, reason: 'Bullish candle engulfed the complete prior bearish candle.' };
+      return {
+        confirmed: true,
+        candleIndex: index,
+        reason: "Bullish candle engulfed the complete prior bearish candle.",
+      };
     }
     if (
-      direction === 'bearish' &&
+      direction === "bearish" &&
       previous.close > previous.open &&
       current.close < current.open &&
       current.high > previous.high &&
       current.low < previous.low &&
       current.close < previous.low
     ) {
-      return { confirmed: true, candleIndex: index, reason: 'Bearish candle engulfed the complete prior bullish candle.' };
+      return {
+        confirmed: true,
+        candleIndex: index,
+        reason: "Bearish candle engulfed the complete prior bullish candle.",
+      };
     }
   }
-  return { confirmed: false, reason: 'No complete lower-timeframe candle engulfing was found.' };
+  return {
+    confirmed: false,
+    reason: "No complete lower-timeframe candle engulfing was found.",
+  };
 };
 
 export const findCloseBeyondTouchedCandle = (
@@ -1029,28 +2016,47 @@ export const findCloseBeyondTouchedCandle = (
   startIndex = touchCandleIndex + 1,
 ): EngulfingConfirmation => {
   const touched = candles[touchCandleIndex];
-  if (!touched) return { confirmed: false, reason: 'The touched candle could not be found.' };
-  for (let index = Math.max(touchCandleIndex + 1, startIndex); index < candles.length; index += 1) {
+  if (!touched)
+    return {
+      confirmed: false,
+      reason: "The touched candle could not be found.",
+    };
+  for (
+    let index = Math.max(touchCandleIndex + 1, startIndex);
+    index < candles.length;
+    index += 1
+  ) {
     const current = candles[index];
-    if (direction === 'bullish' && current.close > current.open && current.close > touched.high) {
+    if (
+      direction === "bullish" &&
+      current.close > current.open &&
+      current.close > touched.high
+    ) {
       return {
         confirmed: true,
         candleIndex: index,
-        reason: 'Bullish confirmation closed above the touched candle wick high.',
+        reason:
+          "Bullish confirmation closed above the touched candle wick high.",
       };
     }
-    if (direction === 'bearish' && current.close < current.open && current.close < touched.low) {
+    if (
+      direction === "bearish" &&
+      current.close < current.open &&
+      current.close < touched.low
+    ) {
       return {
         confirmed: true,
         candleIndex: index,
-        reason: 'Bearish confirmation closed below the touched candle wick low.',
+        reason:
+          "Bearish confirmation closed below the touched candle wick low.",
       };
     }
   }
   return {
     confirmed: false,
-    reason: direction === 'bullish'
-      ? 'No bullish candle closed above the touched candle wick high.'
-      : 'No bearish candle closed below the touched candle wick low.',
+    reason:
+      direction === "bullish"
+        ? "No bullish candle closed above the touched candle wick high."
+        : "No bearish candle closed below the touched candle wick low.",
   };
 };

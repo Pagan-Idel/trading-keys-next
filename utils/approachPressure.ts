@@ -1,7 +1,7 @@
 import type { GoldilocksZone, StrategyCandle } from './goldilocksStrategy.ts';
 
 export interface GoldilocksApproachPressure {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17;
   zoneSide: 'demand' | 'supply';
   approachWindowCandles: number;
   approachReturnLegCandles?: number;
@@ -39,6 +39,7 @@ export interface GoldilocksApproachPressure {
   fastApproachCandleTimes?: number[];
   fastApproachCandleAtrMultiples?: number[];
   fastApproachCandleCount?: number;
+  fastApproachBurstCount?: number;
   fastApproachMaximumBodyAtr?: number;
   confirmationBodyFraction: number;
   confirmationCloseThroughZoneFraction: number;
@@ -64,8 +65,7 @@ const SWEEP_MAXIMUM_CLOSE_DRIFT_ATR=0.75;
 const SWEEP_MINIMUM_OVERLAP_FRACTION=0.35;
 const SWEEP_MINIMUM_BREACH_ATR=0.02;
 const SWEEP_REACTION_ATR=1;
-const FAST_APPROACH_BODY_ATR=1.2;
-const EXTREME_FAST_APPROACH_BODY_ATR=2;
+const FAST_APPROACH_BODY_ATR=1.5;
 const FAST_APPROACH_MINIMUM_BODY_FRACTION=0.6;
 const FAST_APPROACH_MINIMUM_CANDLES=2;
 
@@ -327,7 +327,7 @@ export const measureGoldilocksApproachPressure=(
   );
 
   const touch=candles[safeTouchIndex];
-  const fastApproachCandles=compression.flatMap((candle,index)=>{
+  const fastApproachCandidates=compression.map((candle,index)=>{
     const candleRange=Math.max(0,candle.high-candle.low);
     const directionalBody=zone.side==='supply'
       ?Math.max(0,candle.close-candle.open)
@@ -337,16 +337,27 @@ export const measureGoldilocksApproachPressure=(
     const bodyFraction=safeRatio(directionalBody,candleRange);
     return bodyAtr>=FAST_APPROACH_BODY_ATR
       &&bodyFraction>=FAST_APPROACH_MINIMUM_BODY_FRACTION
-      ?[{time:candle.time,bodyAtr}]
-      :[];
+      ?{time:candle.time,bodyAtr}
+      :null;
   });
+  const fastApproachBursts:Array<Array<{time:number;bodyAtr:number}>>=[];
+  let currentFastApproachBurst:Array<{time:number;bodyAtr:number}>=[];
+  const finishFastApproachBurst=()=>{
+    if(currentFastApproachBurst.length>=FAST_APPROACH_MINIMUM_CANDLES)
+      fastApproachBursts.push(currentFastApproachBurst);
+    currentFastApproachBurst=[];
+  };
+  for(const candidate of fastApproachCandidates){
+    if(candidate)currentFastApproachBurst.push(candidate);
+    else finishFastApproachBurst();
+  }
+  finishFastApproachBurst();
+  const fastApproachCandles=fastApproachBursts.flat();
   const fastApproachMaximumBodyAtr=Math.max(
     0,
     ...fastApproachCandles.map((item)=>item.bodyAtr),
   );
-  const approachMomentumVeto=
-    fastApproachCandles.length>=FAST_APPROACH_MINIMUM_CANDLES
-    ||fastApproachMaximumBodyAtr>=EXTREME_FAST_APPROACH_BODY_ATR;
+  const approachMomentumVeto=fastApproachBursts.length>0;
   const directionalApproach=directionalCloseFraction>=0.5||directionalStepFraction>=0.5;
   const approachClassification=approachMomentumVeto
     ?'momentum_drive'
@@ -382,7 +393,7 @@ export const measureGoldilocksApproachPressure=(
     :[];
 
   return {
-    version:16,
+    version:17,
     zoneSide:zone.side,
     approachWindowCandles:approach.length,
     approachReturnLegCandles:returnApproach.length,
@@ -422,6 +433,7 @@ export const measureGoldilocksApproachPressure=(
     fastApproachCandleTimes:fastApproachCandles.map((item)=>item.time),
     fastApproachCandleAtrMultiples:fastApproachCandles.map((item)=>item.bodyAtr),
     fastApproachCandleCount:fastApproachCandles.length,
+    fastApproachBurstCount:fastApproachBursts.length,
     fastApproachMaximumBodyAtr,
     confirmationBodyFraction,
     confirmationCloseThroughZoneFraction,

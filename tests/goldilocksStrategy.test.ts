@@ -447,7 +447,7 @@ test("measures backtest edge from realized R instead of protected-win labels", (
 });
 
 test("labels a new run with only its strategy version and run date", () => {
-  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.35");
+  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.36");
   assert.equal(
     getGoldilocksBacktestRunLabel(
       "lowerTimeframe",
@@ -818,7 +818,7 @@ test("does not call near-equal probes sweeps without a sharp ATR-qualified breac
     9,
   );
 
-  assert.equal(measured.version, 16);
+  assert.equal(measured.version, 17);
   assert.equal(measured.liquiditySweepCount, 0);
   assert.equal(measured.latestSweepTime, null);
   assert.equal(measured.approachEvidenceTime, 8);
@@ -865,6 +865,72 @@ test("separates tightening compression from a momentum drive into a zone", () =>
   assert.ok(!measured.adversePressureFlags.includes("compression_into_supply"));
   assert.ok(!measured.adversePressureFlags.includes("momentum_drive_into_supply"));
   assert.equal(measured.adversePressureScore, 0);
+});
+
+test("requires two consecutive 1.5 ATR attacking candles for one fast-attack burst", () => {
+  const steady = Array.from({ length: 14 }, (_, index) => ({
+    time: index + 1,
+    open: 100 + index * 0.2,
+    high: 100.6 + index * 0.2,
+    low: 99.6 + index * 0.2,
+    close: 100.2 + index * 0.2,
+  }));
+  const isolatedImpulse = {
+    time: 15,
+    open: 102.8,
+    high: 104.8,
+    low: 102.7,
+    close: 104.6,
+  };
+  const pause = {
+    time: 16,
+    open: 104.6,
+    high: 104.9,
+    low: 104.5,
+    close: 104.7,
+  };
+  const isolatedOnly = measureGoldilocksApproachPressure(
+    { side: "supply", low: 105, high: 106, width: 1, candleTime: 0 },
+    [
+      ...steady,
+      isolatedImpulse,
+      pause,
+      { time: 17, open: 104.7, high: 105.1, low: 104.6, close: 105 },
+      { time: 18, open: 105, high: 105.1, low: 104.4, close: 104.5 },
+    ],
+    16,
+    17,
+  );
+  assert.equal(isolatedOnly.fastApproachBurstCount, 0);
+  assert.equal(isolatedOnly.fastApproachCandleCount, 0);
+  assert.equal(isolatedOnly.approachMomentumVeto, false);
+  assert.ok(
+    !isolatedOnly.adversePressureFlags.includes("momentum_drive_into_supply"),
+  );
+
+  const consecutiveBurst = measureGoldilocksApproachPressure(
+    { side: "supply", low: 109, high: 110, width: 1, candleTime: 0 },
+    [
+      ...steady,
+      isolatedImpulse,
+      pause,
+      { time: 17, open: 104.7, high: 106.8, low: 104.6, close: 106.7 },
+      { time: 18, open: 106.7, high: 108.8, low: 106.6, close: 108.7 },
+      { time: 19, open: 108.7, high: 109.1, low: 108.6, close: 109 },
+      { time: 20, open: 109, high: 109.1, low: 108.4, close: 108.5 },
+    ],
+    18,
+    19,
+  );
+  assert.equal(consecutiveBurst.fastApproachBurstCount, 1);
+  assert.equal(consecutiveBurst.fastApproachCandleCount, 2);
+  assert.deepEqual(consecutiveBurst.approachEvidenceTimes, [17, 18]);
+  assert.equal(consecutiveBurst.approachMomentumVeto, true);
+  assert.ok(
+    consecutiveBurst.adversePressureFlags.includes(
+      "momentum_drive_into_supply",
+    ),
+  );
 });
 
 test("checks the complete close-away-to-touch leg instead of a fixed warning window", () => {
@@ -1046,10 +1112,11 @@ test("classifies approach shape only from the opposite extreme back to the zone"
   assert.equal(supply.sourceApproachCandles, 28);
   assert.equal(supply.approachReturnLegStartTime, 21);
   assert.equal(supply.approachReturnLegCandles, 8);
-  assert.equal(supply.approachClassification, "momentum_drive");
-  assert.equal(supply.fastApproachCandleCount, 3);
-  assert.deepEqual(supply.approachEvidenceTimes, [23, 26, 28]);
-  assert.ok(supply.adversePressureFlags.includes("momentum_drive_into_supply"));
+  assert.notEqual(supply.approachClassification, "momentum_drive");
+  assert.equal(supply.fastApproachBurstCount, 0);
+  assert.equal(supply.fastApproachCandleCount, 0);
+  assert.deepEqual(supply.approachEvidenceTimes, []);
+  assert.ok(!supply.adversePressureFlags.includes("momentum_drive_into_supply"));
 
   const demandCandles = supplyCandles.map((candle) => ({
     time: candle.time,
@@ -1065,8 +1132,8 @@ test("classifies approach shape only from the opposite extreme back to the zone"
     29,
   );
   assert.equal(demand.approachReturnLegStartTime, 21);
-  assert.equal(demand.approachClassification, "momentum_drive");
-  assert.ok(demand.adversePressureFlags.includes("momentum_drive_into_demand"));
+  assert.notEqual(demand.approachClassification, "momentum_drive");
+  assert.ok(!demand.adversePressureFlags.includes("momentum_drive_into_demand"));
 });
 
 test("keeps a long approach scope but promotes its warning analysis resolution", () => {

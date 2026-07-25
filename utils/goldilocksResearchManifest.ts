@@ -287,7 +287,7 @@ export const buildGoldilocksResearchManifest = (
       {
         name: "Approach pressure / confirmation bias",
         scored: true,
-        rule: `Causal pre-touch evidence: two scored warnings for a confirmed liquidity-pool sweep and a fast momentum approach. Every completed ${profile.confirmation} candle from the first close away through the candle before first touch defines the available causal span. Both diagnostics use only its return toward the base: from the latest lowest low for supply, or latest highest high for demand, through the candle before first touch. Long return legs retain that exact interval but aggregate to the smallest standard higher resolution producing at most 500 candles. There is no fixed lookback count. A sweep requires at least four contiguous sideways candles with tightly grouped adverse edges and meaningful overlap, a later wick through their shared edge that closes back inside, and at least one ATR of opposite reaction that closes through the pool midpoint before touch. Pool context may precede the return extreme only when the sweep candle is that extreme. Compression is retained as favorable/neutral context and never deducts points. A fast attacking candle closes toward the zone, has a body at least 1.2 times its prior ATR(14), and has a body covering at least 60% of its range. Two such candles on the return leg create the fast warning; one is sufficient when its body reaches 2 ATR. The pool breach and its reaction form one warning category, not separate deductions. The binary close-through confirmation remains the entry trigger; confirmation-strength research fields do not affect this warning score.`,
+        rule: `Causal pre-touch evidence: two scored warnings for a confirmed liquidity-pool sweep and a fast momentum approach. Every completed ${profile.confirmation} candle from the first close away through the candle before first touch defines the available causal span. Both diagnostics use only its return toward the base: from the latest lowest low for supply, or latest highest high for demand, through the candle before first touch. Long return legs retain that exact interval but aggregate to the smallest standard higher resolution producing at most 500 candles. There is no fixed lookback count. A sweep requires at least four contiguous sideways candles with tightly grouped adverse edges and meaningful overlap, a later wick through their shared edge that closes back inside, and at least one ATR of opposite reaction that closes through the pool midpoint before touch. Pool context may precede the return extreme only when the sweep candle is that extreme. Compression is retained as favorable/neutral context and never deducts points. A fast-attack burst requires at least two consecutive candles closing toward the zone, each with a body at least 1.5 times its prior ATR(14) and covering at least 60% of its range. Each qualifying run creates one fast-warning category; isolated candles never qualify. The pool breach and its reaction form one warning category, not separate deductions. The binary close-through confirmation remains the entry trigger; confirmation-strength research fields do not affect this warning score.`,
         thresholds: {
           minimumPoolCandles: 4,
           maximumPoolEdgeSpreadAtr: 0.25,
@@ -297,8 +297,7 @@ export const buildGoldilocksResearchManifest = (
           minimumSweepExcursionAtr: 0.02,
           minimumSweepExcursionZoneWidth: 0.01,
           recoveryDisplacementAtr: 1,
-          fastApproachBodyAtr: 1.2,
-          extremeFastApproachBodyAtr: 2,
+          fastApproachBodyAtr: 1.5,
           fastApproachMinimumBodyFraction: 0.6,
           fastApproachMinimumCandles: 2,
           compressionScore: 0.6,

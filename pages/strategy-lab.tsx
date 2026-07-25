@@ -1616,15 +1616,17 @@ export default function StrategyLab() {
                             {((trade.approachPressure.approachProgressEfficiency ?? 0) * 100).toFixed(1)}%
                             <span className="why">
                               Compression remains descriptive context and does
-                              not create a warning. A FAST ATTACK candle closes
-                              toward the zone, has a body of at least 1.2 prior
-                              ATR, and has a body covering at least 60% of its
-                              range. Two such candles trigger the warning; one
-                              is enough at 2 ATR. Compression, orderly, and
+                              not create a warning. A FAST ATTACK burst requires
+                              at least two consecutive candles closing toward
+                              the zone, each with a body of at least 1.5 prior
+                              ATR and at least 60% of its full range. Isolated
+                              candles do not count. Compression, orderly, and
                               mixed/unclear approaches do not create a warning.
                             </span>
                             <br />
-                            Fast attack candles{" "}
+                            Fast attack bursts{" "}
+                            {trade.approachPressure.fastApproachBurstCount ?? 0}
+                            {" · qualifying candles "}
                             {trade.approachPressure.fastApproachCandleCount ?? 0}
                             {" · strongest body "}
                             {(

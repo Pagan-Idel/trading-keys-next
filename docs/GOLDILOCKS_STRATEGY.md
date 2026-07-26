@@ -479,6 +479,10 @@ create one warning category; additional markers do not stack score deductions. T
 categories from zero to two and drives the five-point approach-warning score. New backtest trades
 persist the structured measurement; live/demo workers emit `approach_pressure_measured`
 and retain the same object in the trade journal. Existing records display `Legacy`.
+The offline regression fixture for `GL-GBPUSD-20260331-1210-8E930F13` preserves its
+actual causal M5 return-leg candles and must continue to produce the 1:15-1:45 AM CDT
+structural equal-low pool, 2:15 AM sweep, 2:30 AM recovery, three fast pushes, two
+warning categories, and a 9/20 score.
 New runs also persist a causal M5/M15/H1 supply-demand corridor snapshot and a shared
 M1 market-path summary. Each stored setup receives separate versioned research outcomes
 for a 22-policy research grid: set-and-forget targets from 1R to 5R, +1R break-even

@@ -105,6 +105,7 @@ import {
 } from "../utils/zoneAge";
 import { calculateBacktestPerformance } from "../utils/backtestAnalytics";
 import { measureGoldilocksApproachPressure } from "../utils/approachPressure";
+import { GBPUSD_20260331_1210_REGRESSION } from "./fixtures/gbpusd-20260331-1210";
 import {
   evaluateGoldilocksManagementPolicies,
   evaluateTradeManagementPolicy,
@@ -1139,6 +1140,76 @@ test("confirms a structural equal-low pool sweep with separated pivot reactions"
     23,
   );
   assert.equal(reusedBrokenPool.liquiditySweepCount, 0);
+});
+
+test(`keeps ${GBPUSD_20260331_1210_REGRESSION.tradeId} as the structural-sweep regression example`, () => {
+  const fixture = GBPUSD_20260331_1210_REGRESSION;
+  const candles: StrategyCandle[] = fixture.candles.map(
+    ([time, open, high, low, close]) => ({ time, open, high, low, close }),
+  );
+  const touchIndex = candles.findIndex(
+    (candle) => candle.time === fixture.touchTime,
+  );
+  const confirmationIndex = candles.findIndex(
+    (candle) => candle.time === fixture.confirmationTime,
+  );
+  assert.ok(touchIndex > 0);
+  assert.ok(confirmationIndex > touchIndex);
+
+  const measured = measureGoldilocksApproachPressure(
+    fixture.zone,
+    candles,
+    touchIndex,
+    confirmationIndex,
+    {
+      firstOutsideTime: fixture.fixtureStartTime,
+      sweepTimeframeSeconds: 300,
+    },
+  );
+  assert.equal(measured.version, fixture.expected.detectorVersion);
+  assert.deepEqual(measured.liquidityPoolKinds, ["structural"]);
+  assert.deepEqual(measured.liquidityPoolStartTimes, [
+    fixture.expected.poolStartTime,
+  ]);
+  assert.deepEqual(measured.liquidityPoolEndTimes, [
+    fixture.expected.poolEndTime,
+  ]);
+  assert.deepEqual(measured.liquiditySweepTimes, [
+    fixture.expected.sweepTime,
+  ]);
+  assert.deepEqual(measured.adverseRecoveryTimes, [
+    fixture.expected.recoveryTime,
+  ]);
+  assert.deepEqual(
+    measured.fastApproachPushStartTimes,
+    fixture.expected.fastPushStartTimes,
+  );
+  assert.deepEqual(
+    measured.fastApproachCandleTimes,
+    fixture.expected.fastPushEndTimes,
+  );
+  assert.equal(
+    measured.adversePressureScore,
+    fixture.expected.warningCategories,
+  );
+
+  const score = scoreGoldilocksSetup({
+    zone: fixture.zone,
+    tradeDirection: "SELL",
+    trend: "bearish",
+    minimumScore: 14,
+    purityTouches: 3,
+    adverseWarningCount: measured.adversePressureScore,
+    gates: [{ name: "fixture gates", passed: true, reason: "recorded pass" }],
+  });
+  assert.equal(score.total, fixture.expected.score);
+  assert.equal(score.eligible, false);
+  assert.equal(
+    score.components.find((component) =>
+      component.name.endsWith("approach warnings"),
+    )?.points,
+    0,
+  );
 });
 
 test("checks sweeps only from the opposite extreme through first touch", () => {

@@ -1553,17 +1553,19 @@ export default function StrategyLab() {
                           : "none"}
                         <span className="why">
                           The two possible warnings are a confirmed
-                          liquidity-pool sweep and a fast momentum drive into
+                          liquidity sweep and a fast momentum drive into
                           the zone. Compression is not penalized. A liquidity
-                          pool can be either at least four overlapping sideways
-                          candles or at least two separated swing pivots with
-                          equal adverse edges and a meaningful reaction away.
-                          The first later breach must sweep the shared edge,
-                          clear it by at least 0.15 prior ATR, close
+                          sweep can qualify in either of two ways. The standard
+                          path clears and reclaims a sideways or equal-pivot
+                          pool by at least 0.15 prior ATR, closes
                           back inside by at least 0.02 prior ATR or 1% of the
-                          zone width, and recover at least 1.25 ATR through the
-                          pool midpoint before price makes a
-                          newer adverse extreme. Sweeps are checked only on the return
+                          zone width, and recovers at least 1.25 ATR through the
+                          pool midpoint. Equal lows or highs are not required
+                          when a wick instead clears one prior swing by at
+                          least 3.25 ATR, then reclaims that swing with at
+                          least 1.25 ATR of recovery within three analysis
+                          candles. A newer adverse extreme cancels either
+                          pattern. Sweeps are checked only on the return
                           toward the base: from the latest lowest low for
                           supply or latest highest high for demand through
                           first touch. There is no fixed lookback count. The

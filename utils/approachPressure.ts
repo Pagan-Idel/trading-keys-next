@@ -1,7 +1,7 @@
 import type { GoldilocksZone, StrategyCandle } from './goldilocksStrategy.ts';
 
 export interface GoldilocksApproachPressure {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21;
   zoneSide: 'demand' | 'supply';
   approachWindowCandles: number;
   approachReturnLegCandles?: number;
@@ -15,7 +15,7 @@ export interface GoldilocksApproachPressure {
   liquiditySweepTimes?: number[];
   liquidityPoolStartTimes?: number[];
   liquidityPoolEndTimes?: number[];
-  liquidityPoolKinds?: Array<'contiguous'|'structural'>;
+  liquidityPoolKinds?: Array<'contiguous'|'structural'|'deep_reaction'>;
   adverseRecoveryTimes?: number[];
   approachEvidenceTimes?: number[];
   sweepTolerancePrice?: number;
@@ -72,6 +72,8 @@ const SWEEP_MINIMUM_OVERLAP_FRACTION=0.35;
 const SWEEP_MINIMUM_BREACH_ATR=0.15;
 const SWEEP_MINIMUM_RECLAIM_ATR=0.02;
 const SWEEP_REACTION_ATR=1.25;
+const DEEP_SWEEP_MINIMUM_BREACH_ATR=3.25;
+const DEEP_SWEEP_MAXIMUM_RECOVERY_CANDLES=3;
 const FAST_APPROACH_PULLBACK_ATR=0.35;
 const FAST_APPROACH_MINIMUM_DISPLACEMENT_ATR=2;
 const FAST_APPROACH_MINIMUM_DISPLACEMENT_ZONE_WIDTHS=1.25;
@@ -174,9 +176,10 @@ export const measureGoldilocksApproachPressure=(
     tolerance:number;
     poolStartTime:number;
     poolEndTime:number;
-    poolKind:'contiguous'|'structural';
+    poolKind:'contiguous'|'structural'|'deep_reaction';
     reactionTime:number;
   }>=[];
+  const deepSweeps:typeof sweeps=[];
   let lastConfirmedSweepIndex=-1;
 
   for(let index=sweepReturnLegStartIndex;index<sweepApproach.length;index+=1){
@@ -343,8 +346,68 @@ export const measureGoldilocksApproachPressure=(
       lastConfirmedSweepIndex=index;
       break;
     }
+    if(sweeps.at(-1)?.index===index)continue;
+
+    for(let pivotIndex=structuralPivots.length-1;pivotIndex>=0;pivotIndex-=1){
+      const pivot=structuralPivots[pivotIndex];
+      const reference=zone.side==='supply'?pivot.low:pivot.high;
+      const excursion=zone.side==='supply'
+        ?reference-candle.low
+        :candle.high-reference;
+      if(excursion<localAtr*DEEP_SWEEP_MINIMUM_BREACH_ATR)continue;
+      let reaction:StrategyCandle|undefined;
+      for(
+        let reactionIndex=index;
+        reactionIndex<Math.min(
+          sweepApproach.length,
+          index+DEEP_SWEEP_MAXIMUM_RECOVERY_CANDLES,
+        );
+        reactionIndex+=1
+      ){
+        const reactionCandle=sweepApproach[reactionIndex];
+        const madeNewAdverseExtreme=reactionIndex>index&&(
+          zone.side==='supply'
+            ?reactionCandle.low<candle.low
+            :reactionCandle.high>candle.high
+        );
+        if(madeNewAdverseExtreme)break;
+        const displacement=zone.side==='supply'
+          ?reactionCandle.close-candle.low
+          :candle.high-reactionCandle.close;
+        const reclaimedSwing=zone.side==='supply'
+          ?reactionCandle.close>=reference
+          :reactionCandle.close<=reference;
+        if(
+          reclaimedSwing
+          &&safeRatio(displacement,localAtr)>=SWEEP_REACTION_ATR
+        ){
+          reaction=reactionCandle;
+          break;
+        }
+      }
+      if(!reaction)continue;
+      deepSweeps.push({
+        index,
+        time:candle.time,
+        reference,
+        extreme:zone.side==='supply'?candle.low:candle.high,
+        depthAtr:safeRatio(excursion,localAtr),
+        atr:localAtr,
+        tolerance:localAtr*DEEP_SWEEP_MINIMUM_BREACH_ATR,
+        poolStartTime:pivot.time,
+        poolEndTime:pivot.time,
+        poolKind:'deep_reaction',
+        reactionTime:reaction.time,
+      });
+      break;
+    }
   }
 
+  sweeps.push(
+    ...deepSweeps.filter((deepSweep)=>
+      !sweeps.some((sweep)=>sweep.time===deepSweep.time)),
+  );
+  sweeps.sort((left,right)=>left.index-right.index);
   const latestSweep=sweeps.at(-1);
   const recoveryEvents=sweeps.map((sweep)=>({
     time:sweep.reactionTime,
@@ -540,7 +603,7 @@ export const measureGoldilocksApproachPressure=(
     :[];
 
   return {
-    version:20,
+    version:21,
     zoneSide:zone.side,
     approachWindowCandles:approach.length,
     approachReturnLegCandles:returnApproach.length,

@@ -448,7 +448,7 @@ test("measures backtest edge from realized R instead of protected-win labels", (
 });
 
 test("labels a new run with only its strategy version and run date", () => {
-  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.39");
+  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.40");
   assert.equal(
     getGoldilocksBacktestRunLabel(
       "lowerTimeframe",
@@ -821,7 +821,7 @@ test("does not call near-equal probes sweeps without a sharp ATR-qualified breac
     9,
   );
 
-  assert.equal(measured.version, 20);
+  assert.equal(measured.version, 21);
   assert.equal(measured.liquiditySweepCount, 0);
   assert.equal(measured.latestSweepTime, null);
   assert.equal(measured.approachEvidenceTime, 8);
@@ -1193,6 +1193,38 @@ test("rejects the shallow July 2 probe from GL-GBPJPY-20260706-0305-2C94E8FA", (
   assert.equal(measureCandidate(215.29, 215.39).liquiditySweepCount, 0);
 });
 
+test("counts a deep single-pivot break with an adverse recovery as a sweep", () => {
+  const candles: StrategyCandle[] = [
+    ...Array.from({ length: 14 }, (_, index) => ({
+      time: index + 1,
+      open: 215.2,
+      high: 215.25,
+      low: 215.15,
+      close: index % 2 === 0 ? 215.22 : 215.18,
+    })),
+    { time: 15, open: 215.18, high: 215.22, low: 214.96, close: 215.08 },
+    { time: 16, open: 215.08, high: 215.3, low: 215.04, close: 215.25 },
+    { time: 17, open: 215.25, high: 215.27, low: 214.9, close: 214.98 },
+    { time: 18, open: 214.98, high: 215.32, low: 214.95, close: 215.25 },
+    { time: 19, open: 215.25, high: 215.3, low: 215.08, close: 215.2 },
+    { time: 20, open: 215.2, high: 215.22, low: 214, close: 215.1 },
+    { time: 21, open: 215.1, high: 215.45, low: 215.08, close: 215.4 },
+    { time: 22, open: 215.4, high: 216.05, low: 215.39, close: 216 },
+    { time: 23, open: 216, high: 216.01, low: 215.8, close: 215.85 },
+  ];
+  const measured = measureGoldilocksApproachPressure(
+    { side: "supply", low: 216, high: 216.2, width: 0.2, candleTime: 0 },
+    candles,
+    21,
+    22,
+  );
+
+  assert.deepEqual(measured.liquiditySweepTimes, [20]);
+  assert.deepEqual(measured.liquidityPoolKinds, ["deep_reaction"]);
+  assert.deepEqual(measured.liquidityPoolStartTimes, [17]);
+  assert.ok(measured.adversePressureFlags.includes("downside_sweep"));
+});
+
 test(`keeps ${GBPUSD_20260331_1210_REGRESSION.tradeId} as the structural-sweep regression example`, () => {
   const fixture = GBPUSD_20260331_1210_REGRESSION;
   const candles: StrategyCandle[] = fixture.candles.map(
@@ -1218,19 +1250,25 @@ test(`keeps ${GBPUSD_20260331_1210_REGRESSION.tradeId} as the structural-sweep r
     },
   );
   assert.equal(measured.version, fixture.expected.detectorVersion);
-  assert.deepEqual(measured.liquidityPoolKinds, ["structural"]);
-  assert.deepEqual(measured.liquidityPoolStartTimes, [
+  const structuralSweepIndex =
+    measured.liquidityPoolKinds?.indexOf("structural") ?? -1;
+  assert.ok(structuralSweepIndex >= 0);
+  assert.equal(
+    measured.liquidityPoolStartTimes?.[structuralSweepIndex],
     fixture.expected.poolStartTime,
-  ]);
-  assert.deepEqual(measured.liquidityPoolEndTimes, [
+  );
+  assert.equal(
+    measured.liquidityPoolEndTimes?.[structuralSweepIndex],
     fixture.expected.poolEndTime,
-  ]);
-  assert.deepEqual(measured.liquiditySweepTimes, [
+  );
+  assert.equal(
+    measured.liquiditySweepTimes?.[structuralSweepIndex],
     fixture.expected.sweepTime,
-  ]);
-  assert.deepEqual(measured.adverseRecoveryTimes, [
+  );
+  assert.equal(
+    measured.adverseRecoveryTimes?.[structuralSweepIndex],
     fixture.expected.recoveryTime,
-  ]);
+  );
   assert.deepEqual(
     measured.fastApproachPushStartTimes,
     fixture.expected.fastPushStartTimes,
@@ -1284,7 +1322,8 @@ test("checks sweeps only from the opposite extreme through first touch", () => {
     9,
   );
   assert.equal(supply.sweepReturnLegStartTime, 6);
-  assert.equal(supply.liquiditySweepCount, 0);
+  assert.deepEqual(supply.liquiditySweepTimes, [6]);
+  assert.deepEqual(supply.liquidityPoolKinds, ["deep_reaction"]);
 
   const demandCandles = supplyCandles.map((candle) => ({
     time: candle.time,
@@ -1300,7 +1339,8 @@ test("checks sweeps only from the opposite extreme through first touch", () => {
     9,
   );
   assert.equal(demand.sweepReturnLegStartTime, 6);
-  assert.equal(demand.liquiditySweepCount, 0);
+  assert.deepEqual(demand.liquiditySweepTimes, [6]);
+  assert.deepEqual(demand.liquidityPoolKinds, ["deep_reaction"]);
 });
 
 test("classifies approach shape only from the opposite extreme back to the zone", () => {

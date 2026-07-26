@@ -454,9 +454,9 @@ push counts once and receives one `FAST ATTACK` marker at its detected start. On
 create the single fast-approach warning category; additional pushes do not stack score
 deductions. A directional
 return without those impulses is orderly and earns no warning; a non-directional return
-is mixed/unclear and also earns no warning. A pre-touch
-liquidity sweep is a complete three-stage pattern on the confirmation timeframe. First,
-a liquidity pool must exist. It can be either at least four contiguous sideways
+is mixed/unclear and also earns no warning. A pre-touch liquidity sweep can qualify
+through either of two paths on the confirmation timeframe. The standard path starts
+with a liquidity pool. It can be either at least four contiguous sideways
 candles whose adverse edges stay within 0.25 local ATR, total range stays within
 1.5 ATR, close drift stays within 0.75 ATR, and adjacent candles retain meaningful
 range overlap; or at least two separated swing pivots whose adverse edges stay within
@@ -470,8 +470,12 @@ pre-touch candle must react
 at least 1.25 local
 ATR in the opposite direction and close through the pool midpoint before price makes
 a newer adverse extreme. Demand uses the
-upside mirror and supply uses the downside definition. A breach without the pool or
-without the completed opposite reaction is not a sweep. The breach and reaction are
+upside mirror and supply uses the downside definition. The alternate deep-sweep path
+does not require equal lows, equal highs, or a sideways pool. A wick must clear one
+prior adverse swing by at least 3.25 prior ATR, then that candle or one of the next two
+analysis candles must recover at least 1.25 ATR and close back across the swept swing
+before price makes a newer adverse extreme. A shallower breach without a standard pool,
+or either path without the completed opposite reaction, is not a sweep. The breach and reaction are
 one combined warning, never two separate deductions. Only sweep candles at or after
 the return-leg extreme can qualify; earlier departure-side sweeps are ignored. Pool
 context immediately before that extreme may still establish a sweep occurring exactly
@@ -487,8 +491,9 @@ structural equal-low pool, 2:15 AM sweep, 2:30 AM recovery, three fast pushes, t
 warning categories, and a 9/20 score.
 The companion negative regression for `GL-GBPJPY-20260706-0305-2C94E8FA` must reject
 its July 2 11:00 PM CDT probe: it breached the M15 pool by only 0.02 ATR and its
-immediate recovery reached only 1.08 ATR. A separate later qualifying sweep may still
-create the trade's single sweep-warning category.
+immediate recovery reached only 1.08 ATR. Its July 3 1:30 AM CDT wick qualifies through
+the deep-sweep path, while a separate later standard sweep still belongs to the same
+single sweep-warning category.
 New runs also persist a causal M5/M15/H1 supply-demand corridor snapshot and a shared
 M1 market-path summary. Each stored setup receives separate versioned research outcomes
 for a 22-policy research grid: set-and-forget targets from 1R to 5R, +1R break-even

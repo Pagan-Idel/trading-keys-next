@@ -1559,8 +1559,10 @@ export default function StrategyLab() {
                           candles or at least two separated swing pivots with
                           equal adverse edges and a meaningful reaction away.
                           The first later breach must sweep the shared edge,
-                          close meaningfully back inside, and recover at least
-                          1 ATR through the pool midpoint before price makes a
+                          clear it by at least 0.15 prior ATR, close
+                          back inside by at least 0.02 prior ATR or 1% of the
+                          zone width, and recover at least 1.25 ATR through the
+                          pool midpoint before price makes a
                           newer adverse extreme. Sweeps are checked only on the return
                           toward the base: from the latest lowest low for
                           supply or latest highest high for demand through

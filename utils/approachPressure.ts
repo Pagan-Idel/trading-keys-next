@@ -1,7 +1,7 @@
 import type { GoldilocksZone, StrategyCandle } from './goldilocksStrategy.ts';
 
 export interface GoldilocksApproachPressure {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20;
   zoneSide: 'demand' | 'supply';
   approachWindowCandles: number;
   approachReturnLegCandles?: number;
@@ -69,8 +69,9 @@ const SWEEP_MAXIMUM_EDGE_SPREAD_ATR=0.25;
 const SWEEP_MAXIMUM_POOL_RANGE_ATR=1.5;
 const SWEEP_MAXIMUM_CLOSE_DRIFT_ATR=0.75;
 const SWEEP_MINIMUM_OVERLAP_FRACTION=0.35;
-const SWEEP_MINIMUM_BREACH_ATR=0.02;
-const SWEEP_REACTION_ATR=1;
+const SWEEP_MINIMUM_BREACH_ATR=0.15;
+const SWEEP_MINIMUM_RECLAIM_ATR=0.02;
+const SWEEP_REACTION_ATR=1.25;
 const FAST_APPROACH_PULLBACK_ATR=0.35;
 const FAST_APPROACH_MINIMUM_DISPLACEMENT_ATR=2;
 const FAST_APPROACH_MINIMUM_DISPLACEMENT_ZONE_WIDTHS=1.25;
@@ -186,6 +187,10 @@ export const measureGoldilocksApproachPressure=(
       localAtr*SWEEP_MINIMUM_BREACH_ATR,
       Math.max(zone.width,Number.EPSILON)*0.01,
     );
+    const minimumReclaim=Math.max(
+      localAtr*SWEEP_MINIMUM_RECLAIM_ATR,
+      Math.max(zone.width,Number.EPSILON)*0.01,
+    );
     const recentStart=lastConfirmedSweepIndex+1;
     const poolScopeStart=index===sweepReturnLegStartIndex
       ?recentStart
@@ -291,7 +296,7 @@ export const measureGoldilocksApproachPressure=(
       const reclaimDepth=zone.side==='supply'
         ?candle.close-reference
         :reference-candle.close;
-      const reclaimed=reclaimDepth>=minimumExcursion;
+      const reclaimed=reclaimDepth>=minimumReclaim;
       if(!reclaimed||excursion<minimumExcursion)continue;
       const poolMidpoint=(poolLow+poolHigh)/2;
       let reaction:StrategyCandle|undefined;
@@ -535,7 +540,7 @@ export const measureGoldilocksApproachPressure=(
     :[];
 
   return {
-    version:19,
+    version:20,
     zoneSide:zone.side,
     approachWindowCandles:approach.length,
     approachReturnLegCandles:returnApproach.length,

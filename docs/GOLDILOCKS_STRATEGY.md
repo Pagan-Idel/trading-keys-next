@@ -463,9 +463,11 @@ range overlap; or at least two separated swing pivots whose adverse edges stay w
 0.25 local ATR and which produce at least one ATR of intervening reaction away from
 that shared edge. The structural form captures equal lows for supply approaches and
 equal highs for demand approaches without treating rolling edges as a pool. Second,
-the first candle to breach the completed pool must wick strictly through the shared
-adverse edge and close back inside it by at least the minimum required sweep
-excursion. Third, that candle or a later pre-touch candle must react at least one local
+the first candle to breach the completed pool must wick through the shared adverse
+edge by at least 0.15 prior ATR and close back inside it by at least 0.02 prior ATR
+or 1% of the zone width, whichever is greater. Third, that candle or a later
+pre-touch candle must react
+at least 1.25 local
 ATR in the opposite direction and close through the pool midpoint before price makes
 a newer adverse extreme. Demand uses the
 upside mirror and supply uses the downside definition. A breach without the pool or
@@ -483,6 +485,10 @@ The offline regression fixture for `GL-GBPUSD-20260331-1210-8E930F13` preserves 
 actual causal M5 return-leg candles and must continue to produce the 1:15-1:45 AM CDT
 structural equal-low pool, 2:15 AM sweep, 2:30 AM recovery, three fast pushes, two
 warning categories, and a 9/20 score.
+The companion negative regression for `GL-GBPJPY-20260706-0305-2C94E8FA` must reject
+its July 2 11:00 PM CDT probe: it breached the M15 pool by only 0.02 ATR and its
+immediate recovery reached only 1.08 ATR. A separate later qualifying sweep may still
+create the trade's single sweep-warning category.
 New runs also persist a causal M5/M15/H1 supply-demand corridor snapshot and a shared
 M1 market-path summary. Each stored setup receives separate versioned research outcomes
 for a 22-policy research grid: set-and-forget targets from 1R to 5R, +1R break-even

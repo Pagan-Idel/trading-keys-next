@@ -448,7 +448,7 @@ test("measures backtest edge from realized R instead of protected-win labels", (
 });
 
 test("labels a new run with only its strategy version and run date", () => {
-  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.38");
+  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.39");
   assert.equal(
     getGoldilocksBacktestRunLabel(
       "lowerTimeframe",
@@ -821,7 +821,7 @@ test("does not call near-equal probes sweeps without a sharp ATR-qualified breac
     9,
   );
 
-  assert.equal(measured.version, 19);
+  assert.equal(measured.version, 20);
   assert.equal(measured.liquiditySweepCount, 0);
   assert.equal(measured.latestSweepTime, null);
   assert.equal(measured.approachEvidenceTime, 8);
@@ -1046,7 +1046,7 @@ test("confirms a downside pool sweep only after its adverse reaction completes",
     { time: 3, open: 0.78322, high: 0.78353, low: 0.78300, close: 0.78302 },
     { time: 4, open: 0.78302, high: 0.78334, low: 0.78299, close: 0.78300 },
     { time: 5, open: 0.78300, high: 0.78335, low: 0.78295, close: 0.78312 },
-    { time: 6, open: 0.78312, high: 0.78380, low: 0.78289, close: 0.78359 },
+    { time: 6, open: 0.78312, high: 0.78380, low: 0.78275, close: 0.78359 },
     { time: 7, open: 0.78359, high: 0.78400, low: 0.78340, close: 0.78385 },
     { time: 8, open: 0.78460, high: 0.78480, low: 0.78450, close: 0.78470 },
     { time: 9, open: 0.78470, high: 0.78480, low: 0.78440, close: 0.78445 },
@@ -1140,6 +1140,57 @@ test("confirms a structural equal-low pool sweep with separated pivot reactions"
     23,
   );
   assert.equal(reusedBrokenPool.liquiditySweepCount, 0);
+});
+
+test("rejects the shallow July 2 probe from GL-GBPJPY-20260706-0305-2C94E8FA", () => {
+  const baseline = Array.from({ length: 14 }, (_, index) => ({
+    time: index + 1,
+    open: 215.32,
+    high: 215.37,
+    low: 215.27,
+    close: index % 2 === 0 ? 215.33 : 215.31,
+  }));
+  const pool: StrategyCandle[] = [
+    { time: 15, open: 215.34, high: 215.36, low: 215.308, close: 215.34 },
+    { time: 16, open: 215.34, high: 215.364, low: 215.31, close: 215.35 },
+    { time: 17, open: 215.35, high: 215.36, low: 215.309, close: 215.34 },
+    { time: 18, open: 215.34, high: 215.362, low: 215.311, close: 215.351 },
+  ];
+  const measureCandidate = (
+    sweepLow: number,
+    recoveryClose: number,
+  ) => {
+    const candles: StrategyCandle[] = [
+      ...baseline,
+      ...pool,
+      {
+        time: 19,
+        open: 215.351,
+        high: 215.372,
+        low: sweepLow,
+        close: 215.366,
+      },
+      {
+        time: 20,
+        open: 215.366,
+        high: recoveryClose + 0.01,
+        low: 215.34,
+        close: recoveryClose,
+      },
+      { time: 21, open: 215.4, high: 216.05, low: 215.39, close: 216 },
+      { time: 22, open: 216, high: 216.01, low: 215.8, close: 215.85 },
+    ];
+    return measureGoldilocksApproachPressure(
+      { side: "supply", low: 216, high: 216.2, width: 0.2, candleTime: 0 },
+      candles,
+      20,
+      21,
+    );
+  };
+
+  assert.equal(measureCandidate(215.306, 215.413).liquiditySweepCount, 0);
+  assert.equal(measureCandidate(215.306, 215.45).liquiditySweepCount, 0);
+  assert.equal(measureCandidate(215.29, 215.39).liquiditySweepCount, 0);
 });
 
 test(`keeps ${GBPUSD_20260331_1210_REGRESSION.tradeId} as the structural-sweep regression example`, () => {

@@ -32,7 +32,7 @@ export const GBPUSD_20260331_1210_REGRESSION = {
     },
   } satisfies GoldilocksZone,
   expected: {
-    detectorVersion: 19,
+    detectorVersion: 20,
     poolStartTime: 1774937700,
     poolEndTime: 1774939500,
     sweepTime: 1774941300,

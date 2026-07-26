@@ -447,7 +447,7 @@ test("measures backtest edge from realized R instead of protected-win labels", (
 });
 
 test("labels a new run with only its strategy version and run date", () => {
-  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.37");
+  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.38");
   assert.equal(
     getGoldilocksBacktestRunLabel(
       "lowerTimeframe",
@@ -820,7 +820,7 @@ test("does not call near-equal probes sweeps without a sharp ATR-qualified breac
     9,
   );
 
-  assert.equal(measured.version, 18);
+  assert.equal(measured.version, 19);
   assert.equal(measured.liquiditySweepCount, 0);
   assert.equal(measured.latestSweepTime, null);
   assert.equal(measured.approachEvidenceTime, 8);
@@ -1074,6 +1074,71 @@ test("confirms a downside pool sweep only after its adverse reaction completes",
     8,
   );
   assert.equal(beforeReaction.liquiditySweepCount, 0);
+});
+
+test("confirms a structural equal-low pool sweep with separated pivot reactions", () => {
+  const baseline = Array.from({ length: 14 }, (_, index) => ({
+    time: index + 1,
+    open: 100,
+    high: 100.5,
+    low: 99.5,
+    close: index % 2 === 0 ? 100.1 : 99.9,
+  }));
+  const supplyCandles: StrategyCandle[] = [
+    ...baseline,
+    { time: 15, open: 100, high: 100.6, low: 99, close: 99.8 },
+    { time: 16, open: 99.8, high: 102, low: 99.4, close: 101.5 },
+    { time: 17, open: 101.5, high: 101.7, low: 99.1, close: 99.7 },
+    { time: 18, open: 99.7, high: 102.2, low: 99.5, close: 101.8 },
+    { time: 19, open: 101.8, high: 101.9, low: 99.05, close: 99.6 },
+    { time: 20, open: 99.6, high: 101.8, low: 99.4, close: 101.5 },
+    { time: 21, open: 101.5, high: 101.6, low: 98.5, close: 99.4 },
+    { time: 22, open: 99.4, high: 102.5, low: 99.3, close: 102.2 },
+    { time: 23, open: 102.2, high: 103.2, low: 102.1, close: 103 },
+    { time: 24, open: 103, high: 103.1, low: 102.4, close: 102.5 },
+  ];
+  const supply = measureGoldilocksApproachPressure(
+    { side: "supply", low: 103, high: 104, width: 1, candleTime: 0 },
+    supplyCandles,
+    22,
+    23,
+  );
+  assert.deepEqual(supply.liquiditySweepTimes, [21]);
+  assert.deepEqual(supply.liquidityPoolKinds, ["structural"]);
+  assert.deepEqual(supply.liquidityPoolStartTimes, [15]);
+  assert.deepEqual(supply.liquidityPoolEndTimes, [19]);
+  assert.ok(supply.adversePressureFlags.includes("downside_sweep"));
+
+  const demandCandles = supplyCandles.map((candle) => ({
+    time: candle.time,
+    open: 202 - candle.open,
+    high: 202 - candle.low,
+    low: 202 - candle.high,
+    close: 202 - candle.close,
+  }));
+  const demand = measureGoldilocksApproachPressure(
+    { side: "demand", low: 98, high: 99, width: 1, candleTime: 0 },
+    demandCandles,
+    22,
+    23,
+  );
+  assert.deepEqual(demand.liquiditySweepTimes, [21]);
+  assert.deepEqual(demand.liquidityPoolKinds, ["structural"]);
+  assert.ok(demand.adversePressureFlags.includes("upside_sweep"));
+
+  const reusedBrokenPool = measureGoldilocksApproachPressure(
+    { side: "supply", low: 103, high: 104, width: 1, candleTime: 0 },
+    supplyCandles.map((candle) =>
+      candle.time === 21
+        ? { ...candle, close: 98.9 }
+        : candle.time === 22
+          ? { ...candle, low: 98.4, close: 102.2 }
+          : candle,
+    ),
+    22,
+    23,
+  );
+  assert.equal(reusedBrokenPool.liquiditySweepCount, 0);
 });
 
 test("checks sweeps only from the opposite extreme through first touch", () => {

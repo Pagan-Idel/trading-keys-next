@@ -1554,12 +1554,14 @@ export default function StrategyLab() {
                         <span className="why">
                           The two possible warnings are a confirmed
                           liquidity-pool sweep and a fast momentum drive into
-                          the zone. Compression is not penalized. A sweep requires at least four
-                          overlapping sideways confirmation-timeframe candles with tightly
-                          grouped adverse edges, a later wick through their
-                          shared edge that closes back inside, and at least
-                          1 ATR of opposite reaction through the pool midpoint
-                          before touch. Sweeps are checked only on the return
+                          the zone. Compression is not penalized. A liquidity
+                          pool can be either at least four overlapping sideways
+                          candles or at least two separated swing pivots with
+                          equal adverse edges and a meaningful reaction away.
+                          The first later breach must sweep the shared edge,
+                          close meaningfully back inside, and recover at least
+                          1 ATR through the pool midpoint before price makes a
+                          newer adverse extreme. Sweeps are checked only on the return
                           toward the base: from the latest lowest low for
                           supply or latest highest high for demand through
                           first touch. There is no fixed lookback count. The

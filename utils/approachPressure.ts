@@ -1,7 +1,7 @@
 import type { GoldilocksZone, StrategyCandle } from './goldilocksStrategy.ts';
 
 export interface GoldilocksApproachPressure {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
   zoneSide: 'demand' | 'supply';
   approachWindowCandles: number;
   approachReturnLegCandles?: number;
@@ -15,6 +15,7 @@ export interface GoldilocksApproachPressure {
   liquiditySweepTimes?: number[];
   liquidityPoolStartTimes?: number[];
   liquidityPoolEndTimes?: number[];
+  liquidityPoolKinds?: Array<'contiguous'|'structural'>;
   adverseRecoveryTimes?: number[];
   approachEvidenceTimes?: number[];
   sweepTolerancePrice?: number;
@@ -172,6 +173,7 @@ export const measureGoldilocksApproachPressure=(
     tolerance:number;
     poolStartTime:number;
     poolEndTime:number;
+    poolKind:'contiguous'|'structural';
     reactionTime:number;
   }>=[];
   let lastConfirmedSweepIndex=-1;
@@ -185,10 +187,13 @@ export const measureGoldilocksApproachPressure=(
       Math.max(zone.width,Number.EPSILON)*0.01,
     );
     const recentStart=lastConfirmedSweepIndex+1;
-    let pool:StrategyCandle[]|undefined;
+    const poolScopeStart=index===sweepReturnLegStartIndex
+      ?recentStart
+      :Math.max(recentStart,sweepReturnLegStartIndex);
+    let contiguousPool:StrategyCandle[]|undefined;
     for(
       let start=index-SWEEP_MINIMUM_POOL_CANDLES;
-      start>=recentStart;
+      start>=poolScopeStart;
       start-=1
     ){
       const candidate=sweepApproach.slice(start,index);
@@ -215,43 +220,124 @@ export const measureGoldilocksApproachPressure=(
       if(
         closeDrift<=localAtr*SWEEP_MAXIMUM_CLOSE_DRIFT_ATR
         &&averageOverlap>=SWEEP_MINIMUM_OVERLAP_FRACTION
-      )pool=candidate;
+      )contiguousPool=candidate;
     }
-    if(!pool)continue;
-    const poolLow=Math.min(...pool.map((item)=>item.low));
-    const poolHigh=Math.max(...pool.map((item)=>item.high));
-    const reference=zone.side==='supply'?poolLow:poolHigh;
-    const excursion=zone.side==='supply'
-      ?reference-candle.low
-      :candle.high-reference;
-    const reclaimed=zone.side==='supply'
-      ?candle.close>reference
-      :candle.close<reference;
-    if(!reclaimed||excursion<minimumExcursion)continue;
-    const poolMidpoint=(poolLow+poolHigh)/2;
-    const reaction=sweepApproach.slice(index).find((reactionCandle)=>{
-      const displacement=zone.side==='supply'
-        ?reactionCandle.close-candle.low
-        :candle.high-reactionCandle.close;
-      const reachedOppositeSide=zone.side==='supply'
-        ?reactionCandle.close>=poolMidpoint
-        :reactionCandle.close<=poolMidpoint;
-      return reachedOppositeSide&&safeRatio(displacement,localAtr)>=SWEEP_REACTION_ATR;
-    });
-    if(!reaction)continue;
-    sweeps.push({
-      index,
-      time:candle.time,
-      reference,
-      extreme:zone.side==='supply'?candle.low:candle.high,
-      depthAtr:safeRatio(excursion,localAtr),
-      atr:localAtr,
-      tolerance:minimumExcursion,
-      poolStartTime:pool[0].time,
-      poolEndTime:pool.at(-1)!.time,
-      reactionTime:reaction.time,
-    });
-    lastConfirmedSweepIndex=index;
+    const structuralPivots:StrategyCandle[]=[];
+    for(
+      let pivotIndex=Math.max(1,poolScopeStart+1);
+      pivotIndex<=index-2;
+      pivotIndex+=1
+    ){
+      const previous=sweepApproach[pivotIndex-1];
+      const pivot=sweepApproach[pivotIndex];
+      const next=sweepApproach[pivotIndex+1];
+      const isPivot=zone.side==='supply'
+        ?pivot.low<=previous.low&&pivot.low<=next.low
+        :pivot.high>=previous.high&&pivot.high>=next.high;
+      if(isPivot)structuralPivots.push(pivot);
+    }
+    let structuralPool:StrategyCandle[]|undefined;
+    for(
+      let pivotEnd=structuralPivots.length-1;
+      pivotEnd>=1&&!structuralPool;
+      pivotEnd-=1
+    ){
+      for(let pivotStart=pivotEnd-1;pivotStart>=0;pivotStart-=1){
+        const candidate=structuralPivots.slice(pivotStart,pivotEnd+1);
+        const edges=candidate.map((item)=>
+          zone.side==='supply'?item.low:item.high);
+        const edgeSpread=Math.max(...edges)-Math.min(...edges);
+        if(edgeSpread>localAtr*SWEEP_MAXIMUM_EDGE_SPREAD_ATR)break;
+        const reference=zone.side==='supply'
+          ?Math.min(...edges)
+          :Math.max(...edges);
+        const firstPivotIndex=sweepApproach.findIndex(
+          (item)=>item.time===candidate[0].time,
+        );
+        const intervening=sweepApproach.slice(firstPivotIndex,index);
+        const reactedAway=zone.side==='supply'
+          ?Math.max(...intervening.map((item)=>item.high))-reference
+            >=localAtr*SWEEP_REACTION_ATR
+          :reference-Math.min(...intervening.map((item)=>item.low))
+            >=localAtr*SWEEP_REACTION_ATR;
+        if(reactedAway)structuralPool=candidate;
+      }
+    }
+    const poolCandidates:Array<{
+      candles:StrategyCandle[];
+      kind:'contiguous'|'structural';
+    }>=[];
+    if(contiguousPool)
+      poolCandidates.push({candles:contiguousPool,kind:'contiguous'});
+    if(structuralPool)
+      poolCandidates.push({candles:structuralPool,kind:'structural'});
+    for(const poolCandidate of poolCandidates){
+      const pool=poolCandidate.candles;
+      const poolLow=Math.min(...pool.map((item)=>item.low));
+      const poolHigh=Math.max(...pool.map((item)=>item.high));
+      const reference=zone.side==='supply'?poolLow:poolHigh;
+      const poolEndIndex=sweepApproach.findIndex(
+        (item)=>item.time===pool.at(-1)!.time,
+      );
+      const sharedEdgeAlreadyBreached=sweepApproach
+        .slice(poolEndIndex+1,index)
+        .some((item)=>zone.side==='supply'
+          ?item.low<reference
+          :item.high>reference);
+      if(sharedEdgeAlreadyBreached)continue;
+      const excursion=zone.side==='supply'
+        ?reference-candle.low
+        :candle.high-reference;
+      const reclaimDepth=zone.side==='supply'
+        ?candle.close-reference
+        :reference-candle.close;
+      const reclaimed=reclaimDepth>=minimumExcursion;
+      if(!reclaimed||excursion<minimumExcursion)continue;
+      const poolMidpoint=(poolLow+poolHigh)/2;
+      let reaction:StrategyCandle|undefined;
+      for(
+        let reactionIndex=index;
+        reactionIndex<sweepApproach.length;
+        reactionIndex+=1
+      ){
+        const reactionCandle=sweepApproach[reactionIndex];
+        const madeNewAdverseExtreme=reactionIndex>index&&(
+          zone.side==='supply'
+            ?reactionCandle.low<candle.low
+            :reactionCandle.high>candle.high
+        );
+        if(madeNewAdverseExtreme)break;
+        const displacement=zone.side==='supply'
+          ?reactionCandle.close-candle.low
+          :candle.high-reactionCandle.close;
+        const reachedOppositeSide=zone.side==='supply'
+          ?reactionCandle.close>=poolMidpoint
+          :reactionCandle.close<=poolMidpoint;
+        if(
+          reachedOppositeSide
+          &&safeRatio(displacement,localAtr)>=SWEEP_REACTION_ATR
+        ){
+          reaction=reactionCandle;
+          break;
+        }
+      }
+      if(!reaction)continue;
+      sweeps.push({
+        index,
+        time:candle.time,
+        reference,
+        extreme:zone.side==='supply'?candle.low:candle.high,
+        depthAtr:safeRatio(excursion,localAtr),
+        atr:localAtr,
+        tolerance:minimumExcursion,
+        poolStartTime:pool[0].time,
+        poolEndTime:pool.at(-1)!.time,
+        poolKind:poolCandidate.kind,
+        reactionTime:reaction.time,
+      });
+      lastConfirmedSweepIndex=index;
+      break;
+    }
   }
 
   const latestSweep=sweeps.at(-1);
@@ -449,7 +535,7 @@ export const measureGoldilocksApproachPressure=(
     :[];
 
   return {
-    version:18,
+    version:19,
     zoneSide:zone.side,
     approachWindowCandles:approach.length,
     approachReturnLegCandles:returnApproach.length,
@@ -462,6 +548,7 @@ export const measureGoldilocksApproachPressure=(
     liquiditySweepTimes:sweeps.map((sweep)=>sweep.time),
     liquidityPoolStartTimes:sweeps.map((sweep)=>sweep.poolStartTime),
     liquidityPoolEndTimes:sweeps.map((sweep)=>sweep.poolEndTime),
+    liquidityPoolKinds:sweeps.map((sweep)=>sweep.poolKind),
     adverseRecoveryTimes:[...new Set(recoveryEvents.map((event)=>event.time))],
     approachEvidenceTimes,
     sweepTolerancePrice:latestSweep?.tolerance??Math.max(

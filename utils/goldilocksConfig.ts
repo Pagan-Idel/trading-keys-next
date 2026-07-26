@@ -1,4 +1,4 @@
-export const GOLDILOCKS_STRATEGY_VERSION = "0.37";
+export const GOLDILOCKS_STRATEGY_VERSION = "0.38";
 
 export const GOLDILOCKS_RESEARCH_VERSION = "goldilocks-auto-research-v1";
 

@@ -456,12 +456,18 @@ deductions. A directional
 return without those impulses is orderly and earns no warning; a non-directional return
 is mixed/unclear and also earns no warning. A pre-touch
 liquidity sweep is a complete three-stage pattern on the confirmation timeframe. First,
-at least four contiguous candles must form a sideways liquidity pool: their adverse
-edges stay within 0.25 local ATR, their total range stays within 1.5 ATR, close drift
-stays within 0.75 ATR, and adjacent candles retain meaningful range overlap. Second,
-a later candle must wick strictly through the shared adverse edge and close back
-inside it. Third, that candle or a later pre-touch candle must react at least one local
-ATR in the opposite direction and close through the pool midpoint. Demand uses the
+a liquidity pool must exist. It can be either at least four contiguous sideways
+candles whose adverse edges stay within 0.25 local ATR, total range stays within
+1.5 ATR, close drift stays within 0.75 ATR, and adjacent candles retain meaningful
+range overlap; or at least two separated swing pivots whose adverse edges stay within
+0.25 local ATR and which produce at least one ATR of intervening reaction away from
+that shared edge. The structural form captures equal lows for supply approaches and
+equal highs for demand approaches without treating rolling edges as a pool. Second,
+the first candle to breach the completed pool must wick strictly through the shared
+adverse edge and close back inside it by at least the minimum required sweep
+excursion. Third, that candle or a later pre-touch candle must react at least one local
+ATR in the opposite direction and close through the pool midpoint before price makes
+a newer adverse extreme. Demand uses the
 upside mirror and supply uses the downside definition. A breach without the pool or
 without the completed opposite reaction is not a sweep. The breach and reaction are
 one combined warning, never two separate deductions. Only sweep candles at or after

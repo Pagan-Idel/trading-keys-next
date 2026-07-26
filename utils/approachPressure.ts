@@ -1,7 +1,7 @@
 import type { GoldilocksZone, StrategyCandle } from './goldilocksStrategy.ts';
 
 export interface GoldilocksApproachPressure {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22;
   zoneSide: 'demand' | 'supply';
   approachWindowCandles: number;
   approachReturnLegCandles?: number;
@@ -490,6 +490,20 @@ export const measureGoldilocksApproachPressure=(
   const touch=candles[safeTouchIndex];
   const towardZoneClose=(candle:StrategyCandle)=>
     zone.side==='supply'?candle.close:-candle.close;
+  const firstSourceAdvanceTime=(analysisCandleTime:number)=>{
+    const bucketEnd=analysisCandleTime+Math.max(
+      1,
+      adaptiveApproach.timeframeSeconds,
+    );
+    for(let index=1;index<sourceApproach.length;index+=1){
+      const candle=sourceApproach[index];
+      if(candle.time<analysisCandleTime)continue;
+      if(candle.time>=bucketEnd)break;
+      if(towardZoneClose(candle)>towardZoneClose(sourceApproach[index-1]))
+        return candle.time;
+    }
+    return analysisCandleTime;
+  };
   const fastApproachPushCandidates:Array<{
     startTime:number;
     time:number;
@@ -514,12 +528,17 @@ export const measureGoldilocksApproachPressure=(
     );
     const directionalSteps=segment.slice(1).filter((candle,index)=>
       towardZoneClose(candle)>towardZoneClose(segment[index])).length;
+    const firstAdvancingOffset=segment.slice(1).findIndex((candle,index)=>
+      towardZoneClose(candle)>towardZoneClose(segment[index]));
+    const firstAdvancingCandle=firstAdvancingOffset>=0
+      ?segment[firstAdvancingOffset+1]
+      :segment[0];
     const referenceAtr=Math.max(
       averageTrueRange(compression,fastPushStartIndex)||atr,
       atr,
     );
     fastApproachPushCandidates.push({
-      startTime:compression[fastPushStartIndex]?.time??0,
+      startTime:firstSourceAdvanceTime(firstAdvancingCandle?.time??0),
       time:compression[fastPushPeakIndex]?.time??0,
       displacementAtr:safeRatio(displacement,referenceAtr),
       displacementZoneWidths:safeRatio(
@@ -603,7 +622,7 @@ export const measureGoldilocksApproachPressure=(
     :[];
 
   return {
-    version:21,
+    version:22,
     zoneSide:zone.side,
     approachWindowCandles:approach.length,
     approachReturnLegCandles:returnApproach.length,

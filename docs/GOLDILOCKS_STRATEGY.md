@@ -450,7 +450,8 @@ the zone is at least 2 prior ATR and 1.25 zone widths, while retaining at least 
 close-path efficiency and at least two advancing close-to-close steps. This separates
 strong advances divided by a meaningful pause or pullback and rejects both one-candle
 spikes and smaller noisy moves. Each qualifying
-push counts once and receives one `FAST ATTACK` marker at its detected start. One or more pushes
+push counts once and receives one `FAST ATTACK` marker on the first source-timeframe
+candle that actually closes toward the zone; the preceding pullback anchor is not marked. One or more pushes
 create the single fast-approach warning category; additional pushes do not stack score
 deductions. A directional
 return without those impulses is orderly and earns no warning; a non-directional return

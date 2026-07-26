@@ -840,7 +840,7 @@ test("does not call near-equal probes sweeps without a sharp ATR-qualified breac
     9,
   );
 
-  assert.equal(measured.version, 21);
+  assert.equal(measured.version, 22);
   assert.equal(measured.liquiditySweepCount, 0);
   assert.equal(measured.latestSweepTime, null);
   assert.equal(measured.approachEvidenceTime, 8);
@@ -946,6 +946,7 @@ test("groups a fast multi-candle impulse into one ATR-normalized push", () => {
   );
   assert.equal(consecutiveBurst.fastApproachBurstCount, 1);
   assert.equal(consecutiveBurst.fastApproachCandleCount, 1);
+  assert.deepEqual(consecutiveBurst.fastApproachPushStartTimes, [17]);
   assert.deepEqual(consecutiveBurst.approachEvidenceTimes, [18]);
   assert.equal(consecutiveBurst.approachMomentumVeto, true);
   assert.ok(
@@ -984,6 +985,7 @@ test("separates three fast pushes divided by ATR-qualified pullbacks", () => {
     25,
   );
   assert.equal(measured.fastApproachBurstCount, 3);
+  assert.deepEqual(measured.fastApproachPushStartTimes, [15, 18, 23]);
   assert.deepEqual(measured.approachEvidenceTimes, [16, 19, 24]);
   assert.deepEqual(measured.fastApproachPushDirectionalSteps, [2, 2, 2]);
   assert.equal(measured.approachClassification, "momentum_drive");

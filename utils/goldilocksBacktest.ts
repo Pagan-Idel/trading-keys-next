@@ -58,6 +58,7 @@ import {
 import {
   GOLDILOCKS_DEFAULT_MANAGEMENT,
   GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+  GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
   goldilocksRealizedRAtTarget,
   goldilocksSecuredRAtBreakEven,
   normalizeGoldilocksBacktestManager,
@@ -228,6 +229,59 @@ const legacyBlendedRunnerR = (
   runnerExitR: number,
 ) => (1 - runnerFraction) * 2 + runnerFraction * runnerExitR;
 
+const resolveSetAndForgetOutcome = (
+  candles: StrategyCandle[],
+  startIndex: number,
+  direction: "BUY" | "SELL",
+  stopLoss: number,
+  oneR: number,
+  takeProfit?: number,
+  weekendLiquidationTime?: number,
+) => {
+  const entry = (stopLoss + oneR) / 2;
+  const risk = Math.abs(entry - stopLoss);
+  const target =
+    takeProfit ??
+    (direction === "BUY" ? entry + risk * 2 : entry - risk * 2);
+  for (let index = startIndex; index < candles.length; index += 1) {
+    const candle = candles[index];
+    if (
+      weekendLiquidationTime !== undefined &&
+      candle.time >= weekendLiquidationTime
+    ) {
+      const rawOpenR =
+        (direction === "BUY" ? candle.open - entry : entry - candle.open) /
+        risk;
+      const realizedR = Math.max(-1, rawOpenR);
+      return {
+        outcome: (realizedR > 0 ? "WIN" : "LOSS") as "WIN" | "LOSS",
+        outcomeTime: candle.time,
+        exitReason: "weekend_close" as const,
+        realizedR,
+      };
+    }
+    const stopped =
+      direction === "BUY" ? candle.low <= stopLoss : candle.high >= stopLoss;
+    const won =
+      direction === "BUY" ? candle.high >= target : candle.low <= target;
+    if (stopped)
+      return {
+        outcome: "LOSS" as const,
+        outcomeTime: candle.time,
+        exitReason: "stop" as const,
+        realizedR: -1,
+      };
+    if (won)
+      return {
+        outcome: "WIN" as const,
+        outcomeTime: candle.time,
+        exitReason: "target" as const,
+        realizedR: 2,
+      };
+  }
+  return null;
+};
+
 const resolveLegacyScoreTieredOutcome = (
   candles: StrategyCandle[],
   startIndex: number,
@@ -373,10 +427,18 @@ export const resolveProtectedOutcome = (
   weekendLiquidationTime?: number,
   tradeManager?: GoldilocksBacktestManagerId,
 ) => {
-  if (
-    normalizeGoldilocksBacktestManager(tradeManager) ===
-    GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
-  )
+  const manager = normalizeGoldilocksBacktestManager(tradeManager);
+  if (manager === GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID)
+    return resolveSetAndForgetOutcome(
+      candles,
+      startIndex,
+      direction,
+      stopLoss,
+      oneR,
+      takeProfit,
+      weekendLiquidationTime,
+    );
+  if (manager === GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID)
     return resolveLegacyScoreTieredOutcome(
       candles,
       startIndex,
@@ -574,6 +636,37 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
       (direction === "BUY"
         ? entry + Math.abs(entry - stopLoss) * 2
         : entry - Math.abs(entry - stopLoss) * 2);
+    if (
+      normalizeGoldilocksBacktestManager(tradeManager) ===
+      GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID
+    ) {
+      const stopIndex =
+        direction === "BUY"
+          ? firstLowAtMost(startIndex, stopLoss)
+          : firstHighAtLeast(startIndex, stopLoss);
+      const targetIndex =
+        direction === "BUY"
+          ? firstHighAtLeast(startIndex, target)
+          : firstLowAtMost(startIndex, target);
+      if (
+        stopIndex >= 0 &&
+        (targetIndex < 0 || stopIndex <= targetIndex)
+      )
+        return {
+          outcome: "LOSS" as const,
+          outcomeTime: candles[stopIndex].time,
+          exitReason: "stop" as const,
+          realizedR: -1,
+        };
+      return targetIndex >= 0
+        ? {
+            outcome: "WIN" as const,
+            outcomeTime: candles[targetIndex].time,
+            exitReason: "target" as const,
+            realizedR: 2,
+          }
+        : null;
+    }
     if (
       normalizeGoldilocksBacktestManager(tradeManager) ===
       GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID

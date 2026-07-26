@@ -8,10 +8,13 @@ export const GOLDILOCKS_DEFAULT_MANAGEMENT = {
 
 export const GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID =
   "legacy-score-tiered-2r-4r-v1" as const;
+export const GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID =
+  "set-and-forget-2r-v1" as const;
 
 export type GoldilocksBacktestManagerId =
   | typeof GOLDILOCKS_DEFAULT_MANAGEMENT.policyId
-  | typeof GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID;
+  | typeof GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+  | typeof GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID;
 
 export const GOLDILOCKS_BACKTEST_MANAGERS: ReadonlyArray<{
   id: GoldilocksBacktestManagerId;
@@ -26,16 +29,23 @@ export const GOLDILOCKS_BACKTEST_MANAGERS: ReadonlyArray<{
   },
   {
     id: GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
-    label: "Previous score-tiered manager",
+    label: "Break-even strategy (previous)",
     description:
       "Move to break-even at +1R. Scores below 16 exit fully at 2R; scores 16–17 keep a 25% runner and scores 18+ keep a 50% runner toward 4R with a +1R runner stop.",
+  },
+  {
+    id: GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+    label: "Set and forget · full 2R",
+    description:
+      "Place the trade with its original stop and full 2R target. Make no profit-management changes before either level is hit; the mandatory Friday close still applies.",
   },
 ];
 
 export const normalizeGoldilocksBacktestManager = (
   value: unknown,
 ): GoldilocksBacktestManagerId =>
-  value === GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+  value === GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID ||
+  value === GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID
     ? value
     : GOLDILOCKS_DEFAULT_MANAGEMENT.policyId;
 

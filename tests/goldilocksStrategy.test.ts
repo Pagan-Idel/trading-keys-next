@@ -115,6 +115,7 @@ import {
 import {
   GOLDILOCKS_DEFAULT_MANAGEMENT,
   GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+  GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
   getGoldilocksPartialClosePlan,
   normalizeGoldilocksBacktestManager,
 } from "../utils/goldilocksTradeManagement";
@@ -1635,6 +1636,7 @@ test("indexed backtest outcomes match the candle-by-candle reference resolver", 
   for (const manager of [
     GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
     GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+    GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
   ] as const) {
     for (const direction of ["BUY", "SELL"] as const) {
       for (const start of [0, 17, 63, 125]) {
@@ -1697,7 +1699,7 @@ test("official outcomes use the same 50%-at-1R manager regardless of setup score
     );
 });
 
-test("backtests can select the previous score-tiered 2R and 4R manager", () => {
+test("backtests can select the previous break-even and score-tiered runner strategy", () => {
   const runnerStop = [
     { time: 1, open: 100, high: 102.1, low: 99.5, close: 102 },
     { time: 2, open: 102, high: 104.1, low: 101.5, close: 104 },
@@ -1748,6 +1750,61 @@ test("backtests can select the previous score-tiered 2R and 4R manager", () => {
   assert.equal(
     normalizeGoldilocksBacktestManager("unknown"),
     GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+  );
+});
+
+test("set-and-forget backtests leave the original stop and full 2R target untouched", () => {
+  const retraceThenTarget = [
+    { time: 1, open: 100, high: 102.1, low: 99.5, close: 102 },
+    { time: 2, open: 102, high: 102.2, low: 99.9, close: 100.2 },
+    { time: 3, open: 100.2, high: 104.1, low: 99.8, close: 104 },
+  ];
+  assert.deepEqual(
+    resolveProtectedOutcome(
+      retraceThenTarget,
+      0,
+      "BUY",
+      98,
+      102,
+      104,
+      15,
+      undefined,
+      GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+    ),
+    {
+      outcome: "WIN",
+      outcomeTime: 3,
+      exitReason: "target",
+      realizedR: 2,
+    },
+  );
+  const ambiguous = [
+    { time: 1, open: 100, high: 104.1, low: 97.9, close: 103 },
+  ];
+  assert.deepEqual(
+    resolveProtectedOutcome(
+      ambiguous,
+      0,
+      "BUY",
+      98,
+      102,
+      104,
+      15,
+      undefined,
+      GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+    ),
+    {
+      outcome: "LOSS",
+      outcomeTime: 1,
+      exitReason: "stop",
+      realizedR: -1,
+    },
+  );
+  assert.equal(
+    normalizeGoldilocksBacktestManager(
+      GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+    ),
+    GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
   );
 });
 

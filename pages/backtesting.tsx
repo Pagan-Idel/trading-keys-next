@@ -32,6 +32,7 @@ import {
   GOLDILOCKS_BACKTEST_MANAGERS,
   GOLDILOCKS_DEFAULT_MANAGEMENT,
   GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+  GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
   getGoldilocksBacktestManager,
   type GoldilocksBacktestManagerId,
 } from "../utils/goldilocksTradeManagement";
@@ -1668,8 +1669,12 @@ export default function Backtesting() {
           {current &&
           managerForRunConfig(current.config).id ===
             GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
-            ? " Under the previous manager, +1R protects at break-even; 2R exits fully below score 16 or starts the score-tiered runner."
-            : " Under the default manager, reaching +1R banks half and a later break-even exit records +0.5R."}
+            ? " Under the break-even strategy, +1R moves the stop to entry; 2R exits fully below score 16 or starts the score-tiered runner."
+            : current &&
+                managerForRunConfig(current.config).id ===
+                  GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID
+              ? " Under set and forget, the original stop and full 2R target remain untouched until either is hit, except for the mandatory Friday close."
+              : " Under the default manager, reaching +1R banks half and a later break-even exit records +0.5R."}
           Rankings below use expectancy first.{" "}
           {performance.sampleTrades < 50
             ? `This run has only ${performance.sampleTrades} realized-R trades; treat it as an early signal until it reaches at least 50, ideally 100+.`

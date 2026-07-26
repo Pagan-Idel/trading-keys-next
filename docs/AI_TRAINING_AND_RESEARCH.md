@@ -136,7 +136,9 @@ and the remaining 50% targets 2R. The research child rows expose all policies si
 side for comparison. A manual Backtesting run may explicitly select the prior
 `legacy-score-tiered-2r-4r-v1` manager instead; that choice is frozen in the run
 configuration and affects official realized-R and portfolio metrics without changing
-live/demo automation.
+live/demo automation. Manual runs may also select `set-and-forget-2r-v1`, which retains
+the original stop and full 2R target without interim management; mandatory Friday
+liquidation remains a global safety rule.
 
 ## Prevent leakage
 

@@ -107,9 +107,11 @@ which remains locked to H1/M15/M5/M1.
 
 Backtesting also stores a selected trade manager with every run. The default is the
 live-aligned manager that banks 50% at +1R, moves the remainder to break-even, and
-targets 2R. The only alternate official-outcome selection is the previous score-tiered
-manager: it protects at +1R, exits fully at 2R below score 16, keeps 25% toward 4R for
-scores 16-17, and keeps 50% toward 4R for scores 18+, with runner protection at +1R.
+targets 2R. The prior manager is labeled `Break-even strategy (previous)`: it protects
+at +1R, exits fully at 2R below score 16, keeps 25% toward 4R for scores 16-17, and
+keeps 50% toward 4R for scores 18+, with runner protection at +1R. `Set and forget ·
+full 2R` leaves the original stop and full 2R target unchanged until either is hit;
+the mandatory Friday liquidation remains active.
 This selector changes realized R, trade outcome time, overlap filtering, projected
 income, expectancy, profit factor, and drawdown for that backtest only. It never
 changes live/demo automation.
@@ -564,7 +566,8 @@ Historical simulation currently:
   after entry eligibility; later candles are never substituted for missing entry-time data
 - Caps a modeled weekend liquidation at the selected manager's active stop floor:
   -1R before protection, 0R after break-even-only protection, +0.5R total after the
-  default +1R partial, or the score-tiered runner floor after its 2R partial
+  default +1R partial, or the break-even strategy's runner floor after its 2R partial.
+  Set-and-forget has no protection floor beyond its original -1R stop.
 - Conservatively records a loss if one M1 execution candle touches both the original stop and
   +1R, because intrabar ordering is unknown
 - Does not yet reconstruct historical bid/ask spreads, slippage, latency, partial

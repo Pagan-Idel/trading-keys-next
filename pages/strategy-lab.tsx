@@ -497,6 +497,13 @@ type HistoricalEntrySetup = {
   trend: "bullish" | "bearish" | "unknown";
   score: GoldilocksScoreResult;
   realizedR?: number | null;
+  tradeManager?: string;
+  partialExit?: {
+    time: number;
+    price: number;
+    fraction: number;
+    realizedR: number;
+  };
   approachPressure?: GoldilocksApproachPressure;
   zoneCorridors?: ZoneCorridorMeasurement[];
   marketPath?: TradePathSummary | null;
@@ -1299,8 +1306,9 @@ export default function StrategyLab() {
                 </TradeIdentity>
                 <CandyActions>
                   <Pill $tone={isOpen ? "warn" : isWin ? "good" : "bad"}>
-                    {trade.outcome.toUpperCase()} ·{" "}
-                    {trade.exitReason.replaceAll("_", " ").toUpperCase()}
+                    {trade.partialExit
+                      ? `WIN · PARTIAL PROFIT · ${trade.realizedR != null && trade.realizedR > 0 ? "+" : ""}${trade.realizedR?.toFixed(2) ?? "0.00"}R`
+                      : `${trade.outcome.toUpperCase()} · ${trade.exitReason.replaceAll("_", " ").toUpperCase()}`}
                   </Pill>
                   <Pill $tone={trade.score?.eligible ? "good" : "bad"}>
                     {trade.score?.eligible ? "SCORE PASS" : "SCORE FAIL"}
@@ -1319,7 +1327,10 @@ export default function StrategyLab() {
                       : `${trade.realizedR > 0 ? "+" : ""}${trade.realizedR.toFixed(2)}R`}
                   </div>
                   <div className="meta">
-                    {trade.exitReason.replaceAll("_", " ")}{" "}
+                    {trade.partialExit &&
+                    trade.exitReason === "break_even"
+                      ? "50% at +1R · remainder exited at entry"
+                      : trade.exitReason.replaceAll("_", " ")}{" "}
                     {trade.outcomeTime
                       ? `· ${formatStrategyReplayEnid(trade.outcomeTime)}`
                       : ""}
@@ -1676,6 +1687,29 @@ export default function StrategyLab() {
                         {trade.marketPath.mfeR.toFixed(2)}R · MAE{" "}
                         {trade.marketPath.maeR.toFixed(2)}R · ending{" "}
                         {trade.marketPath.endingR.toFixed(2)}R
+                      </>
+                    )}
+                    {trade.partialExit && (
+                      <>
+                        <br />
+                        <strong>Official partial:</strong>{" "}
+                        {Math.round(trade.partialExit.fraction * 100)}% at +1R
+                        {" · banked "}
+                        {trade.partialExit.realizedR > 0 ? "+" : ""}
+                        {trade.partialExit.realizedR.toFixed(2)}R
+                        {" · "}
+                        {formatStrategyReplayEnid(trade.partialExit.time)}
+                        <br />
+                        <strong>Final remainder exit:</strong>{" "}
+                        {trade.exitReason === "break_even"
+                          ? "at entry"
+                          : trade.exitReason.replaceAll("_", " ")}
+                        {trade.realizedR == null
+                          ? ""
+                          : ` · total ${trade.realizedR > 0 ? "+" : ""}${trade.realizedR.toFixed(2)}R`}
+                        {trade.outcomeTime
+                          ? ` · ${formatStrategyReplayEnid(trade.outcomeTime)}`
+                          : ""}
                       </>
                     )}
                     {trade.zoneCorridors?.map((corridor) => (

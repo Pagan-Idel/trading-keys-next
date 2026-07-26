@@ -32,6 +32,8 @@ import {
   formatStrategyZoneLabel,
   getReplayCandleIndexAtOrBefore,
   getReplayExitMarkerPrice,
+  getReplayFinalExitMarkerText,
+  getReplayPartialExitMarkerText,
   getReplayVisibleEnd,
   getReplayVisibleStart,
   sortUniqueReplayCandleItems,
@@ -327,6 +329,14 @@ type HistoricalTradeSetup = {
   outcome: "win" | "loss" | "open";
   exitReason?: string;
   exitPrice?: number;
+  realizedR?: number | null;
+  tradeManager?: string;
+  partialExit?: {
+    time: number;
+    price: number;
+    fraction: number;
+    realizedR: number;
+  };
   outcomeTime?: number;
   approachPressure?: GoldilocksApproachPressure;
 };
@@ -884,9 +894,31 @@ export default function StrategyLabChart({
               price: getReplayExitMarkerPrice(setup),
               color: won ? "#55e991" : "#ff6876",
               shape: "circle" as const,
-              text: `EXIT · ${setup.outcome.toUpperCase()} · ${(setup.exitReason ?? "closed").replaceAll("_", " ").toUpperCase()}`,
+              text: getReplayFinalExitMarkerText(setup),
             },
           ];
+        })()
+      : [];
+    const partialExitMarker = scenario?.tradeSetup?.partialExit
+      ? (() => {
+          const partial = scenario.tradeSetup!.partialExit!;
+          const partialCandleIndex = getReplayCandleIndexAtOrBefore(
+            candles.map((candle) => ({ time: Number(candle.time) })),
+            partial.time,
+          );
+          const partialCandle = candles[Math.max(0, partialCandleIndex)];
+          return partialCandle
+            ? [
+                {
+                  time: partialCandle.time as UTCTimestamp,
+                  position: "atPriceMiddle" as const,
+                  price: partial.price,
+                  color: "#55dff5",
+                  shape: "circle" as const,
+                  text: getReplayPartialExitMarkerText(partial),
+                },
+              ]
+            : [];
         })()
       : [];
     const candleTimes = candles.map((candle) => ({
@@ -1070,6 +1102,7 @@ export default function StrategyLabChart({
         ...priorTouchMarkers,
         ...departureMarkers,
         ...approachEvidenceMarkers,
+        ...partialExitMarker,
         ...exitMarker,
         ...indicatorMarkers,
       ].sort((left, right) => Number(left.time) - Number(right.time)),

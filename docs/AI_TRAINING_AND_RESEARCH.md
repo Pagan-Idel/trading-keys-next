@@ -116,6 +116,9 @@ exporter should include:
   Runner stop is +1R.
 - For live/demo executions, requested and broker-confirmed manager events, broker
   transaction responses, sampled executable-quote MFE/MAE, and coverage timestamps.
+- For secure-half replay visualization, the +1R partial timestamp/price and final
+  remainder-exit timestamp/price are distinct events; the final label carries combined
+  realized R rather than calling the whole trade break-even.
 - Whether the row came from live, demo, or backtest data
 
 Keep rejected candidates. Mark unavailable features as unavailable rather than zero.

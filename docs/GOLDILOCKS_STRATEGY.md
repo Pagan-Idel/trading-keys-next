@@ -50,6 +50,11 @@ its entry/stop/target risk-reward area, its originating zone, and the nearest
 opposite-side zone that was active at entry. Generic historical context zones are omitted.
 Its permanent trade ID appears as a candy-styled copyable badge along the bottom of the
 chart so screenshots and visual audits retain the recorded-trade identity.
+For a stored trade using the secure-half manager, replay draws the +1R partial and the
+final remainder exit as separate markers. The partial marker records the closed
+fraction and banked R; the final marker records where the remainder ended and the
+combined realized R. A remainder stopped at entry is labeled as a final remainder exit,
+not as a zero-profit break-even trade.
 The active indicator feed includes only setups whose current-version score is eligible.
 An older stored trade from a compatible H1/M15/M5 strategy version shows its stored
 trade, entry marker, risk-reward box, and reconstructed trade-zone overlay together

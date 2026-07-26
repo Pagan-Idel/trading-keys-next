@@ -120,6 +120,36 @@ export const getReplayExitMarkerPrice = (trade: {
         ? trade.runway.takeProfit
         : trade.runway.entry;
 
+const formatReplayR = (value: number) =>
+  `${value > 0 ? "+" : ""}${value.toFixed(2)}R`;
+
+export const getReplayPartialExitMarkerText = (partial: {
+  fraction: number;
+  realizedR: number;
+}) =>
+  `PARTIAL EXIT · ${Math.round(partial.fraction * 100)}% AT +1R · BANKED ${formatReplayR(partial.realizedR)}`;
+
+export const getReplayFinalExitMarkerText = (trade: {
+  outcome: string;
+  exitReason?: string;
+  realizedR?: number | null;
+  partialExit?: { fraction: number };
+}) => {
+  const realized =
+    trade.realizedR == null ? "" : ` · TOTAL ${formatReplayR(trade.realizedR)}`;
+  if (trade.partialExit) {
+    const remaining = Math.round((1 - trade.partialExit.fraction) * 100);
+    const location =
+      trade.exitReason === "break_even" || trade.exitReason === "one_r_protected"
+        ? "AT ENTRY"
+        : trade.exitReason === "target" || trade.exitReason === "runner_target"
+          ? "AT 2R"
+          : (trade.exitReason ?? "closed").replaceAll("_", " ").toUpperCase();
+    return `FINAL ${remaining}% EXIT · ${location}${realized}`;
+  }
+  return `FINAL EXIT · ${trade.outcome.toUpperCase()} · ${(trade.exitReason ?? "closed").replaceAll("_", " ").toUpperCase()}${realized}`;
+};
+
 export const getReplayVisibleEnd = (
   lastCandleIndex: number,
   entryIndex: number,

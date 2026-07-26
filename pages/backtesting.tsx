@@ -34,6 +34,7 @@ import {
   GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
   GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
   getGoldilocksBacktestManager,
+  getGoldilocksBacktestManagerForRun,
   type GoldilocksBacktestManagerId,
 } from "../utils/goldilocksTradeManagement";
 
@@ -723,13 +724,9 @@ type TradeRow = Record<string, any> & {
   scoreDetail?: { components?: ScoreComponent[] };
 };
 const managerForRunConfig = (config: RunConfig) => {
-  if (config.tradeManager)
-    return getGoldilocksBacktestManager(config.tradeManager);
-  const numericVersion = Number(config.strategyVersion);
-  return getGoldilocksBacktestManager(
-    Number.isFinite(numericVersion) && numericVersion <= 0.4
-      ? GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
-      : GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+  return getGoldilocksBacktestManagerForRun(
+    config.tradeManager,
+    config.strategyVersion,
   );
 };
 const backtestTweakFields: Array<{

@@ -54,6 +54,19 @@ export const getGoldilocksBacktestManager = (value: unknown) => {
   return GOLDILOCKS_BACKTEST_MANAGERS.find((manager) => manager.id === id)!;
 };
 
+export const getGoldilocksBacktestManagerForRun = (
+  value: unknown,
+  strategyVersion?: string,
+) => {
+  if (typeof value === "string") return getGoldilocksBacktestManager(value);
+  const numericVersion = Number(strategyVersion);
+  return getGoldilocksBacktestManager(
+    Number.isFinite(numericVersion) && numericVersion <= 0.4
+      ? GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+      : GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+  );
+};
+
 export interface GoldilocksPartialClosePlan {
   supported: boolean;
   initialUnits: number;

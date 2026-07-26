@@ -22,7 +22,10 @@ import type {
   GoldilocksTimeframeProfileId,
 } from "./goldilocksConfig.ts";
 import type { GoldilocksResearchManifest } from "./goldilocksResearchManifest.ts";
-import type { GoldilocksBacktestManagerId } from "./goldilocksTradeManagement.ts";
+import {
+  getGoldilocksBacktestManagerForRun,
+  type GoldilocksBacktestManagerId,
+} from "./goldilocksTradeManagement.ts";
 
 export type BacktestStatus =
   "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -306,6 +309,7 @@ export interface BacktestTradeReplay extends Pick<
 > {
   tradeId: string;
   strategyVersion?: string;
+  tradeManager?: GoldilocksBacktestManagerId;
   managementPolicyResults?: TradeManagementResearchResult[];
 }
 export const getBacktestTradeReplay = (
@@ -373,6 +377,10 @@ export const getBacktestTradeReplay = (
     marketPath: marketPathJson ? JSON.parse(marketPathJson) : undefined,
     managementPolicyResults,
     strategyVersion: config.strategyVersion,
+    tradeManager: getGoldilocksBacktestManagerForRun(
+      config.tradeManager,
+      config.strategyVersion,
+    ).id,
   };
 };
 export const getBacktestTradeById = (tradeId: string) => {

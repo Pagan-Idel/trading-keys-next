@@ -80,6 +80,8 @@ import {
   formatStrategyZoneLabel,
   getReplayCandleIndexAtOrBefore,
   getReplayExitMarkerPrice,
+  getReplayFinalExitMarkerText,
+  getReplayPartialExitMarkerText,
   getReplayVisibleEnd,
   getReplayVisibleStart,
   getStrategyReplayBaseContextStart,
@@ -1508,6 +1510,30 @@ test("classifies a break-even stop after reaching 1R as a protected win", () => 
   assert.equal(classifyTradeOutcome("0.00", true), "WIN");
   assert.equal(classifyTradeOutcome("-0.02", true), "WIN");
   assert.equal(classifyTradeOutcome("0.00", false), "LOSS");
+});
+
+test("replay labels distinguish a banked partial from the final remainder exit", () => {
+  assert.equal(
+    getReplayPartialExitMarkerText({ fraction: 0.5, realizedR: 0.5 }),
+    "PARTIAL EXIT · 50% AT +1R · BANKED +0.50R",
+  );
+  assert.equal(
+    getReplayFinalExitMarkerText({
+      outcome: "win",
+      exitReason: "break_even",
+      realizedR: 0.5,
+      partialExit: { fraction: 0.5 },
+    }),
+    "FINAL 50% EXIT · AT ENTRY · TOTAL +0.50R",
+  );
+  assert.equal(
+    getReplayFinalExitMarkerText({
+      outcome: "win",
+      exitReason: "break_even",
+      realizedR: 0,
+    }),
+    "FINAL EXIT · WIN · BREAK EVEN · TOTAL 0.00R",
+  );
 });
 
 test("backtest banks half at +1R, protects the remainder, and treats ambiguous stop candles conservatively", () => {

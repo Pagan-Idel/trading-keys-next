@@ -62,6 +62,7 @@ import {
   getGoldilocksZoneExpiresAt,
 } from "../../../utils/zoneAge";
 import { measureGoldilocksApproachPressure } from "../../../utils/approachPressure";
+import { GOLDILOCKS_DEFAULT_MANAGEMENT } from "../../../utils/goldilocksTradeManagement";
 
 const replayCache = new Map<string, { expiresAt: number; payload: unknown }>();
 
@@ -987,6 +988,13 @@ export default async function handler(
           : storedReplayForRequest.entry -
             storedReplayForRequest.realizedR * storedRisk
         : undefined;
+    const storedPartialExitTime =
+      storedReplayForRequest?.tradeManager ===
+        GOLDILOCKS_DEFAULT_MANAGEMENT.policyId &&
+      storedReplayForRequest.exitReason !== "stop" &&
+      (storedReplayForRequest.realizedR ?? 0) >= 0.5
+        ? storedReplayForRequest.marketPath?.firstReachedAt?.["+1R"]
+        : undefined;
     const storedEntrySetup =
       compatibleTimeframeReplay &&
       storedReplayForRequest &&
@@ -1052,6 +1060,19 @@ export default async function handler(
               typeof scoreGoldilocksSetup
             >,
             realizedR: storedReplayForRequest.realizedR,
+            tradeManager: storedReplayForRequest.tradeManager,
+            partialExit:
+              Number.isFinite(storedPartialExitTime)
+                ? {
+                    time: storedPartialExitTime!,
+                    price: storedReplayForRequest.oneR,
+                    fraction:
+                      GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
+                    realizedR:
+                      GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR *
+                      GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
+                  }
+                : undefined,
             approachPressure: storedApproachPressure,
             zoneCorridors: storedReplayForRequest.zoneCorridors,
             marketPath: storedReplayForRequest.marketPath,

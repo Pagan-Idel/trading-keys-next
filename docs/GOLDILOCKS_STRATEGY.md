@@ -105,6 +105,15 @@ close-through confirmation, and M5 post-entry ordering. Confluence is H1/H4/D1.
 Selecting either research profile on Backtesting does not change the live/demo worker,
 which remains locked to H1/M15/M5/M1.
 
+Backtesting also stores a selected trade manager with every run. The default is the
+live-aligned manager that banks 50% at +1R, moves the remainder to break-even, and
+targets 2R. The only alternate official-outcome selection is the previous score-tiered
+manager: it protects at +1R, exits fully at 2R below score 16, keeps 25% toward 4R for
+scores 16-17, and keeps 50% toward 4R for scores 18+, with runner protection at +1R.
+This selector changes realized R, trade outcome time, overlap filtering, projected
+income, expectancy, profit factor, and drawdown for that backtest only. It never
+changes live/demo automation.
+
 ## Market structure and trend
 
 The swing labeler produces HH, HL, LH, and LL points. The scanner converts adjacent
@@ -414,8 +423,9 @@ stored label when prepared for a rerun.
 Dashboard edge reporting is calculated from each trade's final realized R. It leads
 with expectancy per trade and profit factor, and also reports average positive R,
 average absolute loss R, payoff ratio, profitable-trade rate, break-even trades, net R,
-maximum drawdown in R, and longest losing streak. A protected break-even remains a
-reached-1R diagnostic but contributes 0R and is not counted as a profitable trade.
+maximum drawdown in R, and longest losing streak. Under the default manager, a
+break-even exit after the +1R partial contributes +0.5R. Under the previous manager,
+a break-even exit before its 2R target contributes 0R.
 Profit factor is gross positive R divided by gross negative R: an all-winning sample
 displays infinity, while a run containing only break-even trades (or no realized-R
 trades) displays `No P/L` because the ratio is undefined.
@@ -552,8 +562,9 @@ Historical simulation currently:
 - Tracks the trade beyond +1R and stores one final realized-R result for money simulation
 - Fails closed when the first available M1 execution candle is more than 60 seconds
   after entry eligibility; later candles are never substituted for missing entry-time data
-- Caps a modeled weekend liquidation at the active stop level: -1R before protection,
-  0R after break-even protection, or the protected runner floor after a partial target
+- Caps a modeled weekend liquidation at the selected manager's active stop floor:
+  -1R before protection, 0R after break-even-only protection, +0.5R total after the
+  default +1R partial, or the score-tiered runner floor after its 2R partial
 - Conservatively records a loss if one M1 execution candle touches both the original stop and
   +1R, because intrabar ordering is unknown
 - Does not yet reconstruct historical bid/ask spreads, slippage, latency, partial

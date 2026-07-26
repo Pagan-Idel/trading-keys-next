@@ -133,7 +133,10 @@ returns the permanent live/demo manager ledger for one broker trade.
 Live/demo automation and new official backtests execute
 `secure-50-at-1r-rest-2r-v1`: at +1R the stop moves to entry first, 50% is closed,
 and the remaining 50% targets 2R. The research child rows expose all policies side by
-side for comparison.
+side for comparison. A manual Backtesting run may explicitly select the prior
+`legacy-score-tiered-2r-4r-v1` manager instead; that choice is frozen in the run
+configuration and affects official realized-R and portfolio metrics without changing
+live/demo automation.
 
 ## Prevent leakage
 
@@ -170,8 +173,9 @@ Report at minimum:
 The backtesting dashboard treats final realized-R expectancy as the primary ranking
 metric. Profit factor, average win/loss R, payoff ratio, net R, and drawdown provide
 the surrounding economics. Positive-R trade rate is displayed as a consistency
-diagnostic only. Trades protected at break-even are shown separately because reaching
-+1R is useful setup information, but a later 0R exit is not realized profit. Pair and
+diagnostic only. The chosen manager's realized-R result is authoritative: the default
+manager records +0.5R after its +1R partial and later break-even exit, while the prior
+manager records 0R when break-even occurs before its 2R target. Pair and
 tweak comparisons under 50 realized-R trades are marked early; prefer 100+ before
 drawing an initial conclusion and still require chronological out-of-sample validation.
 
@@ -194,7 +198,7 @@ It must not:
 - Change risk percent, threshold, stop logic, or safety gates without explicit approval
 - Remove losing runs or cherry-pick time windows
 - train on secrets, account IDs, tokens, or personally identifying data
-- treat protected break-even wins as positive P/L when calculating expectancy
+- infer P/L from the protected-win label instead of using the selected manager's stored realized R
 - claim profitability from backtest win rate alone
 
 ## Experiment record

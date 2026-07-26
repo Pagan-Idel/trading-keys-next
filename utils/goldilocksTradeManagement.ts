@@ -6,6 +6,44 @@ export const GOLDILOCKS_DEFAULT_MANAGEMENT = {
   finalTargetR: 2,
 } as const;
 
+export const GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID =
+  "legacy-score-tiered-2r-4r-v1" as const;
+
+export type GoldilocksBacktestManagerId =
+  | typeof GOLDILOCKS_DEFAULT_MANAGEMENT.policyId
+  | typeof GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID;
+
+export const GOLDILOCKS_BACKTEST_MANAGERS: ReadonlyArray<{
+  id: GoldilocksBacktestManagerId;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+    label: "Secure half at 1R (default)",
+    description:
+      "At +1R, bank 50% and move the remaining 50% stop to break-even; final target stays at 2R.",
+  },
+  {
+    id: GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+    label: "Previous score-tiered manager",
+    description:
+      "Move to break-even at +1R. Scores below 16 exit fully at 2R; scores 16–17 keep a 25% runner and scores 18+ keep a 50% runner toward 4R with a +1R runner stop.",
+  },
+];
+
+export const normalizeGoldilocksBacktestManager = (
+  value: unknown,
+): GoldilocksBacktestManagerId =>
+  value === GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+    ? value
+    : GOLDILOCKS_DEFAULT_MANAGEMENT.policyId;
+
+export const getGoldilocksBacktestManager = (value: unknown) => {
+  const id = normalizeGoldilocksBacktestManager(value);
+  return GOLDILOCKS_BACKTEST_MANAGERS.find((manager) => manager.id === id)!;
+};
+
 export interface GoldilocksPartialClosePlan {
   supported: boolean;
   initialUnits: number;

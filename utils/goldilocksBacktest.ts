@@ -57,8 +57,11 @@ import {
 } from "./tradeManagementResearch.ts";
 import {
   GOLDILOCKS_DEFAULT_MANAGEMENT,
+  GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
   goldilocksRealizedRAtTarget,
   goldilocksSecuredRAtBreakEven,
+  normalizeGoldilocksBacktestManager,
+  type GoldilocksBacktestManagerId,
 } from "./goldilocksTradeManagement.ts";
 import { measureZoneCorridor } from "./zoneCorridor.ts";
 import { isTradeSessionOpen } from "./sessionUtils.ts";
@@ -75,6 +78,7 @@ export interface GoldilocksBacktestInput {
   strategyTweaks?: GoldilocksBacktestTweaks;
   gateSettings?: GoldilocksBacktestGates;
   scoreWeights?: GoldilocksScoreWeights;
+  tradeManager?: GoldilocksBacktestManagerId;
   onProgress?: (progress: {
     stage: string;
     completed: number;
@@ -217,7 +221,14 @@ const marketContextAt = (
     return { trend: "unknown" };
   return { trend: point.trend };
 };
-export const resolveProtectedOutcome = (
+const legacyRunnerFractionForScore = (score?: number) =>
+  score == null || score < 16 ? 0 : score < 18 ? 0.25 : 0.5;
+const legacyBlendedRunnerR = (
+  runnerFraction: number,
+  runnerExitR: number,
+) => (1 - runnerFraction) * 2 + runnerFraction * runnerExitR;
+
+const resolveLegacyScoreTieredOutcome = (
   candles: StrategyCandle[],
   startIndex: number,
   direction: "BUY" | "SELL",
@@ -227,6 +238,155 @@ export const resolveProtectedOutcome = (
   score?: number,
   weekendLiquidationTime?: number,
 ) => {
+  const entry = (stopLoss + oneR) / 2;
+  const risk = Math.abs(entry - stopLoss);
+  const target =
+    takeProfit ??
+    (direction === "BUY" ? entry + risk * 2 : entry - risk * 2);
+  const runnerTarget =
+    direction === "BUY" ? entry + risk * 4 : entry - risk * 4;
+  const runnerFraction = legacyRunnerFractionForScore(score);
+  let protectedAt = -1;
+  let partialAt = -1;
+  for (let index = startIndex; index < candles.length; index += 1) {
+    const candle = candles[index];
+    if (
+      weekendLiquidationTime !== undefined &&
+      candle.time >= weekendLiquidationTime
+    ) {
+      const rawOpenR =
+        (direction === "BUY" ? candle.open - entry : entry - candle.open) /
+        risk;
+      const stopFloor = partialAt >= 0 ? 1 : protectedAt >= 0 ? 0 : -1;
+      const boundedOpenR = Math.max(stopFloor, rawOpenR);
+      const realizedR =
+        partialAt >= 0
+          ? legacyBlendedRunnerR(runnerFraction, boundedOpenR)
+          : boundedOpenR;
+      return {
+        outcome: (realizedR > 0 || partialAt >= 0 || protectedAt >= 0
+          ? "WIN"
+          : "LOSS") as "WIN" | "LOSS",
+        outcomeTime: candle.time,
+        exitReason: "weekend_close" as const,
+        realizedR,
+      };
+    }
+    if (partialAt >= 0) {
+      const runnerStopped =
+        direction === "BUY" ? candle.low <= oneR : candle.high >= oneR;
+      const runnerWon =
+        direction === "BUY"
+          ? candle.high >= runnerTarget
+          : candle.low <= runnerTarget;
+      if (runnerStopped)
+        return {
+          outcome: "WIN" as const,
+          outcomeTime: candle.time,
+          exitReason: "runner_stop" as const,
+          realizedR: legacyBlendedRunnerR(runnerFraction, 1),
+        };
+      if (runnerWon)
+        return {
+          outcome: "WIN" as const,
+          outcomeTime: candle.time,
+          exitReason: "runner_target" as const,
+          realizedR: legacyBlendedRunnerR(runnerFraction, 4),
+        };
+      continue;
+    }
+    if (protectedAt < 0) {
+      const stopped =
+        direction === "BUY" ? candle.low <= stopLoss : candle.high >= stopLoss;
+      const reachedOneR =
+        direction === "BUY" ? candle.high >= oneR : candle.low <= oneR;
+      const reachedTarget =
+        direction === "BUY" ? candle.high >= target : candle.low <= target;
+      if (stopped)
+        return {
+          outcome: "LOSS" as const,
+          outcomeTime: candle.time,
+          exitReason: "stop" as const,
+          realizedR: -1,
+        };
+      if (reachedTarget) {
+        if (!runnerFraction)
+          return {
+            outcome: "WIN" as const,
+            outcomeTime: candle.time,
+            exitReason: "target" as const,
+            realizedR: 2,
+          };
+        partialAt = index;
+        continue;
+      }
+      if (reachedOneR) protectedAt = index;
+      continue;
+    }
+    const breakEven =
+      direction === "BUY" ? candle.low <= entry : candle.high >= entry;
+    const reachedTarget =
+      direction === "BUY" ? candle.high >= target : candle.low <= target;
+    if (breakEven)
+      return {
+        outcome: "WIN" as const,
+        outcomeTime: candle.time,
+        exitReason: "break_even" as const,
+        realizedR: 0,
+      };
+    if (reachedTarget) {
+      if (!runnerFraction)
+        return {
+          outcome: "WIN" as const,
+          outcomeTime: candle.time,
+          exitReason: "target" as const,
+          realizedR: 2,
+        };
+      partialAt = index;
+    }
+  }
+  if (partialAt >= 0 && candles.length)
+    return {
+      outcome: "WIN" as const,
+      outcomeTime: candles[candles.length - 1].time,
+      exitReason: "runner_open" as const,
+      realizedR: legacyBlendedRunnerR(runnerFraction, 1),
+    };
+  return protectedAt >= 0 && candles.length
+    ? {
+        outcome: "WIN" as const,
+        outcomeTime: candles[candles.length - 1].time,
+        exitReason: "one_r_protected" as const,
+        realizedR: 0,
+      }
+    : null;
+};
+
+export const resolveProtectedOutcome = (
+  candles: StrategyCandle[],
+  startIndex: number,
+  direction: "BUY" | "SELL",
+  stopLoss: number,
+  oneR: number,
+  takeProfit?: number,
+  score?: number,
+  weekendLiquidationTime?: number,
+  tradeManager?: GoldilocksBacktestManagerId,
+) => {
+  if (
+    normalizeGoldilocksBacktestManager(tradeManager) ===
+    GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+  )
+    return resolveLegacyScoreTieredOutcome(
+      candles,
+      startIndex,
+      direction,
+      stopLoss,
+      oneR,
+      takeProfit,
+      score,
+      weekendLiquidationTime,
+    );
   const entry = (stopLoss + oneR) / 2;
   const risk = Math.abs(entry - stopLoss);
   const target =
@@ -393,6 +553,7 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
     takeProfit?: number,
     score?: number,
     weekendLiquidationTime?: number,
+    tradeManager?: GoldilocksBacktestManagerId,
   ) => {
     if (weekendLiquidationTime !== undefined)
       return resolveProtectedOutcome(
@@ -404,6 +565,7 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
         takeProfit,
         score,
         weekendLiquidationTime,
+        tradeManager,
       );
     const entry = (stopLoss + oneR) / 2;
     const risk = Math.abs(entry - stopLoss);
@@ -412,6 +574,112 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
       (direction === "BUY"
         ? entry + Math.abs(entry - stopLoss) * 2
         : entry - Math.abs(entry - stopLoss) * 2);
+    if (
+      normalizeGoldilocksBacktestManager(tradeManager) ===
+      GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+    ) {
+      const runnerTarget =
+        direction === "BUY" ? entry + risk * 4 : entry - risk * 4;
+      const runnerFraction = legacyRunnerFractionForScore(score);
+      const stopIndex =
+        direction === "BUY"
+          ? firstLowAtMost(startIndex, stopLoss)
+          : firstHighAtLeast(startIndex, stopLoss);
+      const protectedIndex =
+        direction === "BUY"
+          ? firstHighAtLeast(startIndex, oneR)
+          : firstLowAtMost(startIndex, oneR);
+      if (protectedIndex < 0)
+        return stopIndex >= 0
+          ? {
+              outcome: "LOSS" as const,
+              outcomeTime: candles[stopIndex].time,
+              exitReason: "stop" as const,
+              realizedR: -1,
+            }
+          : null;
+      if (stopIndex >= 0 && stopIndex <= protectedIndex)
+        return {
+          outcome: "LOSS" as const,
+          outcomeTime: candles[stopIndex].time,
+          exitReason: "stop" as const,
+          realizedR: -1,
+        };
+      const directTargetIndex =
+        direction === "BUY"
+          ? firstHighAtLeast(startIndex, target)
+          : firstLowAtMost(startIndex, target);
+      const finishRunner = (targetIndex: number) => {
+        if (!runnerFraction)
+          return {
+            outcome: "WIN" as const,
+            outcomeTime: candles[targetIndex].time,
+            exitReason: "target" as const,
+            realizedR: 2,
+          };
+        const runnerAfter = targetIndex + 1;
+        const runnerStopIndex =
+          direction === "BUY"
+            ? firstLowAtMost(runnerAfter, oneR)
+            : firstHighAtLeast(runnerAfter, oneR);
+        const runnerTargetIndex =
+          direction === "BUY"
+            ? firstHighAtLeast(runnerAfter, runnerTarget)
+            : firstLowAtMost(runnerAfter, runnerTarget);
+        if (runnerStopIndex < 0 && runnerTargetIndex < 0)
+          return {
+            outcome: "WIN" as const,
+            outcomeTime: candles[candles.length - 1].time,
+            exitReason: "runner_open" as const,
+            realizedR: legacyBlendedRunnerR(runnerFraction, 1),
+          };
+        if (
+          runnerStopIndex >= 0 &&
+          (runnerTargetIndex < 0 || runnerStopIndex <= runnerTargetIndex)
+        )
+          return {
+            outcome: "WIN" as const,
+            outcomeTime: candles[runnerStopIndex].time,
+            exitReason: "runner_stop" as const,
+            realizedR: legacyBlendedRunnerR(runnerFraction, 1),
+          };
+        return {
+          outcome: "WIN" as const,
+          outcomeTime: candles[runnerTargetIndex].time,
+          exitReason: "runner_target" as const,
+          realizedR: legacyBlendedRunnerR(runnerFraction, 4),
+        };
+      };
+      if (directTargetIndex === protectedIndex)
+        return finishRunner(directTargetIndex);
+      const after = protectedIndex + 1;
+      const breakEvenIndex =
+        direction === "BUY"
+          ? firstLowAtMost(after, entry)
+          : firstHighAtLeast(after, entry);
+      const targetIndex =
+        direction === "BUY"
+          ? firstHighAtLeast(after, target)
+          : firstLowAtMost(after, target);
+      if (breakEvenIndex < 0 && targetIndex < 0)
+        return {
+          outcome: "WIN" as const,
+          outcomeTime: candles[candles.length - 1].time,
+          exitReason: "one_r_protected" as const,
+          realizedR: 0,
+        };
+      if (
+        breakEvenIndex >= 0 &&
+        (targetIndex < 0 || breakEvenIndex <= targetIndex)
+      )
+        return {
+          outcome: "WIN" as const,
+          outcomeTime: candles[breakEvenIndex].time,
+          exitReason: "break_even" as const,
+          realizedR: 0,
+        };
+      return finishRunner(targetIndex);
+    }
     const securedR = goldilocksSecuredRAtBreakEven();
     const targetR = goldilocksRealizedRAtTarget();
     const stopIndex =
@@ -879,6 +1147,7 @@ export const simulateGoldilocksPair = (
             runway.takeProfit,
             score.total,
             weekendLiquidationTime,
+            input.tradeManager,
           );
           const zoneCorridors = sources.map((source) =>
             measureZoneCorridor({

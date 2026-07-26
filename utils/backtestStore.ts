@@ -22,6 +22,7 @@ import type {
   GoldilocksTimeframeProfileId,
 } from "./goldilocksConfig.ts";
 import type { GoldilocksResearchManifest } from "./goldilocksResearchManifest.ts";
+import type { GoldilocksBacktestManagerId } from "./goldilocksTradeManagement.ts";
 
 export type BacktestStatus =
   "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -36,6 +37,7 @@ export interface BacktestRunConfig {
   startingBalance?: number;
   leverage?: number;
   riskProfile?: RiskProfile;
+  tradeManager?: GoldilocksBacktestManagerId;
   protectedWinR?: number;
   archiveOnly?: boolean;
   datasetEndTime?: number;

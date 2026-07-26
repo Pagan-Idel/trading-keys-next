@@ -114,7 +114,9 @@ import {
 } from "../utils/tradeManagementResearch";
 import {
   GOLDILOCKS_DEFAULT_MANAGEMENT,
+  GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
   getGoldilocksPartialClosePlan,
+  normalizeGoldilocksBacktestManager,
 } from "../utils/goldilocksTradeManagement";
 import { measureZoneCorridor } from "../utils/zoneCorridor";
 import { mergeCandleCoverageRanges } from "../utils/candleArchive";
@@ -1630,21 +1632,42 @@ test("indexed backtest outcomes match the candle-by-candle reference resolver", 
     low: 100 + Math.sin(index / 4) * 3 - index / 100,
   }));
   const indexed = buildProtectedOutcomeResolver(history);
-  for (const direction of ["BUY", "SELL"] as const) {
-    for (const start of [0, 17, 63, 125]) {
-      for (const [stop, oneR] of [
-        [98, 102],
-        [96, 104],
-        [99.5, 100.5],
-      ]) {
-        const expected = resolveProtectedOutcome(
-          history,
-          start,
-          direction,
-          stop,
-          oneR,
-        );
-        assert.deepEqual(indexed(start, direction, stop, oneR), expected);
+  for (const manager of [
+    GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+    GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+  ] as const) {
+    for (const direction of ["BUY", "SELL"] as const) {
+      for (const start of [0, 17, 63, 125]) {
+        for (const [stop, oneR] of [
+          [98, 102],
+          [96, 104],
+          [99.5, 100.5],
+        ]) {
+          const expected = resolveProtectedOutcome(
+            history,
+            start,
+            direction,
+            stop,
+            oneR,
+            undefined,
+            18,
+            undefined,
+            manager,
+          );
+          assert.deepEqual(
+            indexed(
+              start,
+              direction,
+              stop,
+              oneR,
+              undefined,
+              18,
+              undefined,
+              manager,
+            ),
+            expected,
+          );
+        }
       }
     }
   }
@@ -1672,6 +1695,60 @@ test("official outcomes use the same 50%-at-1R manager regardless of setup score
       resolveProtectedOutcome(finalTarget, 0, "BUY", 98, 102, 104, score),
       { outcome: "WIN", outcomeTime: 1, exitReason: "target", realizedR: 1.5 },
     );
+});
+
+test("backtests can select the previous score-tiered 2R and 4R manager", () => {
+  const runnerStop = [
+    { time: 1, open: 100, high: 102.1, low: 99.5, close: 102 },
+    { time: 2, open: 102, high: 104.1, low: 101.5, close: 104 },
+    { time: 3, open: 104, high: 104.2, low: 101.9, close: 102 },
+  ];
+  assert.deepEqual(
+    resolveProtectedOutcome(
+      runnerStop,
+      0,
+      "BUY",
+      98,
+      102,
+      104,
+      16,
+      undefined,
+      GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+    ),
+    {
+      outcome: "WIN",
+      outcomeTime: 3,
+      exitReason: "runner_stop",
+      realizedR: 1.75,
+    },
+  );
+  const runnerTarget = [
+    { time: 1, open: 100, high: 104.1, low: 99.5, close: 104 },
+    { time: 2, open: 104, high: 108.1, low: 103, close: 108 },
+  ];
+  assert.deepEqual(
+    resolveProtectedOutcome(
+      runnerTarget,
+      0,
+      "BUY",
+      98,
+      102,
+      104,
+      18,
+      undefined,
+      GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+    ),
+    {
+      outcome: "WIN",
+      outcomeTime: 2,
+      exitReason: "runner_target",
+      realizedR: 3,
+    },
+  );
+  assert.equal(
+    normalizeGoldilocksBacktestManager("unknown"),
+    GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+  );
 });
 
 test("plans an exact restart-safe 50% partial close for integer broker units", () => {

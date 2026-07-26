@@ -28,6 +28,13 @@ import {
   type GoldilocksTimeframeProfileId,
 } from "../utils/goldilocksConfig";
 import { calculateBacktestPerformance } from "../utils/backtestAnalytics";
+import {
+  GOLDILOCKS_BACKTEST_MANAGERS,
+  GOLDILOCKS_DEFAULT_MANAGEMENT,
+  GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+  getGoldilocksBacktestManager,
+  type GoldilocksBacktestManagerId,
+} from "../utils/goldilocksTradeManagement";
 
 const Page = styled.div`
   width: min(1380px, calc(100% - 30px));
@@ -621,6 +628,7 @@ type RunConfig = {
   startingBalance?: number;
   leverage?: number;
   riskProfile?: RiskProfile;
+  tradeManager?: GoldilocksBacktestManagerId;
   protectedWinR?: number;
   timeframeProfile?: GoldilocksTimeframeProfileId;
   strategyTweaks?: GoldilocksBacktestTweaks;
@@ -712,6 +720,16 @@ type SortDirection = "asc" | "desc";
 type ScoreComponent = { name: string; points: number; detail: string };
 type TradeRow = Record<string, any> & {
   scoreDetail?: { components?: ScoreComponent[] };
+};
+const managerForRunConfig = (config: RunConfig) => {
+  if (config.tradeManager)
+    return getGoldilocksBacktestManager(config.tradeManager);
+  const numericVersion = Number(config.strategyVersion);
+  return getGoldilocksBacktestManager(
+    Number.isFinite(numericVersion) && numericVersion <= 0.4
+      ? GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+      : GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+  );
 };
 const backtestTweakFields: Array<{
   key: keyof GoldilocksBacktestTweaks;
@@ -807,6 +825,9 @@ export default function Backtesting() {
       useState<GoldilocksTimeframeProfileId>("intraday"),
     [minimumScore, setMinimumScore] = useState(14),
     [lookbackDays, setLookbackDays] = useState(730),
+    [tradeManager, setTradeManager] = useState<GoldilocksBacktestManagerId>(
+      GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+    ),
     [strategyTweaks, setStrategyTweaks] = useState<GoldilocksBacktestTweaks>(
       () => normalizeGoldilocksBacktestTweaks(undefined),
     ),
@@ -865,6 +886,7 @@ export default function Backtesting() {
     setStartingBalance(config.startingBalance ?? 1000);
     setLeverage(config.leverage ?? 30);
     setProjectionRiskProfile(config.riskProfile ?? "default");
+    setTradeManager(managerForRunConfig(config).id);
     setStrategyTweaks(normalizeGoldilocksBacktestTweaks(config.strategyTweaks));
     setGateSettings(normalizeGoldilocksBacktestGates(config.gateSettings));
     setScoreWeights(
@@ -933,6 +955,7 @@ export default function Backtesting() {
           startingBalance,
           leverage,
           riskProfile,
+          tradeManager,
           timeframeProfile,
           strategyTweaks,
           gateSettings,
@@ -1204,6 +1227,7 @@ export default function Backtesting() {
       `Minimum score: ${result.config.minimumScore}/20`,
       `Lookback: ${result.config.lookbackDays} days`,
       `Risk: ${riskLabel(result.config)}`,
+      `Trade manager: ${managerForRunConfig(result.config).label}`,
       `Starting balance: ${money(result.config.startingBalance ?? 1000)}`,
       `Maximum leverage: ${result.config.leverage ?? 30}:1`,
       `Pairs (${result.config.pairs?.length ?? 0}): ${(result.config.pairs ?? []).join(", ")}`,
@@ -1311,6 +1335,23 @@ export default function Backtesting() {
               <option value={730}>2 years</option>
               <option value={1825}>5 years</option>
               <option value={3650}>10 years</option>
+            </select>
+          </Field>
+          <Field title={getGoldilocksBacktestManager(tradeManager).description}>
+            Trade manager
+            <select
+              value={tradeManager}
+              onChange={(event) =>
+                setTradeManager(
+                  event.target.value as GoldilocksBacktestManagerId,
+                )
+              }
+            >
+              {GOLDILOCKS_BACKTEST_MANAGERS.map((manager) => (
+                <option key={manager.id} value={manager.id}>
+                  {manager.label}
+                </option>
+              ))}
             </select>
           </Field>
           {running ? (
@@ -1624,7 +1665,11 @@ export default function Backtesting() {
         </EdgeGrid>
         <EdgeNote>
           <strong>Read win rate as consistency, not as the objective.</strong>{" "}
-          Under the default manager, reaching +1R banks half and a later break-even exit records +0.5R.
+          {current &&
+          managerForRunConfig(current.config).id ===
+            GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+            ? " Under the previous manager, +1R protects at break-even; 2R exits fully below score 16 or starts the score-tiered runner."
+            : " Under the default manager, reaching +1R banks half and a later break-even exit records +0.5R."}
           Rankings below use expectancy first.{" "}
           {performance.sampleTrades < 50
             ? `This run has only ${performance.sampleTrades} realized-R trades; treat it as an early signal until it reaches at least 50, ideally 100+.`
@@ -1801,6 +1846,12 @@ export default function Backtesting() {
                 <tr>
                   <td>Dynamic risk profile</td>
                   <td>{riskLabel(current.config)}</td>
+                </tr>
+                <tr>
+                  <td>Trade manager</td>
+                  <td>
+                    {managerForRunConfig(current.config).label}
+                  </td>
                 </tr>
                 <tr>
                   <td>Maximum account leverage</td>

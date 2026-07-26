@@ -27,6 +27,7 @@ import {
   normalizeGoldilocksBacktestTweaks,
   normalizeGoldilocksScoreWeights,
 } from "./goldilocksConfig.ts";
+import { normalizeGoldilocksBacktestManager } from "./goldilocksTradeManagement.ts";
 
 export const BACKTEST_CANDLE_LIMITS: Record<string, number> = {
   M1: 800_000,
@@ -177,6 +178,7 @@ export const executeBacktestRun = async (
         strategyTweaks: config.strategyTweaks,
         gateSettings: config.gateSettings,
         scoreWeights: config.scoreWeights,
+        tradeManager: config.tradeManager,
         timeframes: profile,
         trendCandles,
         zoneCandles,
@@ -401,6 +403,7 @@ export const normalizeBacktestConfig = (
     riskProfile: isRiskProfile(input.riskProfile)
       ? input.riskProfile
       : "default",
+    tradeManager: normalizeGoldilocksBacktestManager(input.tradeManager),
     archiveOnly: Boolean(input.archiveOnly),
     datasetEndTime: Number.isFinite(input.datasetEndTime)
       ? Math.floor(Number(input.datasetEndTime))

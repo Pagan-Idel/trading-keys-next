@@ -9,6 +9,18 @@ export const isGoldilocksIntradayStrategyVersion = (
   (/^0\.\d+$/.test(strategyVersion) ||
     /^h1-m15-m5-v\d+$/.test(strategyVersion));
 
+export const isGoldilocksReplayStrategyCompatible = (
+  storedStrategyVersion?: string,
+  selectedStrategyVersion?: string,
+) =>
+  Boolean(
+    storedStrategyVersion &&
+      selectedStrategyVersion &&
+      (storedStrategyVersion === selectedStrategyVersion ||
+        (isGoldilocksIntradayStrategyVersion(storedStrategyVersion) &&
+          isGoldilocksIntradayStrategyVersion(selectedStrategyVersion))),
+  );
+
 export const GOLDILOCKS_TIMEFRAME_PROFILES = {
   lowerTimeframe: {
     id: "lowerTimeframe",

@@ -64,6 +64,7 @@ import {
   getGoldilocksMinimumScore,
   getGoldilocksTimeframeProfile,
   isGoldilocksIntradayStrategyVersion,
+  isGoldilocksReplayStrategyCompatible,
   normalizeGoldilocksBacktestGates,
   normalizeGoldilocksBacktestTweaks,
   normalizeGoldilocksScoreWeights,
@@ -117,7 +118,7 @@ import { buildAutoResearchConfigurations } from "../utils/autoResearchRunner";
 import { researchConfigHash } from "../utils/autoResearchStore";
 import { buildGoldilocksResearchManifest } from "../utils/goldilocksResearchManifest";
 
-test("numeric Goldilocks versions remain compatible with intraday trade replay", () => {
+test("stored replay compatibility preserves numeric and exact research stacks", () => {
   assert.equal(isGoldilocksIntradayStrategyVersion("0.31"), true);
   assert.equal(isGoldilocksIntradayStrategyVersion("0.35"), true);
   assert.equal(isGoldilocksIntradayStrategyVersion("h1-m15-m5-v28"), true);
@@ -128,6 +129,24 @@ test("numeric Goldilocks versions remain compatible with intraday trade replay",
   assert.equal(
     isGoldilocksIntradayStrategyVersion("d1-h4-h1-research-v3"),
     false,
+  );
+  assert.equal(
+    isGoldilocksReplayStrategyCompatible(
+      "m15-m5-m1-research-v3",
+      "m15-m5-m1-research-v3",
+    ),
+    true,
+  );
+  assert.equal(
+    isGoldilocksReplayStrategyCompatible(
+      "m15-m5-m1-research-v3",
+      "d1-h4-h1-research-v3",
+    ),
+    false,
+  );
+  assert.equal(
+    isGoldilocksReplayStrategyCompatible("0.39", "0.40"),
+    true,
   );
 });
 

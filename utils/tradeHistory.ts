@@ -41,6 +41,11 @@ export type JournalData = {
     breakEvenPrice?: number;
     weekendLiquidation?: boolean;
     weekendLiquidatedAt?: string;
+    partialProfitAtOneR?: boolean;
+    partialCloseFraction?: number;
+    partialProfitTaken?: boolean;
+    partialProfitTakenAt?: string;
+    partialUnitsClosed?: number;
     policyId?: string;
     path?: TradePathSummary;
   };

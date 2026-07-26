@@ -4,6 +4,7 @@ import { openNow, type Trade } from '../utils/oanda/api/openNow.ts';
 import { getTradeDetailsById } from '../utils/oanda/api/getTradeDetails.ts';
 import { modifyTrade } from '../utils/oanda/api/modifyTrade.ts';
 import { closeTrade } from '../utils/oanda/api/closeTrade.ts';
+import { closeTradePartial } from '../utils/oanda/api/close-partial.ts';
 import { ACTION } from '../utils/oanda/api/order.ts';
 import { placeTrade } from '../utils/placeTrade.ts';
 import { annotateConfluenceAt, buildGoldilocksHistory, buildGoldilocksHistoryChunked, findFreshGoldilocksConfirmations, getGoldilocksTrend, toStrategyCandles } from '../utils/goldilocksScanner.ts';
@@ -25,6 +26,10 @@ import { formatGoldilocksZoneAge, getGoldilocksZoneAgeDays, getGoldilocksZoneAge
 import { measureGoldilocksApproachPressure, type GoldilocksApproachPressure } from '../utils/approachPressure.ts';
 import { measureZoneCorridor, type ZoneCorridorMeasurement } from '../utils/zoneCorridor.ts';
 import type { TradePathSummary } from '../utils/tradeManagementResearch.ts';
+import {
+  GOLDILOCKS_DEFAULT_MANAGEMENT,
+  getGoldilocksPartialClosePlan,
+} from '../utils/goldilocksTradeManagement.ts';
 
 const TREND_TIMEFRAME = GOLDILOCKS_DEMO_TIMEFRAMES.trend;
 const ZONE_TIMEFRAME = GOLDILOCKS_DEMO_TIMEFRAMES.zone;
@@ -93,7 +98,7 @@ const tradeManagerLog = (
 ) => {
   logMessage(message, data, { pair, level, fileName: 'goldilocksTradeManager', step });
   if(data&&typeof data==='object'&&'tradeId' in data&&typeof (data as {tradeId?:unknown}).tradeId==='string'){
-    recordTradeManagementEvent({tradeId:(data as {tradeId:string}).tradeId,pair,mode,step,policyId:'be-at-1r-full-2r-v1',data:{message,level,...data}});
+    recordTradeManagementEvent({tradeId:(data as {tradeId:string}).tradeId,pair,mode,step,policyId:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,data:{message,level,...data}});
   }
 };
 
@@ -170,16 +175,36 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
   const priceTolerance = 0.5 * 10 ** -precision;
   let managedStopLoss = stopLoss;
   let breakEvenActivated = Math.abs(stopLoss - entry) <= priceTolerance;
+  const initialPartialPlan = getGoldilocksPartialClosePlan(
+    trade.initialUnits,
+    trade.currentUnits,
+  );
+  let partialProfitTaken = initialPartialPlan.completed;
+  let partialUnitsClosed = partialProfitTaken
+    ? Math.max(
+        0,
+        initialPartialPlan.initialUnits - initialPartialPlan.currentUnits,
+      )
+    : 0;
   const originalStopRisk = Math.abs(entry - stopLoss);
   const targetDerivedRisk = Math.abs(takeProfit - entry) / 2;
   const riskDistance = breakEvenActivated ? targetDerivedRisk : originalStopRisk;
   let lastBreakEvenAttempt = 0;
+  let lastPartialCloseAttempt = 0;
+  let partialUnsupportedLogged = false;
   const price = (value: number) => Number.isFinite(value) ? value.toFixed(precision) : 'unavailable';
   journal.tradeManagement = {
     breakEvenAtOneR: true,
-    policyId:'be-at-1r-full-2r-v1',
+    policyId:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
     breakEvenActivated,
     breakEvenPrice: entry,
+    partialProfitAtOneR: true,
+    partialCloseFraction: GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
+    partialProfitTaken,
+    partialUnitsClosed,
+    ...(partialProfitTaken
+      ? { partialProfitTakenAt: new Date().toISOString() }
+      : {}),
     ...(breakEvenActivated ? { breakEvenActivatedAt: new Date().toISOString() } : {}),
   };
   setActiveTrade({
@@ -195,15 +220,15 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
   });
   tradeManagerLog(
     'trade_manager_armed',
-    `MANAGER ARMED · ${direction} ${pair} · entry ${price(entry)} · protected stop ${price(stopLoss)} · 2R target ${price(takeProfit)}.`,
-    { tradeId: trade.id, direction, entry, stopLoss: managedStopLoss, takeProfit, riskDistance, currentUnits:trade.currentUnits, breakEvenActivated, mode },
+    `MANAGER ARMED · ${direction} ${pair} · entry ${price(entry)} · at +1R bank 50% and protect the remainder at break-even · remaining target ${price(takeProfit)}.`,
+    { tradeId: trade.id, direction, entry, stopLoss: managedStopLoss, takeProfit, riskDistance, currentUnits:trade.currentUnits, breakEvenActivated, partialProfitTaken, mode },
   );
   tradeManagerLog(
     breakEvenActivated ? 'trade_manager_break_even' : 'trade_manager_break_even_armed',
     breakEvenActivated
-      ? `BREAK-EVEN ALREADY ACTIVE · broker stop is at entry ${price(entry)} · a stop-out is a protected win.`
-      : `BREAK-EVEN ARMED · at +1.00R the broker stop will move from ${price(stopLoss)} to entry ${price(entry)}.`,
-    { tradeId: trade.id, entry, stopLoss, riskDistance, breakEvenActivated },
+      ? `PROFIT PROTECTION ACTIVE · broker stop is at entry ${price(entry)}${partialProfitTaken ? ' and the 50% partial is already banked' : ''}.`
+      : `PROFIT PROTECTION ARMED · at +1.00R the broker stop moves to entry ${price(entry)} before 50% is closed.`,
+    { tradeId: trade.id, entry, stopLoss, riskDistance, breakEvenActivated, partialProfitTaken },
   );
   updateWorkerStatus(pair, 'in_trade', 'monitoring_trade', `Monitoring Goldilocks trade ${trade.id}. New entries are disabled.`, mode);
   const reachedProfitMilestones = new Set<number>();
@@ -229,8 +254,12 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
         journal.tradeManagement={
           ...journal.tradeManagement,
           breakEvenAtOneR:true,
-          policyId:'be-at-1r-full-2r-v1',
+          policyId:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
           breakEvenActivated,
+          partialProfitAtOneR:true,
+          partialCloseFraction:GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
+          partialProfitTaken,
+          partialUnitsClosed,
           weekendLiquidation:true,
           weekendLiquidatedAt:new Date().toISOString(),
         };
@@ -252,9 +281,37 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
       brokerUnavailable = false;
       tradeManagerLog('trade_manager_connection', 'BROKER CONNECTION RESTORED · trade monitoring resumed.', { tradeId: trade.id });
     }
-    if (!hasPairTrade(open.trades)) {
+    const managedTrade = open.trades.find(
+      (item) =>
+        item.id === trade.id ||
+        normalizePairKeyUnderscore(item.instrument ?? '') ===
+          normalizePairKeyUnderscore(pair),
+    );
+    if (!managedTrade) {
       tradeManagerLog('trade_manager_closing', 'BROKER REPORTS TRADE CLOSED · resolving the final result and realized P/L.', { tradeId: trade.id });
       break;
+    }
+    const brokerPartialPlan = getGoldilocksPartialClosePlan(
+      managedTrade.initialUnits ?? trade.initialUnits,
+      managedTrade.currentUnits,
+    );
+    if (brokerPartialPlan.completed && !partialProfitTaken) {
+      partialProfitTaken = true;
+      partialUnitsClosed = Math.max(
+        0,
+        brokerPartialPlan.initialUnits - brokerPartialPlan.currentUnits,
+      );
+      journal.tradeManagement = {
+        ...journal.tradeManagement!,
+        partialProfitTaken: true,
+        partialProfitTakenAt: new Date().toISOString(),
+        partialUnitsClosed,
+      };
+      tradeManagerLog(
+        'trade_manager_partial_recovered',
+        `PARTIAL PROFIT CONFIRMED · broker position is already reduced to ${brokerPartialPlan.currentUnits} units.`,
+        { tradeId: trade.id, partialPlan: brokerPartialPlan },
+      );
     }
     const quote = await fetchPriceOnce(pair, mode);
     if (quote && riskDistance > 0) {
@@ -268,7 +325,12 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
         const key=`${milestone>=0?'+':''}${milestone}R`;
         if((milestone>=0?progressR>=milestone:progressR<=milestone)&&firstReachedAt[key]===undefined)firstReachedAt[key]=quoteTime;
       }
-      if (!breakEvenActivated && progressR >= 1 && Date.now() - lastBreakEvenAttempt >= 60_000) {
+      if (
+        !breakEvenActivated &&
+        (partialProfitTaken ||
+          progressR >= GOLDILOCKS_DEFAULT_MANAGEMENT.breakEvenAtR) &&
+        Date.now() - lastBreakEvenAttempt >= 60_000
+      ) {
         lastBreakEvenAttempt = Date.now();
         const result = await modifyTrade({ action: ACTION.SLatEntry, pair }, trade.id, mode);
         if (result.success) {
@@ -276,15 +338,70 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
           managedStopLoss = entry;
           journal.tradeManagement = {
             breakEvenAtOneR: true,
-            policyId:'be-at-1r-full-2r-v1',
+            policyId:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
             breakEvenActivated: true,
             breakEvenActivatedAt: new Date().toISOString(),
             breakEvenPrice: entry,
+            partialProfitAtOneR:true,
+            partialCloseFraction:GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
+            partialProfitTaken,
+            partialUnitsClosed,
           };
           setActiveTrade({ tradeId: trade.id, pair, direction, entry, stopLoss: entry, takeProfit: takeProfit || undefined, mode });
-          tradeManagerLog('trade_manager_break_even', `BREAK-EVEN LOCKED · ${pair} reached +1.00R · broker stop moved to entry ${price(entry)} · a stop-out now counts as a protected win.`, { tradeId: trade.id, entry, currentPrice, progressR, brokerResponse:result.raw });
+          tradeManagerLog('trade_manager_break_even', `BREAK-EVEN LOCKED · ${pair} reached +1.00R · broker stop moved to entry ${price(entry)} before the partial close.`, { tradeId: trade.id, entry, currentPrice, progressR, brokerResponse:result.raw });
         } else {
           tradeManagerLog('trade_manager_break_even_retry', `BREAK-EVEN MOVE DELAYED · ${pair} reached +1.00R but the broker did not accept the stop update; retrying safely.`, { tradeId: trade.id, reason: result.reason }, 'warn');
+        }
+      }
+      if (
+        breakEvenActivated &&
+        !partialProfitTaken &&
+        progressR >= GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR &&
+        Date.now() - lastPartialCloseAttempt >= 60_000
+      ) {
+        lastPartialCloseAttempt = Date.now();
+        const partialPlan = getGoldilocksPartialClosePlan(
+          managedTrade.initialUnits ?? trade.initialUnits,
+          managedTrade.currentUnits,
+        );
+        if (!partialPlan.supported || partialPlan.unitsToClose < 1) {
+          if (!partialUnsupportedLogged) {
+            partialUnsupportedLogged = true;
+            tradeManagerLog(
+              'trade_manager_partial_unsupported',
+              `PARTIAL CLOSE UNAVAILABLE · ${pair} position is too small to split safely; the full position remains protected at break-even.`,
+              { tradeId: trade.id, partialPlan },
+              'warn',
+            );
+          }
+        } else {
+          const partialResult = await closeTradePartial(
+            trade.id,
+            partialPlan.unitsToClose,
+            mode,
+          );
+          if ('errorMessage' in partialResult) {
+            tradeManagerLog(
+              'trade_manager_partial_retry',
+              `PARTIAL CLOSE DELAYED · ${pair} reached +1.00R but the broker did not accept the 50% close; break-even remains active and the partial will retry at or above +1R.`,
+              { tradeId: trade.id, partialPlan, reason: partialResult.errorMessage },
+              'warn',
+            );
+          } else {
+            partialProfitTaken = true;
+            partialUnitsClosed += partialPlan.unitsToClose;
+            journal.tradeManagement = {
+              ...journal.tradeManagement!,
+              partialProfitTaken: true,
+              partialProfitTakenAt: new Date().toISOString(),
+              partialUnitsClosed,
+            };
+            tradeManagerLog(
+              'trade_manager_partial_profit',
+              `PROFIT BANKED · ${pair} closed ${partialPlan.unitsToClose} units at approximately +1.00R · the remaining position is protected at break-even and targets 2R.`,
+              { tradeId: trade.id, currentPrice, progressR, partialPlan, brokerResponse: partialResult },
+            );
+          }
         }
       }
       const newProfit = profitMilestones.filter(value => progressR >= value && !reachedProfitMilestones.has(value)).at(-1);
@@ -306,7 +423,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
     await wait(15_000);
   }
   const path:TradePathSummary={coverageStartTime,coverageEndTime,candleCount:quoteCount,mfeR:Number.isFinite(mfeR)?mfeR:0,maeR:Number.isFinite(maeR)?maeR:0,endingR,firstReachedAt,ambiguousCandles:[]};
-  journal.tradeManagement={...journal.tradeManagement!,policyId:'be-at-1r-full-2r-v1',path};
+  journal.tradeManagement={...journal.tradeManagement!,policyId:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,partialProfitTaken,partialUnitsClosed,path};
   tradeManagerLog('trade_manager_path_summary',`MANAGEMENT PATH SAVED · ${pair} sampled ${quoteCount} executable quotes · MFE ${path.mfeR.toFixed(2)}R · MAE ${path.maeR.toFixed(2)}R.`,{tradeId:trade.id,path});
   if (!killed) {
     await recordClosedTrade(trade, journal, breakEvenActivated);

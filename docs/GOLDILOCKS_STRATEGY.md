@@ -335,8 +335,10 @@ stop, target, and confirmation time in the trade journal.
 After entry:
 
 1. Monitor the broker trade and current quote.
-2. At +1R, move the stop to the entry price.
-3. At Friday 16:00 America/New_York, submit a full close so no Goldilocks position is
+2. At +1R, move the stop to the entry price first and close 50% of the position.
+3. Leave the remaining 50% targeting 2R. A later break-even exit banks +0.5R total;
+   reaching 2R banks +1.5R total.
+4. At Friday 16:00 America/New_York, submit a full close so no Goldilocks position is
    deliberately carried into the weekend. Failed close requests retry while the market remains open.
 4. Once +1R has been achieved, classify a later break-even stop as a protected win,
    even when realized P/L is zero or slightly negative from execution costs.
@@ -498,7 +500,7 @@ the deep-sweep path, while a separate later standard sweep still belongs to the 
 single sweep-warning category.
 New runs also persist a causal M5/M15/H1 supply-demand corridor snapshot and a shared
 M1 market-path summary. Each stored setup receives separate versioned research outcomes
-for a 22-policy research grid: set-and-forget targets from 1R to 5R, +1R break-even
+for a 23-policy research grid: the default 50%-at-1R manager, set-and-forget targets from 1R to 5R, +1R break-even
 targets from 1.5R to 5R, and 25%, 50%, or 75% runners from 2R toward 3R, 4R, or 5R. These
 counterfactual rows are training data only: they do not replace the official backtest
 outcome or change live execution. Live/demo manager actions are additionally copied to
@@ -576,7 +578,7 @@ The Backtesting dashboard can start a detached, resumable research campaign stor
 strategy families: baseline, freshness-first, structure-first, confluence/runway-first,
 balanced context, and isolated session, entry-proximity, and adverse-approach gate
 ablations. Core market-hours, holiday, news, and 2R-runway safety gates stay enabled
-in every family. This produces 120 trials and records all 22 management-policy outcomes
+in every family. This produces 120 trials and records all 23 management-policy outcomes
 for every stored trade. Each unique configuration and dataset manifest is hashed, so
 an interrupted worker can resume without treating an identical trial as new evidence.
 

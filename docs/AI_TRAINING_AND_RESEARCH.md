@@ -110,7 +110,7 @@ exporter should include:
   percentages occupied by 1R, 2R, and 4R. Missing corridor sides remain unavailable.
 - A policy-independent M1 path summary: MFE/MAE in R, ending R, coverage bounds/count,
   first time each positive and negative R milestone was reached, and intrabar ambiguity.
-- One child row per versioned manager evaluated on that identical path. The 22-policy
+- One child row per versioned manager evaluated on that identical path. The 23-policy
   grid covers set-and-forget targets from 1R through 5R, break-even-at-+1R targets from
   1.5R through 5R, and 25%, 50%, or 75% runners after 2R toward 3R, 4R, or 5R.
   Runner stop is +1R.
@@ -130,9 +130,10 @@ unchanged, so counterfactual manager research cannot silently alter strategy beh
 The read-only `GET /api/automation/trade-management?tradeId=<broker-trade-id>` endpoint
 returns the permanent live/demo manager ledger for one broker trade.
 
-Live/demo automation currently executes `be-at-1r-full-2r-v1`. Backtests may retain the
-existing score-tiered partial-runner result as their official outcome; the research child
-rows expose all policies side by side instead of hiding that mismatch.
+Live/demo automation and new official backtests execute
+`secure-50-at-1r-rest-2r-v1`: at +1R the stop moves to entry first, 50% is closed,
+and the remaining 50% targets 2R. The research child rows expose all policies side by
+side for comparison.
 
 ## Prevent leakage
 

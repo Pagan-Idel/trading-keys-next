@@ -1,4 +1,5 @@
 import type { StrategyCandle } from './goldilocksStrategy.ts';
+import { GOLDILOCKS_DEFAULT_MANAGEMENT } from './goldilocksTradeManagement.ts';
 
 export const GOLDILOCKS_RESEARCH_SCHEMA_VERSION='goldilocks-ai-research-v1';
 
@@ -21,6 +22,16 @@ const runnerFractions=[.25,.5,.75] as const;
 const runnerTargets=[3,4,5] as const;
 
 export const GOLDILOCKS_MANAGEMENT_POLICIES:TradeManagementPolicy[]=[
+  {
+    id:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+    version:1,
+    label:'Default: 50% at 1R, remaining 50% protected to 2R',
+    breakEvenAtR:GOLDILOCKS_DEFAULT_MANAGEMENT.breakEvenAtR,
+    primaryTargetR:GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR,
+    primaryExitFraction:GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
+    runnerTargetR:GOLDILOCKS_DEFAULT_MANAGEMENT.finalTargetR,
+    runnerStopR:0,
+  },
   ...setAndForgetTargets.map(primaryTargetR=>(
     {id:`set-forget-${targetId(primaryTargetR)}-v1`,version:1 as const,label:`Set and forget ${primaryTargetR}R`,breakEvenAtR:null,primaryTargetR,primaryExitFraction:1,runnerTargetR:null,runnerStopR:null}
   )),
@@ -145,6 +156,8 @@ export const evaluateTradeManagementPolicy=(args:{
     if(reachedPrimary){
       if(policy.primaryExitFraction>=1)return {policyId:policy.id,policyVersion:policy.version,policy,status:'closed',exitTime:candle.time,exitReason:'target',realizedR:policy.primaryTargetR,markToMarketR:rAt(direction,candle.close,entry,risk),breakEvenActivatedAt,partialExitAt,path:summary};
       partialExitAt=candle.time;
+      if(policy.breakEvenAtR!==null&&policy.breakEvenAtR<=policy.primaryTargetR)
+        breakEvenActivatedAt??=candle.time;
       realizedPrimary=policy.primaryExitFraction*policy.primaryTargetR;
       continue;
     }

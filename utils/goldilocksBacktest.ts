@@ -55,6 +55,11 @@ import {
   evaluateGoldilocksManagementPolicies,
   summarizeTradeMarketPath,
 } from "./tradeManagementResearch.ts";
+import {
+  GOLDILOCKS_DEFAULT_MANAGEMENT,
+  goldilocksRealizedRAtTarget,
+  goldilocksSecuredRAtBreakEven,
+} from "./goldilocksTradeManagement.ts";
 import { measureZoneCorridor } from "./zoneCorridor.ts";
 import { isTradeSessionOpen } from "./sessionUtils.ts";
 
@@ -212,11 +217,6 @@ const marketContextAt = (
     return { trend: "unknown" };
   return { trend: point.trend };
 };
-const runnerFractionForScore = (score?: number) =>
-  score == null || score < 16 ? 0 : score < 18 ? 0.25 : 0.5;
-const blendedRunnerR = (runnerFraction: number, runnerExitR: number) =>
-  (1 - runnerFraction) * 2 + runnerFraction * runnerExitR;
-
 export const resolveProtectedOutcome = (
   candles: StrategyCandle[],
   startIndex: number,
@@ -234,10 +234,8 @@ export const resolveProtectedOutcome = (
     (direction === "BUY"
       ? entry + Math.abs(entry - stopLoss) * 2
       : entry - Math.abs(entry - stopLoss) * 2);
-  const runnerTarget =
-    direction === "BUY" ? entry + risk * 4 : entry - risk * 4;
-  const runnerFraction = runnerFractionForScore(score);
-  let protectedAt = -1;
+  const securedR = goldilocksSecuredRAtBreakEven();
+  const targetR = goldilocksRealizedRAtTarget();
   let partialAt = -1;
   for (let index = startIndex; index < candles.length; index += 1) {
     const candle = candles[index];
@@ -248,13 +246,15 @@ export const resolveProtectedOutcome = (
       const rawOpenR =
         (direction === "BUY" ? candle.open - entry : entry - candle.open) /
         risk;
-      const activeStopFloor = partialAt >= 0 ? 1 : protectedAt >= 0 ? 0 : -1;
+      const activeStopFloor = partialAt >= 0 ? 0 : -1;
       const boundedOpenR = Math.max(activeStopFloor, rawOpenR);
       const realizedR =
         partialAt >= 0
-          ? blendedRunnerR(runnerFraction, boundedOpenR)
+          ? securedR +
+            (1 - GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction) *
+              boundedOpenR
           : boundedOpenR;
-      const protectedWin = partialAt >= 0 || protectedAt >= 0;
+      const protectedWin = partialAt >= 0;
       return {
         outcome: (realizedR > 0 || protectedWin ? "WIN" : "LOSS") as
           "WIN" | "LOSS",
@@ -264,93 +264,57 @@ export const resolveProtectedOutcome = (
       };
     }
     if (partialAt >= 0) {
-      const runnerStopped =
-        direction === "BUY" ? candle.low <= oneR : candle.high >= oneR;
-      const runnerWon =
-        direction === "BUY"
-          ? candle.high >= runnerTarget
-          : candle.low <= runnerTarget;
-      if (runnerStopped)
-        return {
-          outcome: "WIN" as const,
-          outcomeTime: candle.time,
-          exitReason: "runner_stop" as const,
-          realizedR: blendedRunnerR(runnerFraction, 1),
-        };
-      if (runnerWon)
-        return {
-          outcome: "WIN" as const,
-          outcomeTime: candle.time,
-          exitReason: "runner_target" as const,
-          realizedR: blendedRunnerR(runnerFraction, 4),
-        };
-      continue;
-    }
-    if (protectedAt < 0) {
-      const stopped =
-        direction === "BUY" ? candle.low <= stopLoss : candle.high >= stopLoss;
-      const reachedOneR =
-        direction === "BUY" ? candle.high >= oneR : candle.low <= oneR;
-      const reachedTarget =
+      const remainingStopped =
+        direction === "BUY" ? candle.low <= entry : candle.high >= entry;
+      const remainingWon =
         direction === "BUY" ? candle.high >= target : candle.low <= target;
-      if (stopped)
+      if (remainingStopped)
         return {
-          outcome: "LOSS" as const,
+          outcome: "WIN" as const,
           outcomeTime: candle.time,
-          exitReason: "stop" as const,
-          realizedR: -1,
+          exitReason: "break_even" as const,
+          realizedR: securedR,
         };
-      if (reachedTarget) {
-        if (!runnerFraction)
-          return {
-            outcome: "WIN" as const,
-            outcomeTime: candle.time,
-            exitReason: "target" as const,
-            realizedR: 2,
-          };
-        partialAt = index;
-        continue;
-      }
-      if (reachedOneR) protectedAt = index;
-      continue;
-    }
-    const breakEven =
-      direction === "BUY" ? candle.low <= entry : candle.high >= entry;
-    const reachedTarget =
-      direction === "BUY" ? candle.high >= target : candle.low <= target;
-    if (breakEven)
-      return {
-        outcome: "WIN" as const,
-        outcomeTime: candle.time,
-        exitReason: "break_even" as const,
-        realizedR: 0,
-      };
-    if (reachedTarget) {
-      if (!runnerFraction)
+      if (remainingWon)
         return {
           outcome: "WIN" as const,
           outcomeTime: candle.time,
           exitReason: "target" as const,
-          realizedR: 2,
+          realizedR: targetR,
         };
-      partialAt = index;
+      continue;
     }
+    const stopped =
+      direction === "BUY" ? candle.low <= stopLoss : candle.high >= stopLoss;
+    const reachedOneR =
+      direction === "BUY" ? candle.high >= oneR : candle.low <= oneR;
+    const reachedTarget =
+      direction === "BUY" ? candle.high >= target : candle.low <= target;
+    if (stopped)
+      return {
+        outcome: "LOSS" as const,
+        outcomeTime: candle.time,
+        exitReason: "stop" as const,
+        realizedR: -1,
+      };
+    if (reachedTarget) {
+      return {
+        outcome: "WIN" as const,
+        outcomeTime: candle.time,
+        exitReason: "target" as const,
+        realizedR: targetR,
+      };
+    }
+    if (reachedOneR) partialAt = index;
   }
   if (partialAt >= 0 && candles.length)
     return {
       outcome: "WIN" as const,
       outcomeTime: candles[candles.length - 1].time,
-      exitReason: "runner_open" as const,
-      realizedR: blendedRunnerR(runnerFraction, 1),
+      exitReason: "one_r_protected" as const,
+      realizedR: securedR,
     };
-  return protectedAt >= 0 && candles.length
-    ? {
-        outcome: "WIN" as const,
-        outcomeTime: candles[candles.length - 1].time,
-        exitReason: "one_r_protected" as const,
-        realizedR: 0,
-      }
-    : null;
+  return null;
 };
 
 export const validateGoldilocksExecutionCoverageAtEntry = (
@@ -448,9 +412,8 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
       (direction === "BUY"
         ? entry + Math.abs(entry - stopLoss) * 2
         : entry - Math.abs(entry - stopLoss) * 2);
-    const runnerTarget =
-      direction === "BUY" ? entry + risk * 4 : entry - risk * 4;
-    const runnerFraction = runnerFractionForScore(score);
+    const securedR = goldilocksSecuredRAtBreakEven();
+    const targetR = goldilocksRealizedRAtTarget();
     const stopIndex =
       direction === "BUY"
         ? firstLowAtMost(startIndex, stopLoss)
@@ -479,47 +442,13 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
       direction === "BUY"
         ? firstHighAtLeast(startIndex, target)
         : firstLowAtMost(startIndex, target);
-    if (directTargetIndex === protectedIndex) {
-      if (!runnerFraction)
-        return {
-          outcome: "WIN" as const,
-          outcomeTime: candles[directTargetIndex].time,
-          exitReason: "target" as const,
-          realizedR: 2,
-        };
-      const after = directTargetIndex + 1;
-      const runnerStopIndex =
-        direction === "BUY"
-          ? firstLowAtMost(after, oneR)
-          : firstHighAtLeast(after, oneR);
-      const runnerTargetIndex =
-        direction === "BUY"
-          ? firstHighAtLeast(after, runnerTarget)
-          : firstLowAtMost(after, runnerTarget);
-      if (runnerStopIndex < 0 && runnerTargetIndex < 0)
-        return {
-          outcome: "WIN" as const,
-          outcomeTime: candles[candles.length - 1].time,
-          exitReason: "runner_open" as const,
-          realizedR: blendedRunnerR(runnerFraction, 1),
-        };
-      if (
-        runnerStopIndex >= 0 &&
-        (runnerTargetIndex < 0 || runnerStopIndex <= runnerTargetIndex)
-      )
-        return {
-          outcome: "WIN" as const,
-          outcomeTime: candles[runnerStopIndex].time,
-          exitReason: "runner_stop" as const,
-          realizedR: blendedRunnerR(runnerFraction, 1),
-        };
+    if (directTargetIndex === protectedIndex)
       return {
         outcome: "WIN" as const,
-        outcomeTime: candles[runnerTargetIndex].time,
-        exitReason: "runner_target" as const,
-        realizedR: blendedRunnerR(runnerFraction, 4),
+        outcomeTime: candles[directTargetIndex].time,
+        exitReason: "target" as const,
+        realizedR: targetR,
       };
-    }
     const after = protectedIndex + 1;
     const breakEvenIndex =
       direction === "BUY"
@@ -534,7 +463,7 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
         outcome: "WIN" as const,
         outcomeTime: candles[candles.length - 1].time,
         exitReason: "one_r_protected" as const,
-        realizedR: 0,
+        realizedR: securedR,
       };
     if (
       breakEvenIndex >= 0 &&
@@ -544,46 +473,13 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
         outcome: "WIN" as const,
         outcomeTime: candles[breakEvenIndex].time,
         exitReason: "break_even" as const,
-        realizedR: 0,
-      };
-    if (!runnerFraction)
-      return {
-        outcome: "WIN" as const,
-        outcomeTime: candles[targetIndex].time,
-        exitReason: "target" as const,
-        realizedR: 2,
-      };
-    const runnerAfter = targetIndex + 1;
-    const runnerStopIndex =
-      direction === "BUY"
-        ? firstLowAtMost(runnerAfter, oneR)
-        : firstHighAtLeast(runnerAfter, oneR);
-    const runnerTargetIndex =
-      direction === "BUY"
-        ? firstHighAtLeast(runnerAfter, runnerTarget)
-        : firstLowAtMost(runnerAfter, runnerTarget);
-    if (runnerStopIndex < 0 && runnerTargetIndex < 0)
-      return {
-        outcome: "WIN" as const,
-        outcomeTime: candles[candles.length - 1].time,
-        exitReason: "runner_open" as const,
-        realizedR: blendedRunnerR(runnerFraction, 1),
-      };
-    if (
-      runnerStopIndex >= 0 &&
-      (runnerTargetIndex < 0 || runnerStopIndex <= runnerTargetIndex)
-    )
-      return {
-        outcome: "WIN" as const,
-        outcomeTime: candles[runnerStopIndex].time,
-        exitReason: "runner_stop" as const,
-        realizedR: blendedRunnerR(runnerFraction, 1),
+        realizedR: securedR,
       };
     return {
       outcome: "WIN" as const,
-      outcomeTime: candles[runnerTargetIndex].time,
-      exitReason: "runner_target" as const,
-      realizedR: blendedRunnerR(runnerFraction, 4),
+      outcomeTime: candles[targetIndex].time,
+      exitReason: "target" as const,
+      realizedR: targetR,
     };
   };
 };

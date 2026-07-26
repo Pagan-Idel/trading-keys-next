@@ -1468,7 +1468,7 @@ export default function Backtesting() {
         <Head style={{padding:0,border:0}}>
           <div>
             <h2>24/7 auto research</h2>
-            <span className="muted">One OANDA acquisition, then sealed SQLite-only trials · M15/M5/M1, H1/M15/M5, and D1/H4/H1 · scores 10-18 · 22 managers</span>
+            <span className="muted">One OANDA acquisition, then sealed SQLite-only trials · M15/M5/M1, H1/M15/M5, and D1/H4/H1 · scores 10-18 · 23 managers</span>
           </div>
           <ResearchActions>
             {!researchCampaign||['completed','cancelled','failed'].includes(researchCampaign.status)
@@ -1615,7 +1615,7 @@ export default function Backtesting() {
             <Metric>{performance.longestLosingStreak}</Metric>
           </Card>
           <Card>
-            <Label>Reached +1R / protected 0R</Label>
+            <Label>Profitable / flat exits</Label>
             <Metric style={{ fontSize: "1.35rem" }}>
               {current?.wins ?? 0} / {performance.breakEvenTrades}
             </Metric>
@@ -1624,7 +1624,7 @@ export default function Backtesting() {
         </EdgeGrid>
         <EdgeNote>
           <strong>Read win rate as consistency, not as the objective.</strong>{" "}
-          Protected break-even trades count as 0R here, not profitable wins.
+          Under the default manager, reaching +1R banks half and a later break-even exit records +0.5R.
           Rankings below use expectancy first.{" "}
           {performance.sampleTrades < 50
             ? `This run has only ${performance.sampleTrades} realized-R trades; treat it as an early signal until it reaches at least 50, ideally 100+.`

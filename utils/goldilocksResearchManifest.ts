@@ -275,7 +275,8 @@ export const buildGoldilocksResearchManifest = (
       },
       {
         name: "Break-even",
-        rule: "Move stop to entry after +1R.",
+        rule:
+          "At +1R, move the stop to entry, bank 50%, and leave the remaining 50% targeting 2R.",
         value: { activationR: 1 },
       },
       {

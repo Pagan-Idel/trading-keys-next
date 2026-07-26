@@ -112,6 +112,10 @@ import {
   evaluateTradeManagementPolicy,
   GOLDILOCKS_MANAGEMENT_POLICIES,
 } from "../utils/tradeManagementResearch";
+import {
+  GOLDILOCKS_DEFAULT_MANAGEMENT,
+  getGoldilocksPartialClosePlan,
+} from "../utils/goldilocksTradeManagement";
 import { measureZoneCorridor } from "../utils/zoneCorridor";
 import { mergeCandleCoverageRanges } from "../utils/candleArchive";
 import { buildAutoResearchConfigurations } from "../utils/autoResearchRunner";
@@ -467,7 +471,7 @@ test("measures backtest edge from realized R instead of protected-win labels", (
 });
 
 test("labels a new run with only its strategy version and run date", () => {
-  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.40");
+  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.41");
   assert.equal(
     getGoldilocksBacktestRunLabel(
       "lowerTimeframe",
@@ -714,7 +718,7 @@ test("freezes every gate, score component, diagnostic, risk profile, and manager
         item.name === "Approach pressure / confirmation bias" && item.scored,
     ),
   );
-  assert.equal(manifest.managementPolicies.length, 22);
+  assert.equal(manifest.managementPolicies.length, 23);
   assert.deepEqual(Object.keys(manifest.riskProfiles).sort(), [
     "aggressive",
     "default",
@@ -1503,7 +1507,7 @@ test("classifies a break-even stop after reaching 1R as a protected win", () => 
   assert.equal(classifyTradeOutcome("0.00", false), "LOSS");
 });
 
-test("backtest follows +1R protection through break-even or the final 2R target and treats ambiguous stop candles conservatively", () => {
+test("backtest banks half at +1R, protects the remainder, and treats ambiguous stop candles conservatively", () => {
   const clean = [
     { time: 1, open: 100, high: 102.1, low: 99.5, close: 101.5 },
     { time: 2, open: 101.5, high: 101.7, low: 99.9, close: 100.2 },
@@ -1512,7 +1516,7 @@ test("backtest follows +1R protection through break-even or the final 2R target 
     outcome: "WIN",
     outcomeTime: 2,
     exitReason: "break_even",
-    realizedR: 0,
+    realizedR: 0.5,
   });
   const target = [
     { time: 1, open: 100, high: 102.1, low: 99.5, close: 101.5 },
@@ -1522,7 +1526,7 @@ test("backtest follows +1R protection through break-even or the final 2R target 
     outcome: "WIN",
     outcomeTime: 2,
     exitReason: "target",
-    realizedR: 2,
+    realizedR: 1.5,
   });
   const ambiguous = [
     { time: 2, open: 100, high: 102.1, low: 97.9, close: 101 },
@@ -1646,38 +1650,43 @@ test("indexed backtest outcomes match the candle-by-candle reference resolver", 
   }
 });
 
-test("score-tiered runners blend partial 2R profit with the protected runner result", () => {
-  const runnerStop = [
+test("official outcomes use the same 50%-at-1R manager regardless of setup score", () => {
+  const protectedStop = [
     { time: 1, open: 100, high: 102.1, low: 99.5, close: 102 },
-    { time: 2, open: 102, high: 104.1, low: 101.5, close: 104 },
-    { time: 3, open: 104, high: 104.2, low: 101.9, close: 102 },
+    { time: 2, open: 102, high: 102.2, low: 99.9, close: 100 },
   ];
   assert.deepEqual(
-    resolveProtectedOutcome(runnerStop, 0, "BUY", 98, 102, 104, 16),
-    {
-      outcome: "WIN",
-      outcomeTime: 3,
-      exitReason: "runner_stop",
-      realizedR: 1.75,
-    },
-  );
-  const runnerTarget = [
-    { time: 1, open: 100, high: 104.1, low: 99.5, close: 104 },
-    { time: 2, open: 104, high: 108.1, low: 103, close: 108 },
-  ];
-  assert.deepEqual(
-    resolveProtectedOutcome(runnerTarget, 0, "BUY", 98, 102, 104, 18),
+    resolveProtectedOutcome(protectedStop, 0, "BUY", 98, 102, 104, 16),
     {
       outcome: "WIN",
       outcomeTime: 2,
-      exitReason: "runner_target",
-      realizedR: 3,
+      exitReason: "break_even",
+      realizedR: 0.5,
     },
   );
-  assert.deepEqual(
-    resolveProtectedOutcome(runnerTarget, 0, "BUY", 98, 102, 104, 15),
-    { outcome: "WIN", outcomeTime: 1, exitReason: "target", realizedR: 2 },
-  );
+  const finalTarget = [
+    { time: 1, open: 100, high: 104.1, low: 99.5, close: 104 },
+  ];
+  for (const score of [15, 16, 18])
+    assert.deepEqual(
+      resolveProtectedOutcome(finalTarget, 0, "BUY", 98, 102, 104, score),
+      { outcome: "WIN", outcomeTime: 1, exitReason: "target", realizedR: 1.5 },
+    );
+});
+
+test("plans an exact restart-safe 50% partial close for integer broker units", () => {
+  assert.deepEqual(getGoldilocksPartialClosePlan("100", "100"), {
+    supported: true,
+    initialUnits: 100,
+    currentUnits: 100,
+    targetRemainingUnits: 50,
+    unitsToClose: 50,
+    completed: false,
+  });
+  assert.equal(getGoldilocksPartialClosePlan("101", "101").unitsToClose, 50);
+  assert.equal(getGoldilocksPartialClosePlan("101", "76").unitsToClose, 25);
+  assert.equal(getGoldilocksPartialClosePlan("101", "51").completed, true);
+  assert.equal(getGoldilocksPartialClosePlan("1", "1").supported, false);
 });
 
 test("portfolio simulation reserves concurrent margin and rejects trades that do not fit", () => {
@@ -3781,6 +3790,12 @@ test("replays multiple versioned managers on the identical M1 path", () => {
     2,
   );
   assert.equal(
+    results.find(
+      (result) => result.policyId === GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+    )?.realizedR,
+    1.5,
+  );
+  assert.equal(
     results.find((result) => result.policyId === "partial-25-runner-4r-v1")
       ?.realizedR,
     1.75,
@@ -3795,7 +3810,11 @@ test("replays multiple versioned managers on the identical M1 path", () => {
 });
 
 test("research manager grid spans target, break-even, and partial-runner choices without changing entry risk", () => {
-  assert.equal(GOLDILOCKS_MANAGEMENT_POLICIES.length, 22);
+  assert.equal(GOLDILOCKS_MANAGEMENT_POLICIES.length, 23);
+  assert.equal(
+    GOLDILOCKS_MANAGEMENT_POLICIES[0]?.id,
+    GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+  );
   assert.ok(
     GOLDILOCKS_MANAGEMENT_POLICIES.some(
       (policy) => policy.id === "set-forget-1r-v1",

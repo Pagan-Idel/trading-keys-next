@@ -40,7 +40,13 @@ export const closeTradePartial = async (
     return { errorMessage: `Invalid unitsToClose: ${unitsToClose}` };
   }
 
-  const result = await closeTrade({ action: "PartialClose50", pair }, pair, unitsToClose, mode);
+  const result = await closeTrade(
+    { action: "PartialClose50", pair },
+    pair,
+    unitsToClose,
+    mode,
+    trade.id,
+  );
   if (!result || typeof result === "boolean") {
     logMessage(`❌ Failed to close partial trade for ${pair} (Trade ID: ${tradeId})`, undefined, {
       level: "error",

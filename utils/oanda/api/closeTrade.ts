@@ -7,6 +7,7 @@ import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
 import { recentTrade } from "../../shared";
 import { getLoginMode } from "../../loginState";
+import { openNow } from "./openNow";
 
 export interface TradeCloseResponse {
   lastTransactionID?: TransactionID;
@@ -50,7 +51,8 @@ export const closeTrade = async (
   orderType: OrderParameters,
   pair?: string,
   unitsOverride?: number,
-  mode: 'live' | 'demo' = getLoginMode()
+  mode: 'live' | 'demo' = getLoginMode(),
+  tradeIdOverride?: string,
 ): Promise<TradeCloseResponse | boolean> => {
   const accountType = mode;
   let accountId = '';
@@ -73,7 +75,11 @@ export const closeTrade = async (
     return false;
   }
 
-  const mostRecentTrade: Trade | undefined = await recentTrade(pair, mode);
+  const mostRecentTrade: Trade | undefined = tradeIdOverride
+    ? (await openNow(tradeIdOverride, mode))?.trades.find(
+        (trade) => trade.id === tradeIdOverride,
+      )
+    : await recentTrade(pair, mode);
   if (!mostRecentTrade) {
     return false;
   }

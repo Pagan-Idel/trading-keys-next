@@ -10,9 +10,38 @@ import { ACTION } from "./order";
 import { getLoginMode } from "../../loginState";
 
 interface ModifyRequest {
-  takeProfit?: OrderDetails;
+  takeProfit?: OrderDetails | null;
   stopLoss?: OrderDetails;
 }
+
+export const replaceTradeProtection = async (
+  tradeId: string,
+  stopLoss: number,
+  removeTakeProfit: boolean,
+  mode: 'live' | 'demo' = getLoginMode(),
+): Promise<{ success: boolean; reason: string; raw: any }> => {
+  const hostname = mode === "live" ? "https://api-fxtrade.oanda.com" : "https://api-fxpractice.oanda.com";
+  const accountId = mode === "live" ? credentials.OANDA_LIVE_ACCOUNT_ID : credentials.OANDA_DEMO_ACCOUNT_ID;
+  const token = mode === "live" ? credentials.OANDA_LIVE_ACCOUNT_TOKEN : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
+  if (!accountId || !token) return { success: false, reason: "Token or AccountId is not set.", raw: undefined };
+  const trade = (await openNow(tradeId, mode))?.trades.find(item => item.id === tradeId);
+  if (!trade?.instrument) return { success: false, reason: `Trade not found for ${tradeId}`, raw: undefined };
+  const requestBody: ModifyRequest = {
+    stopLoss: { price: stopLoss.toFixed(getPrecision(trade.instrument)), timeInForce: "GTC" },
+    ...(removeTakeProfit ? { takeProfit: null } : {}),
+  };
+  const response = await fetch(`${hostname}/v3/accounts/${accountId}/trades/${tradeId}/orders`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "Accept-Datetime-Format": "RFC3339" },
+    body: JSON.stringify(requestBody),
+  });
+  const text = await response.text();
+  let raw: any;
+  try { raw = JSON.parse(text); } catch { raw = text; }
+  return response.ok
+    ? { success: true, reason: "Trade protection replaced", raw }
+    : { success: false, reason: raw?.errorMessage || `Protection update failed. HTTP ${response.status}`, raw };
+};
 
 interface OrderDetails {
   timeInForce: string;

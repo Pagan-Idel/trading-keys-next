@@ -1,9 +1,10 @@
 export const GOLDILOCKS_DEFAULT_MANAGEMENT = {
-  policyId: "secure-50-at-1r-rest-2r-v1",
+  policyId: "secure-half-atr-runner-v3",
   partialAtR: 1,
   partialCloseFraction: 0.5,
   breakEvenAtR: 1,
-  finalTargetR: 2,
+  trailingAtrPeriod: 14,
+  trailingAtrMultiplier: 2,
 } as const;
 
 export const GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID =
@@ -23,9 +24,9 @@ export const GOLDILOCKS_BACKTEST_MANAGERS: ReadonlyArray<{
 }> = [
   {
     id: GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
-    label: "Secure half at 1R (default)",
+    label: "Secure Half + ATR Runner (default)",
     description:
-      "At +1R, bank 50% and move the remaining 50% stop to break-even; final target stays at 2R.",
+      "At +1R, bank 50%, cancel the take-profit, and trail the remaining 50% with a 2× ATR(14) stop that never moves behind break-even.",
   },
   {
     id: GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
@@ -111,7 +112,40 @@ export const goldilocksSecuredRAtBreakEven = () =>
   GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR *
   GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction;
 
-export const goldilocksRealizedRAtTarget = () =>
-  goldilocksSecuredRAtBreakEven() +
-  GOLDILOCKS_DEFAULT_MANAGEMENT.finalTargetR *
-    (1 - GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction);
+export const calculateAtr = (
+  candles: ReadonlyArray<{ high: number; low: number; close: number }>,
+  period = GOLDILOCKS_DEFAULT_MANAGEMENT.trailingAtrPeriod,
+) => {
+  if (candles.length < period + 1) return null;
+  const ranges = candles.slice(-period).map((candle, index, selected) => {
+    const sourceIndex = candles.length - selected.length + index;
+    const previousClose = candles[sourceIndex - 1].close;
+    return Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - previousClose),
+      Math.abs(candle.low - previousClose),
+    );
+  });
+  const atr = ranges.reduce((sum, value) => sum + value, 0) / period;
+  return Number.isFinite(atr) && atr > 0 ? atr : null;
+};
+
+export const getGoldilocksAtrTrailingStop = ({
+  direction,
+  entry,
+  currentStop,
+  favorableExtreme,
+  atr,
+}: {
+  direction: "BUY" | "SELL";
+  entry: number;
+  currentStop: number;
+  favorableExtreme: number;
+  atr: number;
+}) => {
+  const distance =
+    atr * GOLDILOCKS_DEFAULT_MANAGEMENT.trailingAtrMultiplier;
+  return direction === "BUY"
+    ? Math.max(currentStop, entry, favorableExtreme - distance)
+    : Math.min(currentStop, entry, favorableExtreme + distance);
+};

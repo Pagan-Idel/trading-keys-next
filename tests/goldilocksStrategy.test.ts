@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { calculateScoreRisk } from "../utils/dynamicRisk.ts";
 import {
   effectiveOandaLeverage,
   simulateBacktestPortfolio,
 } from "../utils/backtestPortfolio.ts";
+import {
+  assessPortfolioMarginAdmission,
+  estimateMarginFromStopRisk,
+} from "../utils/portfolioMargin.ts";
+import { PortfolioRiskCoordinator } from "../utils/portfolioRiskCoordinator.ts";
 import {
   detectGoldilocksZones,
   detectGoldilocksZoneHistory,
@@ -45,9 +53,14 @@ import type { Candle, SwingResult } from "../utils/swingLabeler";
 import { isTradeSessionOpen } from "../utils/sessionUtils";
 import { zonedWallClockToEpoch } from "../utils/newsGuard";
 import { scoreGoldilocksSetup } from "../utils/goldilocksScoring";
+import {
+  goldilocksScoreComponentMaximum,
+  goldilocksScoreContractVersionNumber,
+} from "../utils/goldilocksScoreDisplay";
 import { classifyTradeOutcome } from "../utils/tradeHistory";
 import {
   buildProtectedOutcomeResolver,
+  reverseGoldilocksExecution,
   resolveProtectedOutcome,
   validateGoldilocksExecutionCoverageAtEntry,
 } from "../utils/goldilocksBacktest";
@@ -84,10 +97,12 @@ import {
   getReplayPartialExitMarkerText,
   getReplayVisibleEnd,
   getReplayVisibleStart,
+  getStrategyReplayZoneFormationDetails,
   getStrategyReplayBaseContextStart,
   getStrategyReplayContextAnchor,
   getStrategyReplayRequestEnd,
   getStrategyReplayWindow,
+  isStoredReplayZoneMatch,
   reconcileStoredReplayPriorTouchDetails,
   sortUniqueReplayCandleItems,
   STRATEGY_REPLAY_BASE_CONTEXT_SECONDS,
@@ -476,7 +491,7 @@ test("measures backtest edge from realized R instead of protected-win labels", (
 });
 
 test("labels a new run with only its strategy version and run date", () => {
-  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.41");
+  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.42");
   assert.equal(
     getGoldilocksBacktestRunLabel(
       "lowerTimeframe",
@@ -494,6 +509,41 @@ test("labels a new run with only its strategy version and run date", () => {
       new Date("2026-07-20T12:00:00Z"),
     ),
     "d1-h4-h1-research-v3 · 2026-07-20",
+  );
+});
+
+test("shows research profiles with the current score-component maximums", () => {
+  assert.equal(
+    goldilocksScoreContractVersionNumber("m15-m5-m1-research-v3"),
+    42,
+  );
+  assert.equal(
+    goldilocksScoreComponentMaximum(
+      "M1 approach warnings",
+      "m15-m5-m1-research-v3",
+    ),
+    5,
+  );
+  assert.equal(
+    goldilocksScoreComponentMaximum(
+      "M5 departure quality",
+      "m15-m5-m1-research-v3",
+    ),
+    4,
+  );
+  assert.equal(
+    goldilocksScoreComponentMaximum(
+      "M15 trend",
+      "m15-m5-m1-research-v3",
+    ),
+    3,
+  );
+  assert.equal(
+    goldilocksScoreComponentMaximum(
+      "Zone inside zone",
+      "m15-m5-m1-research-v3",
+    ),
+    4,
   );
 });
 
@@ -561,6 +611,8 @@ test("normalizes saved backtest gate switches and score weights", () => {
   const gates = normalizeGoldilocksBacktestGates({
     entryNews: false,
     twoToOneRunway: false,
+    adverseApproach: true,
+    departureQuality: true,
   });
   assert.equal(gates.entryNews, false);
   assert.equal(gates.twoToOneRunway, false);
@@ -568,12 +620,21 @@ test("normalizes saved backtest gate switches and score weights", () => {
     gates.weeklyMarketHours,
     GOLDILOCKS_BACKTEST_GATE_DEFAULTS.weeklyMarketHours,
   );
+  assert.equal(gates.adverseApproach, false);
+  assert.equal(gates.departureQuality, false);
   const weights = normalizeGoldilocksScoreWeights({
     trendAlignment: 7,
     purityFresh: Number.NaN,
   });
   assert.equal(weights.trendAlignment, 7);
   assert.equal(weights.purityFresh, GOLDILOCKS_SCORE_WEIGHTS.purityFresh);
+  assert.deepEqual(getGoldilocksScoreCategoryWeights(), {
+    trend: 3,
+    departure: 4,
+    purity: 4,
+    approachWarnings: 5,
+    zoneInsideZone: 4,
+  });
 });
 
 test("rebalances editable score categories to exactly twenty points", () => {
@@ -653,7 +714,7 @@ test("builds a deterministic overnight matrix without varying account risk", () 
     pairs: ["EUR/USD"],
     continuous: false,
   });
-  assert.equal(configurations.length, 120);
+  assert.equal(configurations.length, 105);
   assert.deepEqual(
     [...new Set(configurations.map((config) => config.minimumScore))],
     [10, 12, 14, 16, 18],
@@ -663,6 +724,13 @@ test("builds a deterministic overnight matrix without varying account risk", () 
     ["lowerTimeframe", "intraday", "higherTimeframe"],
   );
   assert.ok(configurations.every((config) => config.riskProfile === "default"));
+  assert.ok(
+    configurations.every(
+      (config) =>
+        config.gateSettings?.adverseApproach === false &&
+        config.gateSettings?.departureQuality === false,
+    ),
+  );
   assert.ok(
     configurations.every(
       (config) =>
@@ -1544,7 +1612,7 @@ test("backtest banks half at +1R, protects the remainder, and treats ambiguous s
   assert.deepEqual(resolveProtectedOutcome(clean, 0, "BUY", 98, 102), {
     outcome: "WIN",
     outcomeTime: 2,
-    exitReason: "break_even",
+    exitReason: "runner_stop",
     realizedR: 0.5,
   });
   const target = [
@@ -1554,8 +1622,8 @@ test("backtest banks half at +1R, protects the remainder, and treats ambiguous s
   assert.deepEqual(resolveProtectedOutcome(target, 0, "BUY", 98, 102), {
     outcome: "WIN",
     outcomeTime: 2,
-    exitReason: "target",
-    realizedR: 1.5,
+    exitReason: "one_r_protected",
+    realizedR: 0.5,
   });
   const ambiguous = [
     { time: 2, open: 100, high: 102.1, low: 97.9, close: 101 },
@@ -1701,7 +1769,7 @@ test("indexed backtest outcomes match the candle-by-candle reference resolver", 
   }
 });
 
-test("official outcomes use the same 50%-at-1R manager regardless of setup score", () => {
+test("official outcomes use the same 50%-at-1R ATR runner regardless of setup score", () => {
   const protectedStop = [
     { time: 1, open: 100, high: 102.1, low: 99.5, close: 102 },
     { time: 2, open: 102, high: 102.2, low: 99.9, close: 100 },
@@ -1711,7 +1779,7 @@ test("official outcomes use the same 50%-at-1R manager regardless of setup score
     {
       outcome: "WIN",
       outcomeTime: 2,
-      exitReason: "break_even",
+      exitReason: "runner_stop",
       realizedR: 0.5,
     },
   );
@@ -1721,8 +1789,38 @@ test("official outcomes use the same 50%-at-1R manager regardless of setup score
   for (const score of [15, 16, 18])
     assert.deepEqual(
       resolveProtectedOutcome(finalTarget, 0, "BUY", 98, 102, 104, score),
-      { outcome: "WIN", outcomeTime: 1, exitReason: "target", realizedR: 1.5 },
+      {
+        outcome: "WIN",
+        outcomeTime: 1,
+        exitReason: "one_r_protected",
+        realizedR: 0.5,
+      },
     );
+});
+
+test("YOLO reverses only the final executable side and mirrors its R geometry", () => {
+  assert.deepEqual(
+    reverseGoldilocksExecution({ entry: 100, risk: 2, direction: "buy" }),
+    {
+      direction: "SELL",
+      entry: 100,
+      risk: 2,
+      stopLoss: 102,
+      oneR: 98,
+      takeProfit: 96,
+    },
+  );
+  assert.deepEqual(
+    reverseGoldilocksExecution({ entry: 100, risk: 2, direction: "sell" }),
+    {
+      direction: "BUY",
+      entry: 100,
+      risk: 2,
+      stopLoss: 98,
+      oneR: 102,
+      takeProfit: 104,
+    },
+  );
 });
 
 test("backtests can select the previous break-even and score-tiered runner strategy", () => {
@@ -1870,26 +1968,116 @@ test("portfolio simulation reserves concurrent margin and rejects trades that do
       score: 20,
       entry: 100,
       stopLoss: 99,
-      outcome: "WIN" as const,
-      realizedR: 2,
+      outcome: "LOSS" as const,
+      realizedR: -1,
     },
   ];
   const result = simulateBacktestPortfolio(trades, {
     startingBalance: 100,
-    leverage: 1,
+    leverage: 2,
     riskProfile: "aggressive",
     minimumScore: 14,
   });
   assert.equal(result.acceptedTrades, 1);
   assert.equal(result.marginBlocked, 1);
-  assert.equal(result.peakMargin, 100);
+  assert.equal(result.peakMargin, 50);
   assert.equal(result.ending, 102);
   assert.equal(result.trades.length, 1);
   assert.equal(result.trades[0].trade.id, "a");
   assert.equal(result.trades[0].realizedR, 2);
   assert.equal(result.trades[0].pnl, 2);
+  const performance = calculateBacktestPerformance(
+    result.trades.map(({ trade, realizedR }) => ({
+      confirmationTime: trade.confirmationTime,
+      realizedR,
+    })),
+  );
+  assert.equal(performance.sampleTrades, 1);
+  assert.equal(performance.netR, 2);
+  assert.equal(performance.expectancyR, 2);
+  assert.equal(performance.losingTrades, 0);
   assert.equal(effectiveOandaLeverage("EUR/USD", 50), 50);
   assert.equal(effectiveOandaLeverage("GBP/JPY", 50), 20);
+});
+
+test("portfolio admission preserves different-pair concurrency within global limits", () => {
+  const estimate = estimateMarginFromStopRisk({
+    pair: "EUR/USD",
+    entry: 1.1,
+    stopLoss: 1.089,
+    riskAmount: 5,
+    accountMarginRate: 0.02,
+  });
+  assert.ok(Math.abs(estimate.requiredMargin - 10) < 1e-9);
+  const admitted = assessPortfolioMarginAdmission({
+    nav: 1000,
+    marginAvailable: 950,
+    marginUsed: 50,
+    marginCloseoutNav: 1000,
+    marginCloseoutPercent: 0.05,
+    reservedMargin: 10,
+    openRiskAmount: 5,
+    reservedRiskAmount: 5,
+    proposedMargin: estimate.requiredMargin,
+    proposedRiskAmount: 5,
+  });
+  assert.equal(admitted.allowed, true);
+  assert.equal(admitted.projectedPortfolioRiskFraction, 0.015);
+  assert.ok(Math.abs(admitted.projectedCloseoutPercent - 0.06) < 1e-12);
+  const closeoutFactorRegression = assessPortfolioMarginAdmission({
+    nav: 1000,
+    marginAvailable: 1000,
+    marginUsed: 0,
+    marginCloseoutNav: 1000,
+    marginCloseoutPercent: 0,
+    reservedMargin: 0,
+    openRiskAmount: 0,
+    reservedRiskAmount: 0,
+    proposedMargin: 300,
+    proposedRiskAmount: 5,
+  });
+  assert.equal(closeoutFactorRegression.allowed, true);
+  assert.equal(closeoutFactorRegression.projectedCloseoutPercent, 0.15);
+});
+
+test("atomic margin reservations prevent pair workers from spending the same headroom", () => {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "goldilocks-margin-test-"),
+  );
+  const databasePath = path.join(directory, "automation.sqlite");
+  const coordinator = new PortfolioRiskCoordinator(undefined, databasePath);
+  try {
+    const account = {
+      nav: 1000,
+      marginAvailable: 1000,
+      marginUsed: 0,
+      marginCloseoutNav: 1000,
+      marginCloseoutPercent: 0,
+      openTradeCount: 0,
+    };
+    const first = coordinator.reserve({
+      pair: "EUR/USD",
+      mode: "demo",
+      proposedMargin: 100,
+      proposedRiskAmount: 10,
+      account,
+    });
+    const second = coordinator.reserve({
+      pair: "GBP/USD",
+      mode: "demo",
+      proposedMargin: 100,
+      proposedRiskAmount: 11,
+      account,
+    });
+    assert.equal(first.allowed, true);
+    assert.equal(second.allowed, false);
+    assert.match(second.reason, /combined open stop-risk/i);
+  } finally {
+    coordinator.close();
+    const resolved = path.resolve(directory);
+    assert.ok(resolved.startsWith(path.resolve(os.tmpdir())));
+    fs.rmSync(resolved, { recursive: true, force: true });
+  }
 });
 
 test("portfolio projection keeps same-pair trades as individual chronological rows", () => {
@@ -3406,6 +3594,51 @@ test("stored replay purity rejects reconstructed touches before the saved first 
   assert.deepEqual(matching, [{ time: 250, penetration: 0.25 }]);
 });
 
+test("matches a reconstructed replay zone when chunk-relative IDs change", () => {
+  assert.equal(
+    isStoredReplayZoneMatch(
+      {
+        id: "bearish-685-719-base-supply-1781074800",
+        kind: "base",
+        side: "supply",
+        candleTime: 1781074800,
+        low: 1.39426,
+        high: 1.39448,
+      },
+      {
+        zoneId: "bearish-619-653-base-supply-1781074800",
+        zoneKind: "base",
+        direction: "SELL",
+        stopLoss: 1.39448,
+      },
+    ),
+    true,
+  );
+});
+
+test("draws zone-timeframe formation candles separately from post-departure touches", () => {
+  const zone = {
+    side: "supply" as const,
+    low: 100,
+    high: 101,
+    candleTime: 100,
+  };
+  const details = getStrategyReplayZoneFormationDetails(
+    zone,
+    [
+      { time: 100, open: 100.2, high: 100.8, low: 100.1, close: 100.5 },
+      { time: 400, open: 100.5, high: 100.7, low: 99.9, close: 100.1 },
+      { time: 700, open: 100.1, high: 100.2, low: 99.2, close: 99.4 },
+      { time: 1000, open: 99.4, high: 100.2, low: 99.3, close: 100.1 },
+    ],
+    700,
+  );
+  assert.deepEqual(details, [
+    { time: 100, price: 100.8 },
+    { time: 400, price: 100.7 },
+  ]);
+});
+
 test("historical scanners keep consecutive touching candles in one visit while confirmation is pending", () => {
   const zone = {
     id: "pending-supply",
@@ -3949,12 +4182,12 @@ test("replays multiple versioned managers on the identical M1 path", () => {
     results.find((result) => result.policyId === "set-forget-2r-v1")?.realizedR,
     2,
   );
-  assert.equal(
-    results.find(
-      (result) => result.policyId === GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
-    )?.realizedR,
-    1.5,
+  const defaultRunner = results.find(
+    (result) => result.policyId === GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
   );
+  assert.equal(defaultRunner?.status, "open");
+  assert.equal(defaultRunner?.realizedR, null);
+  assert.equal(defaultRunner?.markToMarketR, 2);
   assert.equal(
     results.find((result) => result.policyId === "partial-25-runner-4r-v1")
       ?.realizedR,

@@ -1,4 +1,4 @@
-export const GOLDILOCKS_STRATEGY_VERSION = "0.41";
+export const GOLDILOCKS_STRATEGY_VERSION = "0.42";
 
 export const GOLDILOCKS_RESEARCH_VERSION = "goldilocks-auto-research-v1";
 
@@ -329,7 +329,7 @@ export const GOLDILOCKS_BACKTEST_GATE_DEFAULTS = {
   departureQuality: false,
   zoneFormationNews: true,
   entryProximity: true,
-  adverseApproach: true,
+  adverseApproach: false,
   entryNews: true,
   twoToOneRunway: true,
 } as const;
@@ -345,7 +345,7 @@ export const normalizeGoldilocksBacktestGates = (
     value && typeof value === "object"
       ? (value as Partial<GoldilocksBacktestGates>)
       : {};
-  return Object.fromEntries(
+  const normalized = Object.fromEntries(
     Object.entries(GOLDILOCKS_BACKTEST_GATE_DEFAULTS).map(([key, fallback]) => [
       key,
       typeof source[key as keyof GoldilocksBacktestGates] === "boolean"
@@ -353,6 +353,13 @@ export const normalizeGoldilocksBacktestGates = (
         : fallback,
     ]),
   ) as GoldilocksBacktestGates;
+  // Retained in the saved-config type only so older runs remain readable.
+  // Departure shock is diagnostic and approach evidence belongs to the score.
+  return {
+    ...normalized,
+    departureQuality: false,
+    adverseApproach: false,
+  };
 };
 
 export const GOLDILOCKS_BACKTEST_TWEAK_DEFAULTS = {

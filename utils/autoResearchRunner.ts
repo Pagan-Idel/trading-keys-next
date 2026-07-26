@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { spawn } from 'child_process';
 import { forexPairs } from './constants.ts';
 import { calculateBacktestPerformance } from './backtestAnalytics.ts';
+import { simulateBacktestPortfolio } from './backtestPortfolio.ts';
 import { BACKTEST_CANDLE_LIMITS, cancelBacktest, executeBacktestInline, normalizeBacktestConfig } from './backtestRunner.ts';
 import { getActiveBacktestRun, getBacktestDashboard, getBacktestRuntime, getBacktestTrainingData, type BacktestRunConfig } from './backtestStore.ts';
 import { checkpointCandleArchive, getCandleArchiveStorageUsage, getCandleArchiveSummary } from './candleArchive.ts';
@@ -41,7 +42,7 @@ interface AutoResearchStrategyFamily {
   id:string;
   label:string;
   scoreCategories:GoldilocksScoreCategoryWeights;
-  disabledGate?:'pairSession'|'entryProximity'|'adverseApproach';
+  disabledGate?:'pairSession'|'entryProximity';
 }
 
 export const AUTO_RESEARCH_STRATEGY_FAMILIES:AutoResearchStrategyFamily[]=[
@@ -52,7 +53,6 @@ export const AUTO_RESEARCH_STRATEGY_FAMILIES:AutoResearchStrategyFamily[]=[
   {id:'balanced-context',label:'Balanced context',scoreCategories:{trend:4,departure:4,approachWarnings:6,purity:3,zoneInsideZone:3}},
   {id:'session-ablation',label:'Research: session gate off',scoreCategories:{trend:3,departure:4,approachWarnings:5,purity:4,zoneInsideZone:4},disabledGate:'pairSession'},
   {id:'proximity-ablation',label:'Research: proximity gate off',scoreCategories:{trend:3,departure:4,approachWarnings:5,purity:4,zoneInsideZone:4},disabledGate:'entryProximity'},
-  {id:'approach-ablation',label:'Research: adverse approach gate off',scoreCategories:{trend:3,departure:4,approachWarnings:5,purity:4,zoneInsideZone:4},disabledGate:'adverseApproach'},
 ];
 
 export const buildAutoResearchConfigurations=(input:StartAutoResearchInput={}):BacktestRunConfig[]=>{
@@ -79,13 +79,34 @@ export const buildAutoResearchConfigurations=(input:StartAutoResearchInput={}):B
 
 const summarizeRun=(runId:string)=>{
   const dashboard=getBacktestDashboard(runId) as any;
-  const officialTrades=(dashboard.trades??[]).map((trade:any)=>({realizedR:trade.realizedR,confirmationTime:trade.confirmationTime}));
+  const run=dashboard.runs?.find((candidate:any)=>candidate.id===runId);
+  const portfolio=simulateBacktestPortfolio(
+    (dashboard.trades??[]).map((trade:any)=>({
+      id:String(trade.id),tradeId:String(trade.tradeId),pair:String(trade.pair),
+      confirmationTime:Number(trade.confirmationTime),outcomeTime:Number(trade.outcomeTime),
+      score:Number(trade.score),entry:Number(trade.entry),stopLoss:Number(trade.stopLoss),
+      outcome:trade.outcome,realizedR:trade.realizedR==null?null:Number(trade.realizedR),
+    })),
+    {
+      startingBalance:Number(run?.config?.startingBalance??1000),
+      leverage:Number(run?.config?.leverage??30),
+      riskProfile:run?.config?.riskProfile??'default',
+      minimumScore:Number(run?.config?.minimumScore??14),
+    },
+  );
+  const officialTrades=portfolio.trades.map(({trade,realizedR})=>({
+    tradeId:trade.tradeId,pair:trade.pair,realizedR,
+    confirmationTime:trade.confirmationTime,
+  }));
   const official=calculateBacktestPerformance(officialTrades);
-  const byPair=Object.entries((dashboard.trades??[]).reduce((map:Record<string,any[]>,trade:any)=>{
+  const byPair=Object.entries(officialTrades.reduce((map:Record<string,any[]>,trade:any)=>{
     (map[trade.pair]??=[]).push({realizedR:trade.realizedR,confirmationTime:trade.confirmationTime});
     return map;
   },{})).map(([pair,trades])=>({pair,...calculateBacktestPerformance(trades as any[])}));
-  const policies=Object.values(getBacktestTrainingData(runId).reduce((map:Record<string,{policyId:string;trades:Array<{realizedR:number|null;confirmationTime:number}>}>,row:any)=>{
+  const acceptedTradeIds=new Set(officialTrades.map(trade=>trade.tradeId));
+  const policies=Object.values(getBacktestTrainingData(runId).filter((row:any)=>
+    acceptedTradeIds.has(String(row.tradeId)),
+  ).reduce((map:Record<string,{policyId:string;trades:Array<{realizedR:number|null;confirmationTime:number}>}>,row:any)=>{
     const bucket=map[row.policyId]??={policyId:String(row.policyId),trades:[]};
     bucket.trades.push({realizedR:row.policyRealizedR==null?null:Number(row.policyRealizedR),confirmationTime:Number(row.confirmationTime)});
     map[row.policyId]=bucket;

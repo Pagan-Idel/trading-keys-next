@@ -59,7 +59,8 @@ import {
   GOLDILOCKS_DEFAULT_MANAGEMENT,
   GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
   GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
-  goldilocksRealizedRAtTarget,
+  calculateAtr,
+  getGoldilocksAtrTrailingStop,
   goldilocksSecuredRAtBreakEven,
   normalizeGoldilocksBacktestManager,
   type GoldilocksBacktestManagerId,
@@ -80,6 +81,7 @@ export interface GoldilocksBacktestInput {
   gateSettings?: GoldilocksBacktestGates;
   scoreWeights?: GoldilocksScoreWeights;
   tradeManager?: GoldilocksBacktestManagerId;
+  reverseFinalSignal?: boolean;
   onProgress?: (progress: {
     stage: string;
     completed: number;
@@ -109,6 +111,31 @@ export interface GoldilocksBacktestInput {
     reason: string,
   ) => void;
 }
+
+export const reverseGoldilocksExecution = (runway: {
+  entry: number;
+  risk: number;
+  direction: "buy" | "sell";
+}) => {
+  const direction = runway.direction === "buy" ? "SELL" : "BUY";
+  return {
+    direction,
+    entry: runway.entry,
+    risk: runway.risk,
+    stopLoss:
+      direction === "BUY"
+        ? runway.entry - runway.risk
+        : runway.entry + runway.risk,
+    oneR:
+      direction === "BUY"
+        ? runway.entry + runway.risk
+        : runway.entry - runway.risk,
+    takeProfit:
+      direction === "BUY"
+        ? runway.entry + runway.risk * 2
+        : runway.entry - runway.risk * 2,
+  } as const;
+};
 const lastAtOrBefore = <T extends { time: number }>(
   items: T[],
   time: number,
@@ -457,8 +484,9 @@ export const resolveProtectedOutcome = (
       ? entry + Math.abs(entry - stopLoss) * 2
       : entry - Math.abs(entry - stopLoss) * 2);
   const securedR = goldilocksSecuredRAtBreakEven();
-  const targetR = goldilocksRealizedRAtTarget();
   let partialAt = -1;
+  let trailingStop = entry;
+  let favorableExtreme = entry;
   for (let index = startIndex; index < candles.length; index += 1) {
     const candle = candles[index];
     if (
@@ -487,31 +515,41 @@ export const resolveProtectedOutcome = (
     }
     if (partialAt >= 0) {
       const remainingStopped =
-        direction === "BUY" ? candle.low <= entry : candle.high >= entry;
-      const remainingWon =
-        direction === "BUY" ? candle.high >= target : candle.low <= target;
+        direction === "BUY"
+          ? candle.low <= trailingStop
+          : candle.high >= trailingStop;
       if (remainingStopped)
         return {
           outcome: "WIN" as const,
           outcomeTime: candle.time,
-          exitReason: "break_even" as const,
-          realizedR: securedR,
+          exitReason: "runner_stop" as const,
+          realizedR:
+            securedR +
+            (1 - GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction) *
+              ((direction === "BUY"
+                ? trailingStop - entry
+                : entry - trailingStop) /
+                risk),
         };
-      if (remainingWon)
-        return {
-          outcome: "WIN" as const,
-          outcomeTime: candle.time,
-          exitReason: "target" as const,
-          realizedR: targetR,
-        };
+      favorableExtreme =
+        direction === "BUY"
+          ? Math.max(favorableExtreme, candle.high)
+          : Math.min(favorableExtreme, candle.low);
+      const atr = calculateAtr(candles.slice(0, index + 1));
+      if (atr)
+        trailingStop = getGoldilocksAtrTrailingStop({
+          direction,
+          entry,
+          currentStop: trailingStop,
+          favorableExtreme,
+          atr,
+        });
       continue;
     }
     const stopped =
       direction === "BUY" ? candle.low <= stopLoss : candle.high >= stopLoss;
     const reachedOneR =
       direction === "BUY" ? candle.high >= oneR : candle.low <= oneR;
-    const reachedTarget =
-      direction === "BUY" ? candle.high >= target : candle.low <= target;
     if (stopped)
       return {
         outcome: "LOSS" as const,
@@ -519,15 +557,11 @@ export const resolveProtectedOutcome = (
         exitReason: "stop" as const,
         realizedR: -1,
       };
-    if (reachedTarget) {
-      return {
-        outcome: "WIN" as const,
-        outcomeTime: candle.time,
-        exitReason: "target" as const,
-        realizedR: targetR,
-      };
+    if (reachedOneR) {
+      partialAt = index;
+      favorableExtreme = direction === "BUY" ? candle.high : candle.low;
+      trailingStop = entry;
     }
-    if (reachedOneR) partialAt = index;
   }
   if (partialAt >= 0 && candles.length)
     return {
@@ -773,75 +807,18 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
         };
       return finishRunner(targetIndex);
     }
-    const securedR = goldilocksSecuredRAtBreakEven();
-    const targetR = goldilocksRealizedRAtTarget();
-    const stopIndex =
-      direction === "BUY"
-        ? firstLowAtMost(startIndex, stopLoss)
-        : firstHighAtLeast(startIndex, stopLoss);
-    const protectedIndex =
-      direction === "BUY"
-        ? firstHighAtLeast(startIndex, oneR)
-        : firstLowAtMost(startIndex, oneR);
-    if (protectedIndex < 0)
-      return stopIndex >= 0
-        ? {
-            outcome: "LOSS" as const,
-            outcomeTime: candles[stopIndex].time,
-            exitReason: "stop" as const,
-            realizedR: -1,
-          }
-        : null;
-    if (stopIndex >= 0 && stopIndex <= protectedIndex)
-      return {
-        outcome: "LOSS" as const,
-        outcomeTime: candles[stopIndex].time,
-        exitReason: "stop" as const,
-        realizedR: -1,
-      };
-    const directTargetIndex =
-      direction === "BUY"
-        ? firstHighAtLeast(startIndex, target)
-        : firstLowAtMost(startIndex, target);
-    if (directTargetIndex === protectedIndex)
-      return {
-        outcome: "WIN" as const,
-        outcomeTime: candles[directTargetIndex].time,
-        exitReason: "target" as const,
-        realizedR: targetR,
-      };
-    const after = protectedIndex + 1;
-    const breakEvenIndex =
-      direction === "BUY"
-        ? firstLowAtMost(after, entry)
-        : firstHighAtLeast(after, entry);
-    const targetIndex =
-      direction === "BUY"
-        ? firstHighAtLeast(after, target)
-        : firstLowAtMost(after, target);
-    if (breakEvenIndex < 0 && targetIndex < 0)
-      return {
-        outcome: "WIN" as const,
-        outcomeTime: candles[candles.length - 1].time,
-        exitReason: "one_r_protected" as const,
-        realizedR: securedR,
-      };
-    if (
-      breakEvenIndex >= 0 &&
-      (targetIndex < 0 || breakEvenIndex <= targetIndex)
-    )
-      return {
-        outcome: "WIN" as const,
-        outcomeTime: candles[breakEvenIndex].time,
-        exitReason: "break_even" as const,
-        realizedR: securedR,
-      };
-    return {
-      outcome: "WIN" as const,
-      outcomeTime: candles[targetIndex].time,
-      exitReason: "target" as const,
-      realizedR: targetR,
-    };
+    // ATR trailing is path-dependent, so use the causal reference resolver.
+    return resolveProtectedOutcome(
+      candles,
+      startIndex,
+      direction,
+      stopLoss,
+      oneR,
+      takeProfit,
+      score,
+      undefined,
+      tradeManager,
+    );
   };
 };
 
@@ -1206,10 +1183,41 @@ export const simulateGoldilocksPair = (
           ],
         });
         if (score.eligible) {
+          let executionDirection: "BUY" | "SELL" = direction;
+          let executionRunway = runway;
+          let reversedExecution:
+            | ReturnType<typeof reverseGoldilocksExecution>
+            | undefined;
+          if (input.reverseFinalSignal) {
+            reversedExecution = reverseGoldilocksExecution(runway);
+            const reversedZone: GoldilocksZone = {
+              ...zone,
+              side: reversedExecution.direction === "BUY" ? "demand" : "supply",
+              low:
+                reversedExecution.direction === "BUY"
+                  ? reversedExecution.stopLoss
+                  : reversedExecution.entry,
+              high:
+                reversedExecution.direction === "BUY"
+                  ? reversedExecution.entry
+                  : reversedExecution.stopLoss,
+            };
+            executionRunway = validateTwoToOneRunway(
+              reversedZone,
+              known,
+              reversedExecution.entry,
+              { knownZonesUsableAtEntry: true },
+            );
+            executionDirection = reversedExecution.direction;
+            if (gateSettings.twoToOneRunway && !executionRunway.allowed) {
+              state.touch.touchCandleIndex = -1;
+              continue;
+            }
+          }
           const oneR =
-            direction === "BUY"
-              ? runway.entry + runway.risk
-              : runway.entry - runway.risk;
+            executionDirection === "BUY"
+              ? executionRunway.entry + executionRunway.risk
+              : executionRunway.entry - executionRunway.risk;
           const outcomeStart = firstAtOrAfter(
             outcomeCandles,
             confirmationCloseTime,
@@ -1234,10 +1242,10 @@ export const simulateGoldilocksPair = (
           );
           const resolved = resolveOutcome(
             outcomeStart,
-            direction,
-            runway.stopLoss,
+            executionDirection,
+            executionRunway.stopLoss,
             oneR,
-            runway.takeProfit,
+            executionRunway.takeProfit,
             score.total,
             weekendLiquidationTime,
             input.tradeManager,
@@ -1247,9 +1255,9 @@ export const simulateGoldilocksPair = (
               pair: input.pair,
               timeframe: source.timeframe,
               measuredAt: confirmationCloseTime,
-              entry: runway.entry,
-              stopLoss: runway.stopLoss,
-              takeProfit: runway.takeProfit,
+              entry: executionRunway.entry,
+              stopLoss: executionRunway.stopLoss,
+              takeProfit: executionRunway.takeProfit,
               zones: source.history.zones,
               candles: toStrategyCandles(source.candles),
             }),
@@ -1260,7 +1268,7 @@ export const simulateGoldilocksPair = (
                 pair: input.pair,
                 zoneId: zone.id,
                 zoneKind: zone.kind,
-                direction,
+                direction: executionDirection,
                 confirmationTime: candle.time,
                 zoneAgeSeconds: getGoldilocksZoneAgeSeconds(
                   zone.candleTime,
@@ -1268,15 +1276,25 @@ export const simulateGoldilocksPair = (
                 ),
                 firstOutsideTime: purity.firstOutsideTime,
                 ...resolved,
-                entry: runway.entry,
-                stopLoss: runway.stopLoss,
+                entry: executionRunway.entry,
+                stopLoss: executionRunway.stopLoss,
                 oneR,
-                takeProfit: runway.takeProfit,
+                takeProfit: executionRunway.takeProfit,
                 score: score.total,
-                scoreJson: score,
+                scoreJson: input.reverseFinalSignal
+                  ? {
+                      ...score,
+                      executionAssumption: {
+                        id: "yolo-reverse-final-signal-v1",
+                        originalDirection: direction,
+                        executedDirection: executionDirection,
+                        reversedRunwayReason: executionRunway.reason,
+                      },
+                    }
+                  : score,
                 priorTouches: purity.touches,
                 maxPenetration: 0,
-                availableRrr: runway.availableRatio,
+                availableRrr: executionRunway.availableRatio,
                 confluenceCount:
                   scoredZone.timeframeConfluence?.timeframeCount ?? 1,
                 trend,

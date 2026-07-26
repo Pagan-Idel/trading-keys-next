@@ -110,16 +110,24 @@ export const placeTrade = async (signal: TradeSignal, mode: 'live' | 'demo' = ge
 
   logMessage(`✅ Trade placed successfully for ${pair}`, undefined, { fileName: "placeTrade", pair });
 
+  const openedTradeId =
+    orderResult.raw?.orderFillTransaction?.tradeOpened?.tradeID ??
+    orderResult.raw?.orderFillTransaction?.tradeOpenedID;
   let trade;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const tradeInfo = await openNow(pair, mode);
+    const tradeInfo = await openNow(
+      openedTradeId ? String(openedTradeId) : pair,
+      mode,
+    );
 
     logMessage(`🔄 Retry #${attempt + 1} — openNow result:`, tradeInfo, {
       fileName: "placeTrade",
       pair,
     });
 
-    const maybeTrade = tradeInfo?.trades?.[0];
+    const maybeTrade = openedTradeId
+      ? tradeInfo?.trades?.find((item) => item.id === String(openedTradeId))
+      : tradeInfo?.trades?.[0];
 
     if (!maybeTrade) {
       logMessage(`⚠️ No trades returned in openNow() attempt ${attempt + 1}`, undefined, {

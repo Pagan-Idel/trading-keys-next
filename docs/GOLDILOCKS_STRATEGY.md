@@ -74,6 +74,9 @@ prior history. M15 separately retains its originating departure for zone lifecyc
 departure-quality evidence.
 Replay charts mark reconstructed prior-touch candles with orange dots only; they omit
 the timeframe and sequence label and do not render a per-touch audit list.
+They separately mark every zone-timeframe formation candle from the selected base
+through the candle before the first fully outside departure with yellow dots. These
+formation markers explain departure compactness and never count as prior touches.
 They also anchor a `DEPARTURE` arrow to the first completed zone-timeframe candle
 fully outside the trade zone. That same candle supplies departure-quality scoring and
 the zone-formation news window. A departure rejected by the two-of-three shock gate keeps
@@ -111,8 +114,11 @@ Selecting either research profile on Backtesting does not change the live/demo w
 which remains locked to H1/M15/M5/M1.
 
 Backtesting also stores a selected trade manager with every run. The default is the
-live-aligned manager that banks 50% at +1R, moves the remainder to break-even, and
-targets 2R. The prior manager is labeled `Break-even strategy (previous)`: it protects
+live-aligned manager that banks 50% at +1R, removes the broker take-profit, and trails
+the remaining 50% with a causal 2x ATR(14) chandelier stop. The trail follows the best
+favorable price, never loosens, and never moves behind break-even. It uses completed M5
+candles live and the available causal execution candles in backtests; it does not use
+market structure. The prior manager is labeled `Break-even strategy (previous)`: it protects
 at +1R, exits fully at 2R below score 16, keeps 25% toward 4R for scores 16-17, and
 keeps 50% toward 4R for scores 18+, with runner protection at +1R. `Set and forget ·
 full 2R` leaves the original stop and full 2R target unchanged until either is hit;
@@ -120,6 +126,13 @@ the mandatory Friday liquidation remains active.
 This selector changes realized R, trade outcome time, overlap filtering, projected
 income, expectancy, profit factor, and drawdown for that backtest only. It never
 changes live/demo automation.
+
+Manual backtests also expose an opt-in `YOLO reverse final signal` assumption. Detection,
+confirmation, hard gates, and scoring first evaluate the normal Goldilocks signal. Once
+that signal qualifies, YOLO flips BUY to SELL or SELL to BUY at the same entry, mirrors
+the original risk distance to the opposite side, and requires a fresh reversed 2R runway
+when that gate is enabled. The setting is saved with the run and never affects live/demo
+automation.
 
 ## Market structure and trend
 
@@ -270,6 +283,24 @@ Available reward-to-risk is the distance from entry to the nearest edge of the s
 opposing zone divided by risk to the selected entry zone's stop. It remains part of the
 2R runway gate and research record, but it awards no quality-score points.
 
+Position sizing and portfolio margin are separate controls. Each proposed order is
+still sized from its stop distance and configured score-based risk percentage. Directly
+before broker submission, an account-wide coordinator reads the fresh OANDA NAV,
+available/used margin, closeout NAV/percentage, and open-trade count. Projected OANDA
+v20 closeout utilization adds 50% of new regular margin divided by closeout NAV; regular
+available-margin headroom still deducts the full new margin. It then opens an
+atomic SQLite reservation shared by all pair workers. Pending and just-filled
+reservations remain visible for two minutes so simultaneous workers cannot reuse stale
+broker headroom; failed orders release immediately. Broker market orders specify
+`OPEN_ONLY`, and the returned OANDA trade ID is authoritative for fill recovery.
+This preserves concurrent trades on different pairs while retaining exactly one trade
+per pair and the pair-session gate.
+
+The chronological backtest portfolio applies the same admission limits before
+calculating official performance. A margin-blocked signal remains recorded with its
+counterfactual market outcome for research, but it is treated as not executed and is
+excluded from every strategy-edge and projected-account metric.
+
 ## Hard gates
 
 All gates must pass before scoring and again where volatility can change the result:
@@ -284,14 +315,17 @@ All gates must pass before scoring and again where volatility can change the res
 | News                | Reject high-impact events for either currency from one hour before through one hour after; fail closed if news status is unavailable                                                                                                                                                                                                                            |
 | Zone formation news | Reject a zone when either currency's high-impact news window overlaps its M15 base-through-completed-departure interval; fail closed if formation coverage is unavailable                                                                                                                                                                                       |
 | Existing trade      | Only one open broker trade per pair                                                                                                                                                                                                                                                                                                                             |
+| Portfolio margin    | Atomically reserve proposed margin and stop-risk across all pair workers. Reject unless at least 50% of NAV remains as available-margin headroom, projected closeout utilization stays at or below 25%, and combined open stop-risk stays at or below 2% of NAV. Missing broker account fields fail closed. |
 | Zone                | Active, no more than 30 calendar days old, no more than three touches, not broken                                                                                                                                                                                                                                                                                |
 | Confirmation        | Latest completed M5 close-through after a distinct M5 touch candle                                                                                                                                                                                                                                                                                              |
 | Entry proximity     | First M5 touch range must be no more than 50% of M15 zone width; the fresh executable ask for BUY or bid for SELL must remain no more than 50% of one zone width beyond the proximal edge. The confirmation close has no separate distance gate. Historical backtests use that close as the modeled executable entry because historical bid/ask is unavailable. |
-| Adverse approach    | Reject when the final three completed M5 candles displace at least 1.5 prior M5 ATR toward the zone, the first-touch candle spans at least 1.5 ATR, and its close penetrates at least 50% of the zone. A touch candle that wicks through but closes back beyond the proximal edge is an absorption reclaim and explicitly passes this gate.                     |
 | Spread              | Valid quote and no more than 3 pips                                                                                                                                                                                                                                                                                                                             |
 | Runway              | Clear 2R at confirmation and current executable entry                                                                                                                                                                                                                                                                                                           |
 
 Gates receive no points. A failed gate prevents scoring and order submission.
+Liquidity-sweep and fast-momentum approach evidence are not separate hard gates.
+They are the two warning categories inside the five-point confirmation-timeframe
+approach score described below.
 
 ## The implemented 20-point score
 
@@ -325,6 +359,14 @@ Configuration:
 - `GOLDILOCKS_MIN_SCORE`, default 14 and clamped to 0-20
 - Dynamic risk profile, selected from the Automation dashboard and stored in SQLite
 
+The Backtesting rule panel exposes only current, effective controls. Its score sliders
+initialize to 3 trend + 4 departure + 5 approach warnings + 4 purity + 4 ZIZ. Its
+numeric threshold panel exposes the three active zone-validity/entry-proximity values:
+three maximum prior touches, a 50% maximum first-touch range, and a 50% maximum
+executable-entry distance. Retired departure-shock and three-candle adverse-approach
+research fields remain readable in older saved run configurations but are not presented
+as current defaults.
+
 ### Score-powered fixed-fractional risk
 
 Position size uses current OANDA account equity (NAV), the selected zone stop distance,
@@ -352,8 +394,9 @@ After entry:
 
 1. Monitor the broker trade and current quote.
 2. At +1R, move the stop to the entry price first and close 50% of the position.
-3. Leave the remaining 50% targeting 2R. A later break-even exit banks +0.5R total;
-   reaching 2R banks +1.5R total.
+3. Remove the take-profit and trail the remaining 50% with a 2x ATR(14) chandelier
+   stop. The stop never loosens or moves behind entry. A break-even runner exit banks
+   +0.5R total; stronger continuation can bank more without a fixed upside cap.
 4. At Friday 16:00 America/New_York, submit a full close so no Goldilocks position is
    deliberately carried into the weekend. Failed close requests retry while the market remains open.
 4. Once +1R has been achieved, classify a later break-even stop as a protected win,
@@ -402,8 +445,9 @@ and progress events. The detached worker publishes stage-level heartbeats and ov
 progress and can be cancelled from the dashboard without stopping live/demo workers.
 Its Backtest rule controls are organized into three saved groups: enable/disable
 switches for historically simulated hard gates, editable score-component weights, and
-numeric touch-count, entry-proximity, adverse-approach, departure-shock,
-departure-strength, and available-RRR thresholds. These controls affect backtests only
+the active maximum-touch and entry-proximity thresholds. Retired adverse-approach and
+departure-shock fields remain readable in older run JSON but are normalized off and
+are not presented as current controls. These controls affect backtests only
 and never alter the live/demo worker. Starting a run immediately inserts its queued row into Backtest runs while
 the detached worker starts, and every saved run retains the complete normalized tweak
 snapshot in its configuration JSON. Loading a prior run restores those inputs into
@@ -419,10 +463,12 @@ Its history shows one clickable row per complete backtest run rather than duplic
 run into pair rows. Loading a row restores the saved account, leverage, risk, timeframe,
 score, lookback, and pair configuration together with that run's account projection,
 trades, replay links, and event log. A dedicated run-configuration table and the history
-row's hover/focus details expose the saved tweaks for the selected run.
-The Run column stays compact by showing only the `View tweaks` button; its hover/focus
-details include the long saved label and compact numeric tweak snapshot. The separate
-selected-run tweaks table was removed because it duplicated the active editor.
+selected-run configuration card exposes the complete saved setup, gates, score weights,
+and active numeric thresholds for the selected run. The run-history table is intentionally
+compact: Delete is the first column, followed by the run identity, minimum score,
+signal/admission counts, expectancy, profit factor, net R, drawdown, and account return.
+Clicking the row populates the configuration card; there is no row-level `View tweaks`
+button or hover-only configuration.
 The new-run label contains only the selected strategy version and UTC run date
 (`strategy-version · YYYY-MM-DD`). Detailed weights and settings remain in the saved
 run configuration instead of cluttering the label. A restored historical run keeps its
@@ -544,6 +590,10 @@ Historical simulation currently:
 - Uses the selected profile's archived trend/zone/confirmation candles and its
   configured post-entry resolution; the M15/M5/M1 profile uses M1 for both
   confirmation and the lowest available outcome resolution
+- Applies the shared portfolio admission limits chronologically across overlapping
+  trades: 2% maximum combined stop-risk, 50% minimum available-margin/NAV headroom,
+  and 25% maximum projected closeout utilization. Margin uses the selected leverage
+  capped by the same conservative OANDA major/cross-pair rates as live admission.
 - Reconstructs zones without future eligibility at the setup timestamp
 - Applies zone validity, close-through confirmation, 2R runway, scoring, and one open
   simulated trade per pair
@@ -593,11 +643,11 @@ and abandoned runs to reduce selection bias.
 
 The Backtesting dashboard can start a detached, resumable research campaign stored in
 `data/goldilocks-research.sqlite`. The default bounded search evaluates score cutoffs
-10, 12, 14, 16, and 18 across all three timeframe profiles and eight interpretable
+10, 12, 14, 16, and 18 across all three timeframe profiles and seven interpretable
 strategy families: baseline, freshness-first, structure-first, confluence/runway-first,
-balanced context, and isolated session, entry-proximity, and adverse-approach gate
-ablations. Core market-hours, holiday, news, and 2R-runway safety gates stay enabled
-in every family. This produces 120 trials and records all 23 management-policy outcomes
+balanced context, and isolated session and entry-proximity gate ablations. Core
+market-hours, holiday, news, and 2R-runway safety gates stay enabled in every family.
+This produces 105 trials and records all 23 management-policy outcomes
 for every stored trade. Each unique configuration and dataset manifest is hashed, so
 an interrupted worker can resume without treating an identical trial as new evidence.
 
@@ -626,7 +676,7 @@ timeframe archive for every active-zone/confirmation-candle combination.
 | 20-point calculation                       | `utils/goldilocksScoring.ts`                                                                                    |
 | Live/demo orchestration                    | `workers/goldilocksWorker.ts`, `runner/startRunner.ts`, `runner/strategyRunner.ts`                              |
 | Spread/session/news/market gates           | `utils/spreadGuard.ts`, `utils/sessionUtils.ts`, `utils/newsGuard.ts`, `utils/marketCloseGuard.ts`              |
-| Position sizing and broker order           | `utils/placeTrade.ts`, `utils/oanda/api/`                                                                       |
+| Position sizing, portfolio margin, broker order | `utils/portfolioMargin.ts`, `utils/portfolioRiskCoordinator.ts`, `utils/placeTrade.ts`, `utils/oanda/api/` |
 | Persistent logs and trades                 | `utils/automationLogger.ts`, `utils/automationStore.ts`, `utils/tradeHistory.ts`                                |
 | Historical simulation                      | `utils/goldilocksBacktest.ts`, `utils/backtestRunner.ts`, `utils/backtestStore.ts`, `workers/backtestWorker.ts` |
 | Dashboards                                 | `pages/automation.tsx`, `pages/strategy-lab.tsx`, `pages/backtesting.tsx`, `pages/research.tsx`                 |

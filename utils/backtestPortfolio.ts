@@ -1,4 +1,8 @@
 import { calculateScoreRisk, type RiskProfile } from './dynamicRisk.ts';
+import {
+  assessPortfolioMarginAdmission,
+  estimateMarginFromStopRisk,
+} from "./portfolioMargin.ts";
 
 export interface PortfolioTrade {
   id:string|number;pair:string;confirmationTime:number;outcomeTime:number;score:number;
@@ -13,7 +17,7 @@ export const effectiveOandaLeverage=(pair:string,selectedMaximum:number)=>Math.m
 
 export const simulateBacktestPortfolio=(source:PortfolioTrade[],config:PortfolioConfig)=>{
   const initial=Math.max(1,Number(config.startingBalance)||1);
-  let equity=initial,peak=initial,maxDrawdown=0,usedMargin=0,peakMargin=0,totalRisked=0,marginBlocked=0;
+  let equity=initial,peak=initial,maxDrawdown=0,usedMargin=0,openRisk=0,peakMargin=0,totalRisked=0,marginBlocked=0;
   const positions=new Map<string,{riskAmount:number;margin:number;trade:PortfolioTrade}>();
   const byPair=new Map<string,{pair:string;trades:number;wins:number;losses:number;net:number;totalR:number}>();
   const trades:Array<{trade:PortfolioTrade;riskAmount:number;realizedR:number;pnl:number}>=[];
@@ -27,17 +31,35 @@ export const simulateBacktestPortfolio=(source:PortfolioTrade[],config:Portfolio
       const risk=calculateScoreRisk(Number(event.trade.score),config.minimumScore,config.riskProfile);
       const desiredRisk=equity*(risk.riskPercentage/100);
       const entry=Math.abs(Number(event.trade.entry));
-      const stopFraction=entry>0?Math.abs(Number(event.trade.entry)-Number(event.trade.stopLoss))/entry:0;
       const effectiveLeverage=effectiveOandaLeverage(event.trade.pair,config.leverage);
-      const requiredMargin=stopFraction>0?desiredRisk/stopFraction/effectiveLeverage:Number.POSITIVE_INFINITY;
+      const marginEstimate=estimateMarginFromStopRisk({
+        pair:event.trade.pair,
+        entry:Number(event.trade.entry),
+        stopLoss:Number(event.trade.stopLoss),
+        riskAmount:desiredRisk,
+        accountMarginRate:1/effectiveLeverage,
+      });
+      const requiredMargin=marginEstimate.requiredMargin;
       const availableMargin=Math.max(0,equity-usedMargin);
-      if(!Number.isFinite(requiredMargin)||requiredMargin>availableMargin+1e-9){marginBlocked+=1;continue}
+      const admission=assessPortfolioMarginAdmission({
+        nav:equity,
+        marginAvailable:availableMargin,
+        marginUsed:usedMargin,
+        marginCloseoutNav:equity,
+        marginCloseoutPercent:equity>0?(usedMargin*0.5)/equity:Number.POSITIVE_INFINITY,
+        reservedMargin:0,
+        openRiskAmount:openRisk,
+        reservedRiskAmount:0,
+        proposedMargin:requiredMargin,
+        proposedRiskAmount:desiredRisk,
+      });
+      if(!admission.allowed){marginBlocked+=1;continue}
       positions.set(key,{riskAmount:desiredRisk,margin:requiredMargin,trade:event.trade});
-      usedMargin+=requiredMargin;peakMargin=Math.max(peakMargin,usedMargin);totalRisked+=desiredRisk;
+      usedMargin+=requiredMargin;openRisk+=desiredRisk;peakMargin=Math.max(peakMargin,usedMargin);totalRisked+=desiredRisk;
       continue;
     }
     const position=positions.get(key);if(!position)continue;
-    positions.delete(key);usedMargin=Math.max(0,usedMargin-position.margin);
+    positions.delete(key);usedMargin=Math.max(0,usedMargin-position.margin);openRisk=Math.max(0,openRisk-position.riskAmount);
     const realizedR=position.trade.realizedR==null?(position.trade.outcome==='WIN'?0:-1):Number(position.trade.realizedR);
     const pnl=position.riskAmount*realizedR;equity=Math.max(0,equity+pnl);peak=Math.max(peak,equity);
     trades.push({trade:position.trade,riskAmount:position.riskAmount,realizedR,pnl});

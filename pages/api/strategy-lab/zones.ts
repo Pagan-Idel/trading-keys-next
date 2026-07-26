@@ -46,10 +46,12 @@ import { getBacktestTradeReplay } from "../../../utils/backtestStore";
 import {
   annotateReplayZonePurityAt,
   filterReplayRejectedFirstTouchesAt,
+  getStrategyReplayZoneFormationDetails,
   getStrategyReplayBaseContextStart,
   getStrategyReplayContextAnchor,
   getStrategyReplayRequestEnd,
   getStrategyReplayWindow,
+  isStoredReplayZoneMatch,
   reconcileStoredReplayPriorTouchDetails,
 } from "../../../utils/strategyReplay";
 import {
@@ -165,7 +167,7 @@ export default async function handler(
     return res.status(400).json({ error: "Unsupported timeframe" });
   }
   const replayCacheKey = Number.isFinite(requestedTradeTime)
-      ? `all-zone-base-context-v6:${strategyStack.id}:${pair}:${timeframe}:${requestedTradeTime}:${requestedTradeId ?? "latest"}:${Number.isFinite(requestedExitTime) ? requestedExitTime : "stored"}`
+      ? `all-zone-base-context-v7:${strategyStack.id}:${pair}:${timeframe}:${requestedTradeTime}:${requestedTradeId ?? "latest"}:${Number.isFinite(requestedExitTime) ? requestedExitTime : "stored"}`
     : "";
   const cachedReplay = replayCacheKey
     ? replayCache.get(replayCacheKey)
@@ -429,7 +431,10 @@ export default async function handler(
           items.findIndex((item) => item.id === zone.id) === index,
       )
       .map((zone) => {
-        if (zone.id === storedReplayForRequest?.zoneId) {
+        if (
+          storedReplayForRequest &&
+          isStoredReplayZoneMatch(zone, storedReplayForRequest)
+        ) {
           return {
             ...zone,
             touches: storedReplayForRequest.priorTouches,
@@ -516,10 +521,9 @@ export default async function handler(
     // entry-time ZIZ count. A bounded chart replay may not contain the much older
     // M5/H1 source zones even though they were present in the full backtest history.
     const displayZonesWithConfluence = annotatedDisplayZones.map((zone) => {
-      const storedCount =
-        zone.id === storedReplayForRequest?.zoneId
-          ? storedReplayForRequest.confluenceCount
-          : undefined;
+      const storedCount = isStoredReplayZoneMatch(zone, storedReplayForRequest)
+        ? storedReplayForRequest?.confluenceCount
+        : undefined;
       const currentCount = zone.timeframeConfluence?.timeframeCount ?? 1;
       if (!storedCount || storedCount <= currentCount) return zone;
       return {
@@ -856,18 +860,7 @@ export default async function handler(
     );
     const storedZoneForReplay = compatibleTimeframeReplay
       ? deepZoneHistory.zones.find(
-          (zone) =>
-            zone.id === storedReplayForRequest!.zoneId ||
-            (zone.kind === storedReplayForRequest!.zoneKind &&
-              zone.side ===
-                (storedReplayForRequest!.direction === "BUY"
-                  ? "demand"
-                  : "supply") &&
-              zone.candleTime === storedZoneCandleTime &&
-              Math.abs(
-                (zone.side === "demand" ? zone.low : zone.high) -
-                  storedReplayForRequest!.stopLoss,
-              ) < 1e-9),
+          (zone) => isStoredReplayZoneMatch(zone, storedReplayForRequest),
         )
       : undefined;
     const storedConfirmationIndex = compatibleTimeframeReplay
@@ -963,6 +956,14 @@ export default async function handler(
             storedTouchCandle.time,
           )
         : undefined;
+    const storedFormationCandleDetails = storedZoneForReplay
+      ? getStrategyReplayZoneFormationDetails(
+          storedZoneForReplay,
+          deepZoneStrategy,
+          storedZoneFormation?.firstOutsideTime ??
+            storedReplayForRequest?.firstOutsideTime,
+        )
+      : [];
     const storedProximity =
       storedZoneForReplay && storedTouchCandle && storedConfirmationCandle
         ? validateGoldilocksEntryProximity(
@@ -1017,6 +1018,7 @@ export default async function handler(
               storedTouchCandle.time,
               storedPurity?.touchDetails ?? [],
             ),
+            formationCandleDetails: storedFormationCandleDetails,
             zone: {
               ...storedZoneForReplay,
               touches: currentStrategyReplay
@@ -1025,6 +1027,9 @@ export default async function handler(
               maxPenetration: 0,
               departureInsideCandleCount:
                 storedZoneFormation?.departureInsideCandleCount ?? 0,
+              timeframeConfluence: displayZonesWithConfluence.find(
+                (zone) => zone.id === storedZoneForReplay.id,
+              )?.timeframeConfluence,
             },
             zoneAgeSeconds: storedZoneAgeSeconds,
             confirmationTimeframe: strategyStack.confirmation,

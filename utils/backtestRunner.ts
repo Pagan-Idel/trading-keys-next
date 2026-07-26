@@ -179,6 +179,7 @@ export const executeBacktestRun = async (
         gateSettings: config.gateSettings,
         scoreWeights: config.scoreWeights,
         tradeManager: config.tradeManager,
+        reverseFinalSignal: config.reverseFinalSignal,
         timeframes: profile,
         trendCandles,
         zoneCandles,
@@ -404,6 +405,7 @@ export const normalizeBacktestConfig = (
       ? input.riskProfile
       : "default",
     tradeManager: normalizeGoldilocksBacktestManager(input.tradeManager),
+    reverseFinalSignal: Boolean(input.reverseFinalSignal),
     archiveOnly: Boolean(input.archiveOnly),
     datasetEndTime: Number.isFinite(input.datasetEndTime)
       ? Math.floor(Number(input.datasetEndTime))

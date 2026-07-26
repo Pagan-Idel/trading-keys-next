@@ -62,6 +62,12 @@ const TweakField = styled.label`
   font-size: 0.64rem;
   font-weight: 800;
   span { color: #dce7f5; }
+  small {
+    color: #77869a;
+    font-size: 0.61rem;
+    font-weight: 650;
+    line-height: 1.4;
+  }
   span[title] { cursor: help; text-decoration: underline dotted #647287; text-underline-offset: 3px; }
   input {
     width: 100%;
@@ -465,11 +471,29 @@ const Table = styled.div`
 `;
 const LeaderboardTable = styled(Table)`
   table {
-    min-width: 1750px;
+    min-width: 920px;
   }
   th {
     white-space: nowrap;
   }
+`;
+const RunConfigGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 9px;
+  padding: 16px;
+`;
+const RunConfigItem = styled.div`
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #293445;
+  border-radius: 11px;
+  background: #091019;
+  color: #dce7f5;
+  font-size: 0.72rem;
+  font-weight: 750;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 `;
 const Feed = styled.div`
   max-height: 390px;
@@ -567,60 +591,6 @@ const SortableHeading = styled.button`
     color: #fff;
   }
 `;
-const PairCount = styled.button`
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 30px;
-  padding: 4px 8px;
-  border: 1px solid #36d6a1;
-  background: #10372d;
-  color: #7dffd0;
-  border-radius: 999px;
-  font: inherit;
-  font-weight: 900;
-  cursor: help;
-  outline: none;
-  &:hover > span,
-  &:focus-visible > span {
-    opacity: 1;
-    visibility: visible;
-    transform: translate(-50%, 0);
-  }
-`;
-const PairTip = styled.span`
-  position: absolute;
-  z-index: 20;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  width: max-content;
-  max-width: 310px;
-  padding: 9px 11px;
-  border: 1px solid #485365;
-  border-radius: 10px;
-  background: #111720;
-  color: #e8eef8;
-  box-shadow: 0 12px 30px #000b;
-  line-height: 1.6;
-  white-space: normal;
-  opacity: 0;
-  visibility: hidden;
-  transform: translate(-50%, 5px);
-  transition: 0.15s ease;
-  pointer-events: none;
-  strong {
-    display: block;
-    color: #71efc0;
-    font-size: 0.62rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-  .list {
-    display: block;
-    font-weight: 750;
-  }
-`;
 
 type RunConfig = {
   minimumScore: number;
@@ -631,6 +601,7 @@ type RunConfig = {
   leverage?: number;
   riskProfile?: RiskProfile;
   tradeManager?: GoldilocksBacktestManagerId;
+  reverseFinalSignal?: boolean;
   protectedWinR?: number;
   timeframeProfile?: GoldilocksTimeframeProfileId;
   strategyTweaks?: GoldilocksBacktestTweaks;
@@ -735,54 +706,48 @@ const backtestTweakFields: Array<{
   short: string;
   explanation: string;
   step: number;
+  max: number;
 }> = [
-  { key: "maximumPriorTouches", label: "Max prior touches", short: "TOUCH MAX", explanation: "Maximum completed confirmation-timeframe candles allowed to touch the zone before the trade trigger. A fourth touch is rejected when this is 3; lowering it demands fresher zones.", step: 1 },
-  { key: "maxTouchRangeZoneFraction", label: "Touch range / zone", short: "TOUCH %", explanation: "Largest allowed first-touch candle range divided by zone width. 0.50 means the candle may span at most 50% of the zone; lowering it requires a tighter touch.", step: 0.05 },
-  { key: "maxEntryDistanceZoneFraction", label: "Entry distance / zone", short: "ENTRY %", explanation: "Maximum entry distance beyond the proximal edge, divided by zone width. 0.50 means entry may be no farther than half a zone width; lowering it avoids chasing.", step: 0.05 },
-  { key: "adverseApproachCandles", label: "Approach candles", short: "APP N", explanation: "Number of completed confirmation-timeframe candles used to measure the final move into the zone. Increasing it measures the approach over a longer window.", step: 1 },
-  { key: "minimumFastApproachAtr", label: "Fast approach ATR", short: "APP ATR", explanation: "Minimum adverse displacement toward the zone, measured in prior ATRs, for the fast-approach warning. Higher values require a more extreme approach before rejection.", step: 0.1 },
-  { key: "minimumFastTouchRangeAtr", label: "Fast touch ATR", short: "TOUCH ATR", explanation: "Minimum first-touch candle range in prior ATRs for the adverse-approach gate. Higher values require a larger touch candle before rejection.", step: 0.1 },
-  { key: "shockRangeAtrMultiple", label: "Shock range ATR", short: "SHOCK ATR", explanation: "Departure candle range in prior ATRs needed for this warning. 3 means at least three ATRs. The zone is rejected when any two of SHOCK ATR, WICK %, and weak CLOSE X warnings match.", step: 0.1 },
-  { key: "rejectionWickFraction", label: "Shock rejection wick", short: "WICK %", explanation: "Minimum adverse wick share of the departure candle range. 0.50 means at least half the candle is rejection wick; increasing it requires a more severe wick.", step: 0.05 },
-  { key: "minimumShockCloseDepartureZoneMultiple", label: "Shock close-away", short: "CLOSE X", explanation: "Minimum close distance away from the zone, measured in zone widths, that avoids the weak-close shock rejection. 1 means the close must finish at least one zone width away.", step: 0.1 },
-  { key: "departureStrengthZoneMultiple", label: "Departure strength", short: "DEP X", explanation: "Close-based departure distance, in zone widths, required for the departure-strength score point. 2 means price must close more than two zone widths away.", step: 0.1 },
+  { key: "maximumPriorTouches", label: "Zone validity · maximum prior touches", short: "3 TOUCHES", explanation: "Maximum completed confirmation-timeframe touch candles before the trade trigger. Three remains valid; the fourth invalidates the zone.", step: 1, max: 3 },
+  { key: "maxTouchRangeZoneFraction", label: "Entry proximity · first-touch range", short: "50% OF ZONE", explanation: "The entire first confirmation-timeframe touch candle may span no more than 50% of one zone width.", step: 0.05, max: 1 },
+  { key: "maxEntryDistanceZoneFraction", label: "Entry proximity · executable distance", short: "50% OF ZONE", explanation: "The executable price may be no more than 50% of one zone width beyond the proximal edge. Historical backtests use the confirmation close because bid/ask history is unavailable.", step: 0.05, max: 1 },
 ];
 const backtestGateFields: Array<{
   key: keyof GoldilocksBacktestGates;
   label: string;
+  value: string;
   explanation: string;
 }> = [
-  { key: "weeklyMarketHours", label: "Weekly market hours", explanation: "When enabled, no new trade may enter from Friday 4 PM through Sunday 6 PM New York time. Disable only to research how weekend-edge signals would have behaved." },
-  { key: "holiday", label: "Holiday", explanation: "When enabled, configured U.S. market holidays are skipped because liquidity and price behavior can be abnormal." },
-  { key: "pairSession", label: "Pair session", explanation: "When enabled, at least one currency in the pair must be inside its normal local trading session. This avoids testing entries when both sides are quiet." },
-  { key: "zoneFormationNews", label: "Formation news", explanation: "When enabled, a zone is discarded if high-impact news overlaps the base-to-departure formation window. This prevents news spikes from being treated like ordinary structure." },
-  { key: "entryProximity", label: "Entry proximity", explanation: "When enabled, the first-touch candle must stay compact and the executable entry cannot be chased too far beyond the zone edge." },
-  { key: "adverseApproach", label: "Adverse approach", explanation: "When enabled, a fast multi-ATR drive plus an oversized touch is rejected unless the touch closes back beyond the proximal edge, showing reclaim." },
-  { key: "entryNews", label: "Entry news", explanation: "When enabled, entries inside the high-impact news block window for either currency are skipped." },
-  { key: "twoToOneRunway", label: "2R runway", explanation: "When enabled, the path from entry to the exact 2R target must not cross the nearest active opposing zone. The target itself remains fixed at 2R either way." },
+  { key: "weeklyMarketHours", label: "Weekly market hours", value: "Friday 16:00 → Sunday 18:00 New York blocked", explanation: "Matches the chart audit's weekly market-hours gate and prevents entries around the weekly close and reopen." },
+  { key: "holiday", label: "Historical holiday", value: "Configured holiday windows blocked", explanation: "Matches the chart audit's historical-holiday gate." },
+  { key: "pairSession", label: "Historical pair session", value: "At least one pair currency session active", explanation: "Matches the chart audit's historical pair-session gate." },
+  { key: "zoneFormationNews", label: "Zone formation news", value: "High-impact news cannot overlap base through departure", explanation: "Missing historical coverage fails closed. This is separate from the entry-time news gate." },
+  { key: "entryProximity", label: "Entry proximity", value: "Touch range ≤ 50% · executable distance ≤ 50%", explanation: "Matches the chart's entry-proximity hard gate. The numeric limits below are the authoritative defaults." },
+  { key: "entryNews", label: "Historical news", value: "Either currency blocked around high-impact news", explanation: "Matches the chart audit's historical-news gate; missing coverage fails closed." },
+  { key: "twoToOneRunway", label: "2:1 runway", value: "Clear path from entry to the exact 2R target", explanation: "Matches the chart audit's 2:1-runway gate and checks the nearest active opposing zone." },
 ];
 const scoreWeightFields: Array<{
   key: GoldilocksScoreCategory;
   label: string;
   explanation: string;
 }> = [
-  { key: "trend", label: "Trend alignment", explanation: "Rewards trades aligned with the protected trend. Raise it when direction should matter more; the other five categories automatically give up the same total points." },
-  { key: "departure", label: "Departure quality", explanation: "Covers combined zone-timeframe formation compactness and capped sustained displacement." },
-  { key: "approachWarnings", label: "Approach warnings", explanation: "Rewards clean pre-touch evidence. Zero warnings earns 5 points, one earns 3, and both earn none. The two confirmation-timeframe categories are a confirmed liquidity-pool sweep and a fast momentum approach. Compression is measured but does not deduct points." },
-  { key: "purity", label: "Zone freshness", explanation: "Rewards zero prior touches. Exactly one prior touch automatically receives half of this category; two or more receive zero." },
-  { key: "zoneInsideZone", label: "Zone inside zone", explanation: "Rewards same-side overlap across the timeframe stack. Two-of-three overlap automatically receives half of this category." },
+  { key: "trend", label: "Trend-timeframe alignment · default 3", explanation: "Rewards agreement between trade direction and protected structure at trade time. The other four categories rebalance when this research weight changes." },
+  { key: "departure", label: "Zone-timeframe departure quality · default 4", explanation: "Three points cover total formation compactness; one point covers sustained close displacement away from the zone." },
+  { key: "approachWarnings", label: "Confirmation-timeframe approach warnings · default 5", explanation: "Zero warnings earns 5 points, one earns 3, and both earn 0. The categories are a confirmed liquidity-pool sweep and a fast momentum approach. Compression is not penalized." },
+  { key: "purity", label: "Confirmation-timeframe zone purity · default 4", explanation: "Zero prior touch candles earns 4 points, exactly one earns 2, and two or more earn 0." },
+  { key: "zoneInsideZone", label: "Multi-timeframe zone confluence (ZIZ) · default 4", explanation: "ZIZ 1/3 earns 0, ZIZ 2/3 earns 2, and ZIZ 3/3 earns 4." },
 ];
 const runSortOptions = [
-  ["createdAt", "Run date"], ["label", "Run label"], ["pairs", "Pairs"],
-  ["minimumScore", "Minimum score"], ["lookbackDays", "Lookback"],
-  ["totalTrades", "Trades"], ["netR", "Net R"], ["expectancyR", "Expectancy"],
-  ["profitFactor", "Profit factor"], ["averageWinR", "Average win"],
-  ["averageLossR", "Average loss"], ["payoffRatio", "Payoff"],
-  ["profitableRate", "Profitable rate"], ["breakEvenTrades", "Break-even trades"],
-  ["maxDrawdownR", "Max drawdown (R)"], ["maxDrawdownPercent", "Max drawdown (%)"],
-  ["startingBalance", "Starting balance"], ["endingBalance", "Ending balance"],
-  ["netProfitLoss", "Net P/L"], ["accountReturn", "Return"],
-  ["leverage", "Leverage"], ["risk", "Risk profile"], ["sampleTrades", "Sample size"],
+  ["createdAt", "Run date"],
+  ["label", "Run label"],
+  ["minimumScore", "Minimum score"],
+  ["totalTrades", "Signals"],
+  ["acceptedTrades", "Portfolio admitted"],
+  ["netR", "Net R"],
+  ["expectancyR", "Expectancy"],
+  ["profitFactor", "Profit factor"],
+  ["maxDrawdownR", "Max drawdown"],
+  ["accountReturn", "Account return"],
 ] as const;
 const normalizedSortValue = (value: unknown) => {
   if (value == null) return Number.NEGATIVE_INFINITY;
@@ -826,6 +791,7 @@ export default function Backtesting() {
     [tradeManager, setTradeManager] = useState<GoldilocksBacktestManagerId>(
       GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
     ),
+    [reverseFinalSignal, setReverseFinalSignal] = useState(false),
     [strategyTweaks, setStrategyTweaks] = useState<GoldilocksBacktestTweaks>(
       () => normalizeGoldilocksBacktestTweaks(undefined),
     ),
@@ -885,6 +851,7 @@ export default function Backtesting() {
     setLeverage(config.leverage ?? 30);
     setProjectionRiskProfile(config.riskProfile ?? "default");
     setTradeManager(managerForRunConfig(config).id);
+    setReverseFinalSignal(Boolean(config.reverseFinalSignal));
     setStrategyTweaks(normalizeGoldilocksBacktestTweaks(config.strategyTweaks));
     setGateSettings(normalizeGoldilocksBacktestGates(config.gateSettings));
     setScoreWeights(
@@ -954,6 +921,7 @@ export default function Backtesting() {
           leverage,
           riskProfile,
           tradeManager,
+          reverseFinalSignal,
           timeframeProfile,
           strategyTweaks,
           gateSettings,
@@ -1139,9 +1107,6 @@ export default function Backtesting() {
       setClearingAll(false);
     }
   };
-  const reachRate = current?.totalTrades
-    ? Math.round((current.wins / current.totalTrades) * 1000) / 10
-    : 0;
   const running = current?.status === "running" || current?.status === "queued";
   const progress = Math.max(
     0,
@@ -1191,13 +1156,19 @@ export default function Backtesting() {
   const performance = useMemo(
     () =>
       calculateBacktestPerformance(
-        (data?.trades ?? []).map((trade) => ({
+        projection.trades.map(({ trade, realizedR }) => ({
           confirmationTime: Number(trade.confirmationTime),
-          realizedR: trade.realizedR == null ? null : Number(trade.realizedR),
+          realizedR,
         })),
       ),
-    [data?.trades],
+    [projection.trades],
   );
+  const acceptedReachedOneR = projection.trades.filter(
+    ({ trade }) => trade.outcome === "WIN",
+  ).length;
+  const reachRate = projection.acceptedTrades
+    ? Math.round((acceptedReachedOneR / projection.acceptedTrades) * 1000) / 10
+    : 0;
   const money = (value: number) =>
     new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -1218,7 +1189,7 @@ export default function Backtesting() {
     RISK_PROFILES[config.riskProfile ?? "default"]?.label ??
     config.riskProfile ??
     "Default";
-  const tweakSummary = (result: RunResult) =>
+  const tweakSummary = (result: Run) =>
     [
       `Strategy: ${result.config.strategyVersion ?? result.label}`,
       `Timeframes: ${timeframeLabel(result.config)}`,
@@ -1226,6 +1197,7 @@ export default function Backtesting() {
       `Lookback: ${result.config.lookbackDays} days`,
       `Risk: ${riskLabel(result.config)}`,
       `Trade manager: ${managerForRunConfig(result.config).label}`,
+      `YOLO reverse final signal: ${result.config.reverseFinalSignal ? "enabled" : "disabled"}`,
       `Starting balance: ${money(result.config.startingBalance ?? 1000)}`,
       `Maximum leverage: ${result.config.leverage ?? 30}:1`,
       `Pairs (${result.config.pairs?.length ?? 0}): ${(result.config.pairs ?? []).join(", ")}`,
@@ -1352,6 +1324,17 @@ export default function Backtesting() {
               ))}
             </select>
           </Field>
+          <Field title="Backtest only: after the normal signal qualifies, execute the opposite side with mirrored risk and a fresh reversed 2R runway check.">
+            YOLO reverse final signal
+            <input
+              aria-label="YOLO reverse final signal"
+              type="checkbox"
+              checked={reverseFinalSignal}
+              onChange={(event) =>
+                setReverseFinalSignal(event.target.checked)
+              }
+            />
+          </Field>
           {running ? (
             <CancelButton disabled={busy} onClick={cancel}>
               {busy ? "Stopping..." : "Cancel run"}
@@ -1373,12 +1356,17 @@ export default function Backtesting() {
             </Sub>
           <ConfigCategory>
             <h3>1. Hard gates</h3>
-            <p>Enable or disable each backtest eligibility filter.</p>
+            <p>
+              The names and values below match the chart audit. Liquidity-sweep
+              and fast-approach evidence belong to the five-point warning score;
+              they are not separate hard gates.
+            </p>
             <TweakGrid>
               {backtestGateFields.map((field) => (
                 <TweakField key={field.key} data-tooltip={field.explanation}>
-                  <span>{gateSettings[field.key] ? "ENABLED" : "DISABLED"}</span>
-                  {field.label}
+                  <span>{field.label}</span>
+                  {gateSettings[field.key] ? "ENABLED" : "DISABLED"}
+                  <small>{field.value}</small>
                   <input
                     aria-label={field.label}
                     type="checkbox"
@@ -1397,8 +1385,9 @@ export default function Backtesting() {
           <ConfigCategory>
             <h3>2. Score weights</h3>
             <p>
-              Total: <strong>20.00 points</strong> · Move any slider and the
-              other categories rebalance automatically.
+              These initialize to the chart&apos;s official 3 + 4 + 5 + 4 + 4
+              distribution. Total: <strong>20.00 points</strong>. Move any
+              slider and the other categories rebalance automatically.
             </p>
             <RestoreWeightsButton
               type="button"
@@ -1444,7 +1433,10 @@ export default function Backtesting() {
           </ConfigCategory>
           <ConfigCategory>
             <h3>3. Numeric thresholds</h3>
-            <p>Percent keys use decimals: 0.50 = 50%.</p>
+            <p>
+              Only thresholds consumed by the current contract are shown.
+              Decimal zone fractions use 0.50 = 50%.
+            </p>
           <TweakGrid>
             {backtestTweakFields.map((field) => (
               <TweakField key={field.key} data-tooltip={field.explanation}>
@@ -1452,10 +1444,12 @@ export default function Backtesting() {
                   {field.short}
                 </span>
                 {field.label}
+                <small>{field.explanation}</small>
                 <input
                   aria-label={field.label}
                   type="number"
                   min="0"
+                  max={field.max}
                   step={field.step}
                   value={strategyTweaks[field.key]}
                   onChange={(event) => {
@@ -1656,7 +1650,7 @@ export default function Backtesting() {
           <Card>
             <Label>Profitable / flat exits</Label>
             <Metric style={{ fontSize: "1.35rem" }}>
-              {current?.wins ?? 0} / {performance.breakEvenTrades}
+              {performance.profitableTrades} / {performance.breakEvenTrades}
             </Metric>
             <span className="muted">{reachRate.toFixed(1)}% reached +1R</span>
           </Card>
@@ -1678,6 +1672,9 @@ export default function Backtesting() {
             : `${performance.sampleTrades} realized-R trades are included.`}
           {performance.omittedTrades
             ? ` ${performance.omittedTrades} legacy trade(s) without realized R are excluded from edge math.`
+            : ""}
+          {projection.marginBlocked
+            ? ` ${projection.marginBlocked} margin-blocked signal(s) were not executed and are excluded from every strategy-edge metric above.`
             : ""}
         </EdgeNote>
       </EdgeLab>
@@ -1773,7 +1770,7 @@ export default function Backtesting() {
             </Metric>
           </Card>
           <Card>
-            <Label>Margin-blocked trades</Label>
+            <Label>Portfolio-capacity blocked</Label>
             <Metric
               style={{
                 fontSize: "1.35rem",
@@ -1786,96 +1783,19 @@ export default function Backtesting() {
         </MoneyGrid>
         <MoneyNote>
           Each trade contributes one final realized-R number to P/L. Positions
-          reserve margin from entry until exit; if the requested score-sized
-          position does not fit the remaining margin, that trade is rejected and
-          contributes no profit or loss. Accepted {projection.acceptedTrades} of{" "}
-          {data?.trades.length ?? 0} signals. The selected leverage is capped
-          per OANDA US rules at 50:1 for major pairs and 20:1 for other pairs.
+          reserve margin and stop risk from entry until exit. A signal is
+          capacity-blocked if admitting it would leave less than 50% of NAV in
+          available-margin headroom, raise projected closeout utilization above
+          25%, or raise combined open stop risk above 2% of NAV. It contributes
+          no profit or loss and is not treated as a bad setup. Accepted{" "}
+          {projection.acceptedTrades} of {data?.trades.length ?? 0} signals. The
+          selected leverage is capped per OANDA US rules at 50:1 for major pairs
+          and 20:1 for other pairs.
           Spread-only commission is generally included in the spread; exact
           historical spread and daily/triple-rollover financing remain excluded;
           simulated positions are force-closed before the Friday weekend cutoff.
         </MoneyNote>
       </MoneyLab>
-      {Boolean(0) && current && (
-        <Section>
-          <Head>
-            <div>
-              <h2>Tweaks for this backtest run</h2>
-              <span className="muted">
-                Saved configuration for “{current.label}” · run {current.id}
-              </span>
-            </div>
-          </Head>
-          <Table>
-            <table>
-              <thead>
-                <tr>
-                  <th>Setting</th>
-                  <th>Saved value for this run</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Strategy / tweak label</td>
-                  <td>{current.label}</td>
-                </tr>
-                <tr>
-                  <td>Strategy version</td>
-                  <td>
-                    {current.config.strategyVersion ?? "Legacy / not recorded"}
-                  </td>
-                </tr>
-                <tr>
-                  <td>Timeframe stack</td>
-                  <td>{timeframeLabel(current.config)}</td>
-                </tr>
-                <tr>
-                  <td>Minimum score</td>
-                  <td>{current.config.minimumScore}/20</td>
-                </tr>
-                <tr>
-                  <td>Lookback</td>
-                  <td>{current.config.lookbackDays} days</td>
-                </tr>
-                <tr>
-                  <td>Selected pairs</td>
-                  <td>{current.config.pairs?.join(", ") || "None recorded"}</td>
-                </tr>
-                <tr>
-                  <td>Starting account</td>
-                  <td>{money(current.config.startingBalance ?? 1000)}</td>
-                </tr>
-                <tr>
-                  <td>Dynamic risk profile</td>
-                  <td>{riskLabel(current.config)}</td>
-                </tr>
-                <tr>
-                  <td>Trade manager</td>
-                  <td>
-                    {managerForRunConfig(current.config).label}
-                  </td>
-                </tr>
-                <tr>
-                  <td>Maximum account leverage</td>
-                  <td>{current.config.leverage ?? 30}:1</td>
-                </tr>
-                <tr>
-                  <td>Protected-win R</td>
-                  <td>{current.config.protectedWinR ?? "Default"}</td>
-                </tr>
-                <tr>
-                  <td>Candle source</td>
-                  <td>
-                    {current.config.archiveOnly
-                      ? "Saved archive only"
-                      : "Archive with configured acquisition"}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </Table>
-        </Section>
-      )}
       <Section>
         <Head>
           <div>
@@ -1981,11 +1901,13 @@ export default function Backtesting() {
                     </td>
                     <td
                       className={
-                        displayedR > 0
-                          ? "win"
-                          : displayedR < 0
-                            ? "loss"
-                            : "break-even"
+                        projected
+                          ? displayedR > 0
+                            ? "win"
+                            : displayedR < 0
+                              ? "loss"
+                              : "break-even"
+                          : "break-even"
                       }
                     >
                       {projected
@@ -1998,10 +1920,14 @@ export default function Backtesting() {
                     </td>
                     <td
                       className={
-                        projected && projected.pnl >= 0 ? "win" : "loss"
+                        projected
+                          ? projected.pnl >= 0
+                            ? "win"
+                            : "loss"
+                          : "break-even"
                       }
                     >
-                      {projected ? money(projected.pnl) : "Not accepted"}
+                      {projected ? money(projected.pnl) : "N/A"}
                     </td>
                   </tr>
                 );
@@ -2054,37 +1980,19 @@ export default function Backtesting() {
           <table>
             <thead>
               <tr>
-                <th>#</th>
+                <th>Delete</th>
                 <th>Run</th>
-                <th>Run date</th>
-                <th>Pairs</th>
-                <th>Min score</th>
-                <th>Lookback</th>
-                <th>Trades</th>
-                <th>Net R</th>
+                <th>Score</th>
+                <th>Signals / admitted</th>
                 <th>Expectancy</th>
                 <th>Profit factor</th>
-                <th>Avg win</th>
-                <th>Avg loss</th>
-                <th>Payoff</th>
-                <th>Profitable rate</th>
-                <th>BE trades</th>
-                <th>Max DD (R)</th>
-                <th>Max DD (%)</th>
-                <th>Starting</th>
-                <th>Ending</th>
-                <th>Net P/L</th>
-                <th>Return</th>
-                <th>Leverage</th>
-                <th>Risk</th>
-                <th>Sample</th>
-                <th>Actions</th>
+                <th>Net R</th>
+                <th>Max drawdown</th>
+                <th>Account return</th>
               </tr>
             </thead>
             <tbody>
-              {sortedRunResults.map((row, index) => {
-                const runPairs = row.config.pairs ?? [];
-                const details = tweakSummary(row);
+              {sortedRunResults.map((row) => {
                 return (
                   <tr
                     key={row.id}
@@ -2098,30 +2006,60 @@ export default function Backtesting() {
                     }}
                     title={`Load complete run: ${row.label}`}
                   >
-                    <td>{index + 1}</td>
                     <td>
-                      <PairCount
-                        type="button"
-                        aria-label={`View saved tweaks for ${row.label}`}
+                      <DeleteButton
+                        disabled={deletingId === row.id}
+                        title="Delete this entire run and all of its trades"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void removeRun(row.id, row.label);
+                        }}
                       >
-                        View tweaks
-                        <PairTip>
-                          <strong>Saved run configuration</strong>
-                          {details.map((detail) => (
-                            <span key={detail} className="list">
-                              {detail}
-                            </span>
-                          ))}
-                        </PairTip>
-                      </PairCount>
+                        {deletingId === row.id ? "Deleting…" : "Delete"}
+                      </DeleteButton>
                     </td>
-                    <td>{new Date(row.createdAt).toLocaleDateString()}</td>
-                    <td>{runPairs.length}</td>
+                    <td>
+                      <strong>{row.label}</strong>
+                      <div
+                        style={{
+                          marginTop: 4,
+                          color: "#748195",
+                          fontSize: ".66rem",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {new Date(row.createdAt).toLocaleDateString()} ·{" "}
+                        {timeframeLabel(row.config)} ·{" "}
+                        {row.status.toUpperCase()}
+                      </div>
+                    </td>
                     <td>{row.config.minimumScore}/20</td>
-                    <td>{row.config.lookbackDays} days</td>
-                    <td>{row.totalTrades}</td>
-                    <td className={row.netR >= 0 ? "win" : "loss"}>
-                      {formatR(row.netR, true)}
+                    <td
+                      title={
+                        row.sampleTrades < 50
+                          ? "Early sample: below 50 realized-R signals"
+                          : row.sampleTrades < 100
+                            ? "Building sample: continue toward 100+"
+                            : "Stronger sample: 100+ realized-R signals"
+                      }
+                    >
+                      <strong>
+                        {row.totalTrades} / {row.acceptedTrades}
+                      </strong>
+                      <div
+                        style={{
+                          marginTop: 4,
+                          color: row.sampleTrades < 50 ? "#ffb65c" : "#748195",
+                          fontSize: ".64rem",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {row.sampleTrades < 50
+                          ? "EARLY"
+                          : row.sampleTrades < 100
+                            ? "BUILDING"
+                            : "100+"}
+                      </div>
                     </td>
                     <td
                       className={(row.expectancyR ?? 0) >= 0 ? "win" : "loss"}
@@ -2139,52 +2077,25 @@ export default function Backtesting() {
                     >
                       {formatFactor(row.profitFactor)}
                     </td>
-                    <td className="win">{formatR(row.averageWinR)}</td>
-                    <td className="loss">{formatR(row.averageLossR)}</td>
-                    <td>{formatPayoff(row.payoffRatio)}</td>
-                    <td>{row.profitableRate.toFixed(1)}%</td>
-                    <td>{row.breakEvenTrades}</td>
-                    <td className="loss">{formatR(row.maxDrawdownR)}</td>
-                    <td className="loss">
-                      {row.maxDrawdownPercent.toFixed(2)}%
+                    <td className={row.netR >= 0 ? "win" : "loss"}>
+                      {formatR(row.netR, true)}
                     </td>
-                    <td>{money(row.config.startingBalance ?? 1000)}</td>
-                    <td>{money(row.endingBalance)}</td>
-                    <td className={row.netProfitLoss >= 0 ? "win" : "loss"}>
-                      {money(row.netProfitLoss)}
+                    <td className="loss">
+                      {formatR(row.maxDrawdownR)} ·{" "}
+                      {row.maxDrawdownPercent.toFixed(2)}%
                     </td>
                     <td className={row.accountReturn >= 0 ? "win" : "loss"}>
                       {row.accountReturn.toFixed(2)}%
-                    </td>
-                    <td>{row.config.leverage ?? 30}:1</td>
-                    <td>{riskLabel(row.config)}</td>
-                    <td
-                      title={
-                        row.sampleTrades < 50
-                          ? "Early sample: below 50 realized-R trades"
-                          : row.sampleTrades < 100
-                            ? "Useful sample: continue toward 100+"
-                            : "Stronger sample: 100+ realized-R trades"
-                      }
-                    >
-                      {row.sampleTrades}{" "}
-                      {row.sampleTrades < 50
-                        ? "| EARLY"
-                        : row.sampleTrades < 100
-                          ? "| BUILDING"
-                          : "| 100+"}
-                    </td>
-                    <td>
-                      <DeleteButton
-                        disabled={deletingId === row.id}
-                        title="Delete this entire run and all of its trades"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void removeRun(row.id, row.label);
+                      <div
+                        style={{
+                          marginTop: 4,
+                          color: "inherit",
+                          fontSize: ".64rem",
+                          whiteSpace: "nowrap",
                         }}
                       >
-                        {deletingId === row.id ? "Deleting…" : "Delete run"}
-                      </DeleteButton>
+                        {money(row.netProfitLoss)}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -2193,6 +2104,26 @@ export default function Backtesting() {
           </table>
         </LeaderboardTable>
       </Section>
+      {current && (
+        <Section>
+          <Head>
+            <div>
+              <h2>Selected run configuration</h2>
+              <span className="muted">
+                Click any backtest-run row above to populate this card ·
+                currently showing “{current.label}”
+              </span>
+            </div>
+          </Head>
+          <RunConfigGrid>
+            <RunConfigItem>Run ID: {current.id}</RunConfigItem>
+            <RunConfigItem>Saved label: {current.label}</RunConfigItem>
+            {tweakSummary(current).map((detail) => (
+              <RunConfigItem key={detail}>{detail}</RunConfigItem>
+            ))}
+          </RunConfigGrid>
+        </Section>
+      )}
       <Section>
         <Head>
           <h2>Backtest candylog</h2>

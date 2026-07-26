@@ -5,6 +5,8 @@ import { logMessage } from "../../logger";
 import credentials from "../../../credentials.json";
 import { type RISK, calculateRisk, getPrecision, normalizeOandaSymbol } from "../../shared";
 import { getLoginMode } from "../../loginState";
+import { estimateMarginFromStopRisk } from "../../portfolioMargin";
+import { PortfolioRiskCoordinator } from "../../portfolioRiskCoordinator";
 
 export const TYPE = {
   MARKET: 'MARKET',
@@ -47,6 +49,7 @@ export interface MarketOrderRequest {
   stopLossOnFill?: ActionOnFill;
   takeProfitOnFill?: ActionOnFill;
   timeInForce: string;
+  positionFill?: "OPEN_ONLY" | "REDUCE_FIRST" | "REDUCE_ONLY" | "DEFAULT";
 }
 
 export interface OrderRequest {
@@ -91,7 +94,47 @@ export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 
   const stopLoss = riskData.stopLoss;
   const takeProfit = riskData.takeProfit;
   const signedUnits = `${orderType.action === ACTION.SELL ? '-' : ''}${units}`;
-  logMessage("Creating order request", { pair, signedUnits, stopLoss, takeProfit }, { level: "info", fileName });
+  const marginEstimate = estimateMarginFromStopRisk({
+    pair,
+    entry: riskData.entryPrice,
+    stopLoss: Number(stopLoss),
+    riskAmount: riskData.riskAmount,
+    accountMarginRate: riskData.accountMarginRate,
+  });
+  const marginCoordinator = new PortfolioRiskCoordinator();
+  const marginReservation = marginCoordinator.reserve({
+    pair,
+    mode,
+    proposedMargin: marginEstimate.requiredMargin,
+    proposedRiskAmount: riskData.riskAmount,
+    account: {
+      nav: riskData.accountNav,
+      marginAvailable: riskData.marginAvailable,
+      marginUsed: riskData.marginUsed,
+      marginCloseoutNav: riskData.marginCloseoutNav,
+      marginCloseoutPercent: riskData.marginCloseoutPercent,
+      openTradeCount: riskData.openTradeCount,
+    },
+  });
+  if (!marginReservation.allowed || !marginReservation.reservationId) {
+    marginCoordinator.close();
+    logMessage(
+      `Portfolio margin rejected ${pair}: ${marginReservation.reason}`,
+      { marginEstimate, marginReservation },
+      { level: "warn", fileName },
+    );
+    return {
+      success: false,
+      reason: marginReservation.reason,
+      raw: { marginEstimate, marginReservation },
+    };
+  }
+  const reservationId = marginReservation.reservationId;
+  logMessage(
+    "Portfolio margin reserved",
+    { pair, signedUnits, stopLoss, takeProfit, marginEstimate, marginReservation },
+    { level: "info", fileName },
+  );
 
   const requestBody: OrderRequest = {
     order: {
@@ -104,7 +147,8 @@ export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 
       takeProfitOnFill: {
         price: takeProfit
       },
-      timeInForce: "FOK"
+      timeInForce: "FOK",
+      positionFill: "OPEN_ONLY",
     }
   };
 
@@ -130,6 +174,8 @@ export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 
     }
 
     if (!response.ok) {
+      marginCoordinator.release(reservationId);
+      marginCoordinator.close();
       logMessage("❌ HTTP error placing order", { status: response.status, errorText: json }, { level: "error", fileName });
       return { success: false, reason: json?.orderCancelTransaction?.reason || json?.errorMessage || 'HTTP error', raw: json };
     }
@@ -145,9 +191,23 @@ export const order = async (orderType: OrderParameters, mode: 'live' | 'demo' = 
     }
 
     logMessage("✅ Order placed response", json, { level: "info", fileName });
+    const openedTradeId =
+      json?.orderFillTransaction?.tradeOpened?.tradeID ??
+      json?.orderFillTransaction?.tradeOpenedID;
+    if (json?.orderFillTransaction) {
+      marginCoordinator.markFilled(
+        reservationId,
+        openedTradeId ? String(openedTradeId) : undefined,
+      );
+    } else {
+      marginCoordinator.release(reservationId);
+    }
+    marginCoordinator.close();
     return { success: !!json?.orderFillTransaction, reason, raw: json };
 
   } catch (err: any) {
+    marginCoordinator.release(reservationId);
+    marginCoordinator.close();
     logMessage("❌ Fetch threw an error", err, { level: "error", fileName });
     return { success: false, reason: err?.message || 'Fetch error', raw: err };
   }

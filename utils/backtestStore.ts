@@ -41,6 +41,7 @@ export interface BacktestRunConfig {
   leverage?: number;
   riskProfile?: RiskProfile;
   tradeManager?: GoldilocksBacktestManagerId;
+  reverseFinalSignal?: boolean;
   protectedWinR?: number;
   archiveOnly?: boolean;
   datasetEndTime?: number;
@@ -636,7 +637,12 @@ export const getBacktestDashboard = (runId?: string) => {
       riskProfile: config.riskProfile ?? "default",
       minimumScore: config.minimumScore,
     });
-    const performance = calculateBacktestPerformance(runTrades);
+    const performance = calculateBacktestPerformance(
+      portfolio.trades.map(({ trade, realizedR }) => ({
+        confirmationTime: trade.confirmationTime,
+        realizedR,
+      })),
+    );
     return {
       ...run,
       config,
@@ -676,25 +682,44 @@ export const getBacktestDashboard = (runId?: string) => {
     )
       .map((row) => {
         const config = summaryConfig(row.configJson);
-        const portfolioTrades = d
+        const runPortfolioTrades = d
           .prepare(
             `SELECT id,pair,confirmation_time AS confirmationTime,outcome_time AS outcomeTime,
         score,entry,stop_loss AS stopLoss,outcome,realized_r AS realizedR
-        FROM backtest_trades WHERE run_id=? AND pair=? ORDER BY confirmation_time`,
+        FROM backtest_trades WHERE run_id=? ORDER BY confirmation_time`,
           )
-          .all(row.runId, row.pair) as PortfolioTrade[];
-        const portfolio = simulateBacktestPortfolio(portfolioTrades, {
+          .all(row.runId) as PortfolioTrade[];
+        const portfolio = simulateBacktestPortfolio(runPortfolioTrades, {
           startingBalance: config.startingBalance ?? 1000,
           leverage: config.leverage ?? 30,
           riskProfile: config.riskProfile ?? "default",
           minimumScore: config.minimumScore,
         });
-        const performance = calculateBacktestPerformance(portfolioTrades);
+        const acceptedPairTrades = portfolio.trades.filter(
+          ({ trade }) => trade.pair === row.pair,
+        );
+        const performance = calculateBacktestPerformance(
+          acceptedPairTrades.map(({ trade, realizedR }) => ({
+            confirmationTime: trade.confirmationTime,
+            realizedR,
+          })),
+        );
+        const acceptedScores = acceptedPairTrades.map(({ trade }) =>
+          Number(trade.score),
+        );
         return {
           ...row,
           config,
           configJson: undefined,
           maxDrawdown: Number(portfolio.maxDrawdown.toFixed(2)),
+          trades: acceptedPairTrades.length,
+          wins: performance.profitableTrades,
+          losses: performance.losingTrades,
+          winRate: performance.profitableRate,
+          averageScore: acceptedScores.length
+            ? acceptedScores.reduce((sum, score) => sum + score, 0) /
+              acceptedScores.length
+            : 0,
           ...performance,
         };
       })

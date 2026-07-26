@@ -66,8 +66,9 @@ execution. Require explicit user approval for material live-risk changes.
 - Score only after all hard gates pass.
 - Use the executable entry for the final 2R runway check.
 - Stop at the selected zone distal boundary; target exactly 2R.
-- At +1R, move the stop to entry first and close 50%; leave the remaining 50%
-  targeting 2R. A later break-even stop banks +0.5R total.
+- At +1R, move the stop to entry first and close 50%; remove the take-profit and
+  trail the remaining 50% with the default 2x ATR(14) runner. A break-even runner
+  stop banks +0.5R total.
 - Maximum three qualifying touches; invalidate on the fourth.
 - Expire active zones after two calendar years.
 - Preserve one open trade per pair and restart recovery.

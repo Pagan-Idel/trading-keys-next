@@ -1,5 +1,5 @@
 import type { StrategyCandle } from './goldilocksStrategy.ts';
-import { GOLDILOCKS_DEFAULT_MANAGEMENT } from './goldilocksTradeManagement.ts';
+import { GOLDILOCKS_DEFAULT_MANAGEMENT, calculateAtr, getGoldilocksAtrTrailingStop } from './goldilocksTradeManagement.ts';
 
 export const GOLDILOCKS_RESEARCH_SCHEMA_VERSION='goldilocks-ai-research-v1';
 
@@ -25,11 +25,11 @@ export const GOLDILOCKS_MANAGEMENT_POLICIES:TradeManagementPolicy[]=[
   {
     id:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
     version:1,
-    label:'Default: 50% at 1R, remaining 50% protected to 2R',
+    label:'Secure Half + ATR Runner (default)',
     breakEvenAtR:GOLDILOCKS_DEFAULT_MANAGEMENT.breakEvenAtR,
     primaryTargetR:GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR,
     primaryExitFraction:GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
-    runnerTargetR:GOLDILOCKS_DEFAULT_MANAGEMENT.finalTargetR,
+    runnerTargetR:null,
     runnerStopR:0,
   },
   ...setAndForgetTargets.map(primaryTargetR=>(
@@ -120,6 +120,8 @@ export const evaluateTradeManagementPolicy=(args:{
   let breakEvenActivatedAt:number|null=null;
   let partialExitAt:number|null=null;
   let realizedPrimary=0;
+  let trailingStop=entry;
+  let favorableExtreme=entry;
   const primaryTarget=thresholdPrice(direction,entry,risk,policy.primaryTargetR);
   const runnerTarget=policy.runnerTargetR===null?null:thresholdPrice(direction,entry,risk,policy.runnerTargetR);
   for(let index=startIndex;index<candles.length;index+=1){
@@ -132,8 +134,9 @@ export const evaluateTradeManagementPolicy=(args:{
       return {policyId:policy.id,policyVersion:policy.version,policy,status:'closed',exitTime:candle.time,exitReason:'weekend_close',realizedR,markToMarketR:openR,breakEvenActivatedAt,partialExitAt,path:summary};
     }
     if(partialExitAt!==null){
-      const runnerStopR=policy.runnerStopR??0;
-      const runnerStop=thresholdPrice(direction,entry,risk,runnerStopR);
+      const isDefaultAtrRunner=policy.id===GOLDILOCKS_DEFAULT_MANAGEMENT.policyId;
+      const runnerStopR=isDefaultAtrRunner?rAt(direction,trailingStop,entry,risk):(policy.runnerStopR??0);
+      const runnerStop=isDefaultAtrRunner?trailingStop:thresholdPrice(direction,entry,risk,runnerStopR);
       const stopped=hitAdverse(candle,direction,runnerStop);
       const won=runnerTarget!==null&&hitFavorable(candle,direction,runnerTarget);
       if(stopped&&won)summary.ambiguousCandles.push({time:candle.time,reason:'runner stop and runner target were both inside one M1 candle; conservative runner stop used'});
@@ -141,6 +144,11 @@ export const evaluateTradeManagementPolicy=(args:{
         const runnerR=stopped?runnerStopR:policy.runnerTargetR!;
         const realizedR=realizedPrimary+(1-policy.primaryExitFraction)*runnerR;
         return {policyId:policy.id,policyVersion:policy.version,policy,status:'closed',exitTime:candle.time,exitReason:stopped?'runner_stop':'runner_target',realizedR,markToMarketR:rAt(direction,candle.close,entry,risk),breakEvenActivatedAt,partialExitAt,path:summary};
+      }
+      if(isDefaultAtrRunner){
+        favorableExtreme=direction==='BUY'?Math.max(favorableExtreme,candle.high):Math.min(favorableExtreme,candle.low);
+        const atr=calculateAtr(candles.slice(0,index+1));
+        if(atr)trailingStop=getGoldilocksAtrTrailingStop({direction,entry,currentStop:trailingStop,favorableExtreme,atr});
       }
       continue;
     }
@@ -156,6 +164,7 @@ export const evaluateTradeManagementPolicy=(args:{
     if(reachedPrimary){
       if(policy.primaryExitFraction>=1)return {policyId:policy.id,policyVersion:policy.version,policy,status:'closed',exitTime:candle.time,exitReason:'target',realizedR:policy.primaryTargetR,markToMarketR:rAt(direction,candle.close,entry,risk),breakEvenActivatedAt,partialExitAt,path:summary};
       partialExitAt=candle.time;
+      favorableExtreme=direction==='BUY'?candle.high:candle.low;
       if(policy.breakEvenAtR!==null&&policy.breakEvenAtR<=policy.primaryTargetR)
         breakEvenActivatedAt??=candle.time;
       realizedPrimary=policy.primaryExitFraction*policy.primaryTargetR;

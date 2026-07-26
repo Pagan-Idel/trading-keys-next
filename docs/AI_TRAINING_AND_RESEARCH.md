@@ -134,14 +134,34 @@ The read-only `GET /api/automation/trade-management?tradeId=<broker-trade-id>` e
 returns the permanent live/demo manager ledger for one broker trade.
 
 Live/demo automation and new official backtests execute
-`secure-50-at-1r-rest-2r-v1`: at +1R the stop moves to entry first, 50% is closed,
-and the remaining 50% targets 2R. The research child rows expose all policies side by
+`secure-half-atr-runner-v3` (`Secure Half + ATR Runner`): at +1R the stop moves to entry first, 50% is closed,
+the broker take-profit is removed, and the remaining 50% follows a causal 2x ATR(14)
+chandelier stop that never loosens or moves behind entry. The research child rows expose all policies side by
 side for comparison. A manual Backtesting run may explicitly select the prior
 `legacy-score-tiered-2r-4r-v1` manager instead; that choice is frozen in the run
 configuration and affects official realized-R and portfolio metrics without changing
 live/demo automation. Manual runs may also select `set-and-forget-2r-v1`, which retains
 the original stop and full 2R target without interim management; mandatory Friday
 liquidation remains a global safety rule.
+
+Manual backtests may opt into the versioned `yolo-reverse-final-signal-v1` execution
+assumption. It reverses only the final qualified side and mirrors the original R geometry;
+it does not retrain, rescore, or alter live/demo signals. Keep YOLO runs labeled and
+separate from official-direction baselines.
+
+Strategy `0.42` applies the same account-wide admission policy to live/demo orders and
+the chronological portfolio projection. A candidate must leave at least 50% of NAV as
+available margin, keep projected margin-closeout usage at or below 25%, and keep known
+plus conservatively estimated open stop risk at or below 2% of NAV. Live/demo workers
+coordinate through an atomic, expiring SQLite reservation so two different-pair workers
+cannot spend the same account headroom. `marginBlocked` is a portfolio-capacity result,
+not a strategy-signal rejection. The historical projection remains conservative and
+simplified: it does not continuously mark intratrade equity to market and does not
+reconstruct historical broker margin tiers.
+Official strategy-edge and research metrics use only chronologically portfolio-admitted
+trades. Margin-blocked signals retain their counterfactual outcome for missed-trade
+research, but they contribute nothing to realized R, expectancy, profit factor, win
+rate, loss streak, drawdown, or projected account P/L.
 
 ## Prevent leakage
 

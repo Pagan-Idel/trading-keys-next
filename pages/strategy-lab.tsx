@@ -22,6 +22,7 @@ import type {
   TradePathSummary,
 } from "../utils/tradeManagementResearch";
 import { getGoldilocksChartStack } from "../utils/goldilocksConfig";
+import { goldilocksScoreComponentMaximum } from "../utils/goldilocksScoreDisplay";
 
 const StrategyLabChart = dynamic(
   () => import("../components/StrategyLabChart"),
@@ -41,39 +42,11 @@ const StrategyLabChart = dynamic(
     ),
   },
 );
-const usesConfluenceHeavyWeights = (strategyVersion?: string) => {
-  const version = strategyVersionNumber(strategyVersion);
-  return version ? version >= 16 : true;
-};
-const strategyVersionNumber = (strategyVersion?: string) => {
-  const legacy = strategyVersion?.match(/^h1-m15-m5-v(\d+)$/);
-  if (legacy) return Number(legacy[1]);
-  const semantic = strategyVersion?.match(/^0\.(\d+)$/);
-  return Number(semantic?.[1] ?? 0);
-};
 const formatWarningResolution = (seconds?: number) => {
   if (!seconds) return "stored confirmation timeframe";
   if (seconds >= 86400) return `${seconds / 86400}-day candles`;
   if (seconds >= 3600) return `${seconds / 3600}-hour candles`;
   return `${seconds / 60}-minute candles`;
-};
-const scoreComponentMaximum = (name: string, strategyVersion?: string) => {
-  if (name.endsWith(" range")) return 0;
-  if (name.endsWith(" trend"))
-    return usesConfluenceHeavyWeights(strategyVersion) ? 3 : 4;
-  if (name.endsWith(" departure quality")) {
-    const version = strategyVersionNumber(strategyVersion);
-    return version >= 23 ? 4 : version === 22 ? 5 : 8;
-  }
-  if (name.endsWith(" approach warnings")) {
-    const version = strategyVersionNumber(strategyVersion);
-    return version >= 23 ? 5 : version === 22 ? 4 : 3;
-  }
-  if (name.endsWith(" purity")) return 4;
-  if (name === "Available RRR") return 1;
-  if (name === "Zone inside zone")
-    return usesConfluenceHeavyWeights(strategyVersion) ? 4 : 3;
-  return null;
 };
 const scoreComponentDisplayName = (name: string) => {
   if (name.endsWith(" range")) return "Legacy range context";
@@ -477,6 +450,10 @@ type HistoricalEntrySetup = {
   zoneAgeSeconds?: number;
   firstOutsideTime?: number;
   priorTouchDetails?: Array<{
+    time: number;
+    price: number;
+  }>;
+  formationCandleDetails?: Array<{
     time: number;
     price: number;
   }>;
@@ -1190,11 +1167,11 @@ export default function StrategyLab() {
           const scoreContractVersion = live.legacyReplay
             ? live.replayStrategyVersion
             : live.currentStrategyVersion;
-          const departureMaximum = scoreComponentMaximum(
+          const departureMaximum = goldilocksScoreComponentMaximum(
             `${roleTimeframes.zone} departure quality`,
             scoreContractVersion,
           );
-          const approachMaximum = scoreComponentMaximum(
+          const approachMaximum = goldilocksScoreComponentMaximum(
             `${roleTimeframes.trigger} approach warnings`,
             scoreContractVersion,
           );
@@ -1237,13 +1214,13 @@ export default function StrategyLab() {
                   {(trade.score?.components ?? [])
                     .filter(
                       (component) =>
-                        scoreComponentMaximum(
+                        goldilocksScoreComponentMaximum(
                           component.name,
                           scoreContractVersion,
                         ) !== 0,
                     )
                     .map((component) => {
-                      const maximum = scoreComponentMaximum(
+                      const maximum = goldilocksScoreComponentMaximum(
                         component.name,
                         scoreContractVersion,
                       );

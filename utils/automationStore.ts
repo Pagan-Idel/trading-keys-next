@@ -298,9 +298,9 @@ export const setActiveTrade = (trade: ActiveTradeInput): void => {
       stop_loss = excluded.stop_loss,
       take_profit = excluded.take_profit,
       mode = excluded.mode,
-      score = excluded.score,
-      risk_profile = excluded.risk_profile,
-      risk_percentage = excluded.risk_percentage,
+      score = COALESCE(excluded.score, active_trades.score),
+      risk_profile = COALESCE(excluded.risk_profile, active_trades.risk_profile),
+      risk_percentage = COALESCE(excluded.risk_percentage, active_trades.risk_percentage),
       updated_at = excluded.updated_at
   `).run({
     ...trade,
@@ -316,6 +316,14 @@ export const setActiveTrade = (trade: ActiveTradeInput): void => {
 export const clearActiveTrade = (pair: string): void => {
   getDatabase().prepare('DELETE FROM active_trades WHERE pair = ?').run(pair);
 };
+
+export const getActiveTrade = (pair: string): ActiveTradeInput | undefined =>
+  getDatabase().prepare(`
+    SELECT trade_id AS tradeId, pair, direction, entry, stop_loss AS stopLoss,
+      take_profit AS takeProfit, mode, score, risk_profile AS riskProfile,
+      risk_percentage AS riskPercentage
+    FROM active_trades WHERE pair = ?
+  `).get(pair) as ActiveTradeInput | undefined;
 
 export const clearAutomationEvents = (): void => {
   const db = getDatabase();

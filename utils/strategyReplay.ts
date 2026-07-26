@@ -202,6 +202,48 @@ export const reconcileStoredReplayPriorTouchDetails = <
   return causalDetails.length === storedTouchCount ? causalDetails : [];
 };
 
+export const isStoredReplayZoneMatch = (
+  zone: Pick<GoldilocksZone, "id" | "kind" | "side" | "candleTime" | "low" | "high">,
+  stored: {
+    zoneId: string;
+    zoneKind: string;
+    direction: string;
+    stopLoss: number;
+  } | undefined,
+) => {
+  if (!stored) return false;
+  if (zone.id === stored.zoneId) return true;
+  const storedCandleTime = Number(stored.zoneId.match(/(\d+)$/)?.[1]);
+  return (
+    Number.isFinite(storedCandleTime) &&
+    zone.kind === stored.zoneKind &&
+    zone.side === (stored.direction === "BUY" ? "demand" : "supply") &&
+    zone.candleTime === storedCandleTime &&
+    Math.abs((zone.side === "demand" ? zone.low : zone.high) - stored.stopLoss) <
+      1e-9
+  );
+};
+
+export const getStrategyReplayZoneFormationDetails = (
+  zone: Pick<GoldilocksZone, "side" | "low" | "high" | "candleTime">,
+  zoneTimeframeCandles: StrategyCandle[],
+  firstOutsideTime: number | undefined,
+) =>
+  firstOutsideTime === undefined
+    ? []
+    : zoneTimeframeCandles
+        .filter(
+          (candle) =>
+            candle.time >= zone.candleTime &&
+            candle.time < firstOutsideTime &&
+            candle.high >= zone.low &&
+            candle.low <= zone.high,
+        )
+        .map((candle) => ({
+          time: candle.time,
+          price: zone.side === "demand" ? candle.low : candle.high,
+        }));
+
 export const filterReplayRejectedFirstTouchesAt = <
   T extends { zoneId: string },
 >(

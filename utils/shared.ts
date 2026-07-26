@@ -174,6 +174,15 @@ export interface RISK {
   units: string;
   takeProfit: string;
   stopLoss: string;
+  entryPrice: number;
+  riskAmount: number;
+  accountNav: number;
+  accountMarginRate: number;
+  marginAvailable: number;
+  marginUsed: number;
+  marginCloseoutNav: number;
+  marginCloseoutPercent: number;
+  openTradeCount: number;
 }
 
 export interface SLTPMT {
@@ -307,6 +316,15 @@ export const calculateRisk = async (
       units: units.toFixed(0),
       stopLoss: slPrice.toFixed(precision),
       takeProfit: tpPrice.toFixed(precision),
+      entryPrice,
+      riskAmount,
+      accountNav: accountEquity,
+      accountMarginRate: Number(account.marginRate),
+      marginAvailable: Number(account.marginAvailable),
+      marginUsed: Number(account.marginUsed),
+      marginCloseoutNav: Number(account.marginCloseoutNAV),
+      marginCloseoutPercent: Number(account.marginCloseoutPercent),
+      openTradeCount: Number(account.openTradeCount),
     };
   } catch (error: any) {
     console.log(`❌ Error calculating risk: ${error.message}`, undefined, { fileName: "shared", pair });

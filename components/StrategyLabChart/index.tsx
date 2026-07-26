@@ -321,6 +321,10 @@ type HistoricalTradeSetup = {
     time: number;
     price: number;
   }>;
+  formationCandleDetails?: Array<{
+    time: number;
+    price: number;
+  }>;
   confirmationTimeframe: string;
   confirmationTime: number;
   confirmationCandle: StrategyCandle;
@@ -948,6 +952,28 @@ export default function StrategyLabChart({
         },
       ];
     });
+    const formationCandleMarkers = (
+      scenario?.tradeSetup?.formationCandleDetails ?? []
+    ).flatMap((detail) => {
+      if (detail.time < firstCandleTime || detail.time > lastCandleTime)
+        return [];
+      const candleIndex = getReplayCandleIndexAtOrBefore(
+        candleTimes,
+        detail.time,
+      );
+      const candle = candles[candleIndex];
+      if (!candle) return [];
+      return [
+        {
+          time: candle.time as UTCTimestamp,
+          position: "atPriceMiddle" as const,
+          price: detail.price,
+          color: "#ffd45c",
+          shape: "circle" as const,
+          text: "",
+        },
+      ];
+    });
     const departureQuality = scenario?.tradeSetup?.zone.departureQuality;
     const departureMarkers =
       departureQuality &&
@@ -1099,6 +1125,7 @@ export default function StrategyLabChart({
       series,
       [
         ...structureMarkers,
+        ...formationCandleMarkers,
         ...priorTouchMarkers,
         ...departureMarkers,
         ...approachEvidenceMarkers,

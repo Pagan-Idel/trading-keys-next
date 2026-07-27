@@ -24,6 +24,10 @@ Use these sources in order:
 
 Never let an AI infer a new trading rule solely from a screenshot or a profitable
 historical example.
+Replay reconstruction failures do not erase immutable stored trade geometry. When the
+confirmation candle exists but a newer detector cannot reproduce the old zone, use the
+saved entry-time corridor for the explanatory zone and retain the stored entry, stop,
+target, and outcome.
 
 ## Available data
 
@@ -110,7 +114,7 @@ exporter should include:
   percentages occupied by 1R, 2R, and 4R. Missing corridor sides remain unavailable.
 - A policy-independent M1 path summary: MFE/MAE in R, ending R, coverage bounds/count,
   first time each positive and negative R milestone was reached, and intrabar ambiguity.
-- One child row per versioned manager evaluated on that identical path. The 23-policy
+- One child row per versioned manager evaluated on that identical path. The 25-policy
   grid covers set-and-forget targets from 1R through 5R, break-even-at-+1R targets from
   1.5R through 5R, and 25%, 50%, or 75% runners after 2R toward 3R, 4R, or 5R.
   Runner stop is +1R.
@@ -133,23 +137,50 @@ unchanged, so counterfactual manager research cannot silently alter strategy beh
 The read-only `GET /api/automation/trade-management?tradeId=<broker-trade-id>` endpoint
 returns the permanent live/demo manager ledger for one broker trade.
 
-Live/demo automation and new official backtests execute
+Live/demo automation and automatic research campaigns execute
 `secure-half-atr-runner-v3` (`Secure Half + ATR Runner`): at +1R the stop moves to entry first, 50% is closed,
 the broker take-profit is removed, and the remaining 50% follows a causal 2x ATR(14)
 chandelier stop that never loosens or moves behind entry. The research child rows expose all policies side by
 side for comparison. A manual Backtesting run may explicitly select the prior
 `legacy-score-tiered-2r-4r-v1` manager instead; that choice is frozen in the run
 configuration and affects official realized-R and portfolio metrics without changing
-live/demo automation. Manual runs may also select `set-and-forget-2r-v1`, which retains
-the original stop and full 2R target without interim management; mandatory Friday
-liquidation remains a global safety rule.
+live/demo automation. Fresh manual runs default to `set-and-forget-2r-v1`, which retains
+the original stop and a configurable fixed target without interim management;
+mandatory Friday liquidation remains a global safety rule. The initial target selection
+is the automatic opposing-base mode. Its optional fixed target-R value
+defaults to 2, is bounded from 1 through 20, and becomes both the take-profit multiple
+and the minimum opposing-zone runway for that run. Its alternative `opposing-base`
+mode fixes take-profit at the proximal edge first touched on the most recent opposing
+base that was causally usable at entry. It fails closed when no such base exists ahead
+of entry, and it retains the hard minimum runway gate: the opposing-base touch must
+offer at least 2.00R from executable entry. A value below 2R rejects the setup before
+scoring; exactly 2.00R passes.
+Replay preserves that target base ID, target price, and resulting R multiple so a chart
+does not substitute a nearer continuation or a hardcoded 2R marker.
+Manual runs may additionally select `bank-half-untouched-stop-runner-v1`. It
+banks 50% at +1R and removes the take-profit while retaining the original -1R
+stop unchanged for the runner. It never moves to break-even or trails; an
+original-stop exit after the partial totals 0.00R, and mandatory Friday
+liquidation remains active.
+`adaptive-attack-scale-out-runner-v1` adds causal +1R/+2R/+3R scale-outs while
+retaining the original stop. Each milestone banks 25% of the original position
+when the preceding 0.5R completed within 30 minutes, otherwise up to 50%, while
+always preserving a final 25% runner. Treat this as a research hypothesis until
+same-data and out-of-sample comparisons establish robust expectancy and drawdown.
+After a fast-momentum 25% partial, a 0.5R retracement from the prior favorable
+extreme banks all exposure above the final 25% runner as a causal risk-off
+response. A slow 50% partial does not trigger that redundant reduction.
 
 Manual backtests may opt into the versioned `yolo-reverse-final-signal-v1` execution
 assumption. It reverses only the final qualified side and mirrors the original R geometry;
 it does not retrain, rescore, or alter live/demo signals. Keep YOLO runs labeled and
 separate from official-direction baselines.
+Manual backtests may separately disable the default `Close trades before weekend`
+assumption. Disabled runs omit simulated Friday liquidation but retain the weekly
+entry-hours gate unless that independent gate is also disabled. This setting is
+backtest-only and never changes live/demo weekend safety.
 
-Strategy `0.42` applies the same account-wide admission policy to live/demo orders and
+Strategy `0.49` applies the same account-wide admission policy to live/demo orders and
 the chronological portfolio projection. A candidate must leave at least 50% of NAV as
 available margin, keep projected margin-closeout usage at or below 25%, and keep known
 plus conservatively estimated open stop risk at or below 2% of NAV. Live/demo workers

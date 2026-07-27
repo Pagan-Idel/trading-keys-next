@@ -13,7 +13,6 @@ import {
   validateFinalEntryAfterEngulf,
   validateGoldilocksDepartureQuality,
   validateGoldilocksEntryProximity,
-  validateGoldilocksFirstTouchCandle,
   validateGoldilocksZoneApproach,
   validateTwoToOneRunway,
   type GoldilocksEntryProximityCheck,
@@ -29,6 +28,7 @@ import {
   annotateConfluenceAt,
   buildGoldilocksHistoryChunked,
   buildGoldilocksLegs,
+  getGoldilocksStructureBreakingLegDirection,
   getGoldilocksTrend,
   toStrategyCandles,
 } from "../../../utils/goldilocksScanner";
@@ -45,10 +45,12 @@ import { scoreGoldilocksSetup } from "../../../utils/goldilocksScoring";
 import { getBacktestTradeReplay } from "../../../utils/backtestStore";
 import {
   annotateReplayZonePurityAt,
+  buildStoredReplayZoneFallback,
   filterReplayRejectedFirstTouchesAt,
   getStrategyReplayZoneFormationDetails,
   getStrategyReplayBaseContextStart,
   getStrategyReplayContextAnchor,
+  getStrategyReplayForwardPageWindow,
   getStrategyReplayRequestEnd,
   getStrategyReplayWindow,
   isStoredReplayZoneMatch,
@@ -64,14 +66,14 @@ import {
   getGoldilocksZoneExpiresAt,
 } from "../../../utils/zoneAge";
 import { measureGoldilocksApproachPressure } from "../../../utils/approachPressure";
-import { GOLDILOCKS_DEFAULT_MANAGEMENT } from "../../../utils/goldilocksTradeManagement";
+import {
+  GOLDILOCKS_DEFAULT_MANAGEMENT,
+  GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID,
+  GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
+  GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+} from "../../../utils/goldilocksTradeManagement";
 
 const replayCache = new Map<string, { expiresAt: number; payload: unknown }>();
-
-const isBullishPair = (left: string, right: string) =>
-  ["LL", "HL", "L"].includes(left) && ["HH", "LH", "H"].includes(right);
-const isBearishPair = (left: string, right: string) =>
-  ["HH", "LH", "H"].includes(left) && ["LL", "HL", "L"].includes(right);
 
 const zoneExpiresAt = getGoldilocksZoneExpiresAt;
 
@@ -102,11 +104,10 @@ const buildZoneHistory = (
   for (let index = 0; index < swings.length - 1; index += 1) {
     const left = swings[index];
     const right = swings[index + 1];
-    const direction = isBullishPair(left.swing, right.swing)
-      ? "bullish"
-      : isBearishPair(left.swing, right.swing)
-        ? "bearish"
-        : null;
+    const direction = getGoldilocksStructureBreakingLegDirection(
+      left.swing,
+      right.swing,
+    );
     if (!direction) continue;
     const startIndex = candles.findIndex((candle) => candle.time === left.time);
     const endIndex = candles.findIndex((candle) => candle.time === right.time);
@@ -162,12 +163,15 @@ export default async function handler(
   const storedZoneCandleTime = Number(
     storedReplayForRequest?.zoneId.match(/(\d+)$/)?.[1],
   );
+  const storedTargetZoneCandleTime = Number(
+    storedReplayForRequest?.setAndForgetTargetZoneId?.match(/(\d+)$/)?.[1],
+  );
   const supportedTimeframes = ["M1", "M5", "M15", "H1"];
   if (!supportedTimeframes.includes(timeframe)) {
     return res.status(400).json({ error: "Unsupported timeframe" });
   }
   const replayCacheKey = Number.isFinite(requestedTradeTime)
-      ? `all-zone-base-context-v7:${strategyStack.id}:${pair}:${timeframe}:${requestedTradeTime}:${requestedTradeId ?? "latest"}:${Number.isFinite(requestedExitTime) ? requestedExitTime : "stored"}`
+    ? `stored-zone-fallback-v9:${strategyStack.id}:${pair}:${timeframe}:${requestedTradeTime}:${requestedTradeId ?? "latest"}:${Number.isFinite(requestedExitTime) ? requestedExitTime : "stored"}`
     : "";
   const cachedReplay = replayCacheKey
     ? replayCache.get(replayCacheKey)
@@ -198,20 +202,18 @@ export default async function handler(
             confirmationEnd: requestedBefore,
           }
         : Number.isFinite(requestedAfter)
-          ? {
-              chartStart:
-                requestedAfter +
-                (GOLDILOCKS_TIMEFRAME_SECONDS[timeframe] ?? 300),
-              chartEnd:
-                requestedAfter +
-                (GOLDILOCKS_TIMEFRAME_SECONDS[timeframe] ?? 300) * 1500,
-              confirmationStart:
-                requestedAfter +
-                (GOLDILOCKS_TIMEFRAME_SECONDS[timeframe] ?? 300),
-              confirmationEnd:
-                requestedAfter +
-                (GOLDILOCKS_TIMEFRAME_SECONDS[timeframe] ?? 300) * 1500,
-            }
+          ? (() => {
+              const forward = getStrategyReplayForwardPageWindow(
+                requestedAfter,
+                GOLDILOCKS_TIMEFRAME_SECONDS[timeframe] ?? 300,
+              );
+              return {
+                chartStart: forward.start,
+                chartEnd: forward.end,
+                confirmationStart: forward.start,
+                confirmationEnd: forward.end,
+              };
+            })()
           : undefined;
     const replayWindow = storedReplayForRequest
       ? getStrategyReplayWindow(
@@ -219,9 +221,11 @@ export default async function handler(
           Number.isFinite(requestedExitTime)
             ? requestedExitTime
             : storedReplayForRequest.outcomeTime,
-          Number.isFinite(storedZoneCandleTime)
-            ? storedZoneCandleTime
-            : undefined,
+          Number.isFinite(storedTargetZoneCandleTime)
+            ? Math.min(storedZoneCandleTime, storedTargetZoneCandleTime)
+            : Number.isFinite(storedZoneCandleTime)
+              ? storedZoneCandleTime
+              : undefined,
         )
       : researchZoneWindow;
     const replayWindowStart = replayWindow?.chartStart;
@@ -258,11 +262,10 @@ export default async function handler(
     for (let index = 0; index < swings.length - 1; index += 1) {
       const left = swings[index];
       const right = swings[index + 1];
-      const direction = isBullishPair(left.swing, right.swing)
-        ? "bullish"
-        : isBearishPair(left.swing, right.swing)
-          ? "bearish"
-          : null;
+      const direction = getGoldilocksStructureBreakingLegDirection(
+        left.swing,
+        right.swing,
+      );
       if (!direction) continue;
       const startIndex = candles.findIndex(
         (candle) => candle.time === left.time,
@@ -289,11 +292,10 @@ export default async function handler(
     for (let index = swings.length - 2; index >= 0; index -= 1) {
       const left = swings[index];
       const right = swings[index + 1];
-      const direction = isBullishPair(left.swing, right.swing)
-        ? "bullish"
-        : isBearishPair(left.swing, right.swing)
-          ? "bearish"
-          : null;
+      const direction = getGoldilocksStructureBreakingLegDirection(
+        left.swing,
+        right.swing,
+      );
       if (!direction) continue;
       const startIndex = candles.findIndex(
         (candle) => candle.time === left.time,
@@ -399,6 +401,23 @@ export default async function handler(
     const nearestZones = [nearestDemand, nearestSupply].filter(
       (zone): zone is NonNullable<typeof zone> => Boolean(zone),
     );
+    const storedTargetZone =
+      storedReplayForRequest?.setAndForgetTargetMode === "opposing-base"
+        ? displayZonePool.find(
+            (zone) =>
+              zone.kind === "base" &&
+              zone.side !==
+                (storedReplayForRequest.direction === "BUY"
+                  ? "demand"
+                  : "supply") &&
+              (zone.id === storedReplayForRequest.setAndForgetTargetZoneId ||
+                (Number.isFinite(storedTargetZoneCandleTime) &&
+                  zone.candleTime === storedTargetZoneCandleTime)) &&
+              (storedReplayForRequest.direction === "SELL"
+                ? zone.high === storedReplayForRequest.takeProfit
+                : zone.low === storedReplayForRequest.takeProfit),
+          )
+        : undefined;
     const detectedRecentBase = detection.zones.find(
       (zone) => zone.kind === "base",
     );
@@ -422,6 +441,7 @@ export default async function handler(
     const displayPurityCutoff = replayDisplayTime ?? Number.POSITIVE_INFINITY;
     const displayZones = [
       ...nearestZones,
+      ...(storedTargetZone ? [storedTargetZone] : []),
       ...(recentSwingBase ? [recentSwingBase] : []),
       ...(recentDemandBase ? [recentDemandBase] : []),
       ...(recentSupplyBase ? [recentSupplyBase] : []),
@@ -630,23 +650,6 @@ export default async function handler(
               candle.high >= zone.low &&
               candle.low <= zone.high
             ) {
-              const firstTouch = validateGoldilocksFirstTouchCandle(
-                zone,
-                candle,
-              );
-              if (!firstTouch.allowed) {
-                rejectedFirstTouches.push({
-                  zoneId: zone.id,
-                  zoneSide: zone.side,
-                  time: candle.time,
-                  candle,
-                  touchRangeZoneFraction: firstTouch.touchRangeZoneFraction,
-                  maxTouchRangeZoneFraction:
-                    firstTouch.maxTouchRangeZoneFraction,
-                  reason: firstTouch.reason,
-                });
-                break;
-              }
               touchState.touchCandleIndex = index;
             }
           }
@@ -859,39 +862,62 @@ export default async function handler(
       currentStrategyVersion,
     );
     const storedZoneForReplay = compatibleTimeframeReplay
-      ? deepZoneHistory.zones.find(
-          (zone) => isStoredReplayZoneMatch(zone, storedReplayForRequest),
+      ? deepZoneHistory.zones.find((zone) =>
+          isStoredReplayZoneMatch(zone, storedReplayForRequest),
         )
       : undefined;
+    const storedZoneCorridor = storedReplayForRequest?.zoneCorridors?.find(
+      (corridor) => corridor.timeframe === strategyStack.zone,
+    );
+    const storedReplayZone: GoldilocksZone | undefined =
+      storedZoneForReplay ??
+      (compatibleTimeframeReplay &&
+      storedReplayForRequest &&
+      Number.isFinite(storedZoneCandleTime)
+        ? buildStoredReplayZoneFallback({
+            zoneId: storedReplayForRequest.zoneId,
+            zoneKind: storedReplayForRequest.zoneKind as GoldilocksZone["kind"],
+            direction: storedReplayForRequest.direction,
+            zoneCandleTime: storedZoneCandleTime,
+            firstOutsideTime: storedReplayForRequest.firstOutsideTime,
+            entry: storedReplayForRequest.entry,
+            stopLoss: storedReplayForRequest.stopLoss,
+            takeProfit: storedReplayForRequest.takeProfit,
+            priorTouches: storedReplayForRequest.priorTouches,
+            maxPenetration: storedReplayForRequest.maxPenetration,
+            demandHigh: storedZoneCorridor?.demandHigh,
+            supplyLow: storedZoneCorridor?.supplyLow,
+          })
+        : undefined);
     const storedConfirmationIndex = compatibleTimeframeReplay
       ? historicalCandles.findIndex(
           (candle) => candle.time === storedReplayForRequest!.confirmationTime,
         )
       : -1;
     const storedTouchState = createHistoricalZoneTouchState();
-    if (storedZoneForReplay && storedConfirmationIndex > 0) {
+    if (storedReplayZone && storedConfirmationIndex > 0) {
       for (
         let index = firstCandleAfter(
           historicalCandles,
-          storedZoneForReplay.availableAt ?? storedZoneForReplay.candleTime,
+          storedReplayZone.availableAt ?? storedReplayZone.candleTime,
         );
         index < storedConfirmationIndex;
         index += 1
       ) {
         const candle = historicalCandles[index];
         if (
-          storedZoneForReplay.invalidatedAt &&
-          candle.time >= storedZoneForReplay.invalidatedAt
+          storedReplayZone.invalidatedAt &&
+          candle.time >= storedReplayZone.invalidatedAt
         )
           break;
         const broken =
-          storedZoneForReplay.side === "demand"
-            ? candle.low < storedZoneForReplay.low
-            : candle.high > storedZoneForReplay.high;
+          storedReplayZone.side === "demand"
+            ? candle.low < storedReplayZone.low
+            : candle.high > storedReplayZone.high;
         if (broken) break;
         if (storedTouchState.touchCandleIndex < 0) {
           const armed = summarizeZoneTimeframeTouches(
-            storedZoneForReplay,
+            storedReplayZone,
             zoneTouchCandles,
             zoneCandleSeconds,
             candle.time,
@@ -899,49 +925,58 @@ export default async function handler(
           if (
             armed.firstOutsideTime !== undefined &&
             candle.time >= armed.firstOutsideTime &&
-            candle.high >= storedZoneForReplay.low &&
-            candle.low <= storedZoneForReplay.high
+            candle.high >= storedReplayZone.low &&
+            candle.low <= storedReplayZone.high
           )
             storedTouchState.touchCandleIndex = index;
         }
       }
     }
-    const storedTouchCandle =
-      storedTouchState.touchCandleIndex >= 0
-        ? historicalCandles[storedTouchState.touchCandleIndex]
-        : undefined;
     const storedConfirmationCandle =
       storedConfirmationIndex >= 0
         ? historicalCandles[storedConfirmationIndex]
         : undefined;
+    if (
+      storedReplayForRequest?.confirmationMode === "touch-entry" &&
+      storedConfirmationIndex >= 0
+    ) {
+      storedTouchState.touchCandleIndex = storedConfirmationIndex;
+    }
+    const storedTouchCandle =
+      storedTouchState.touchCandleIndex >= 0
+        ? historicalCandles[storedTouchState.touchCandleIndex]
+        : undefined;
     const storedZoneAgeSeconds =
-      storedReplayForRequest && storedZoneForReplay
-        ? storedReplayForRequest.zoneAgeSeconds ??
+      storedReplayForRequest && storedReplayZone
+        ? (storedReplayForRequest.zoneAgeSeconds ??
           getGoldilocksZoneAgeSeconds(
-            storedZoneForReplay.candleTime,
+            storedReplayZone.candleTime,
             storedReplayForRequest.confirmationTime +
-              (GOLDILOCKS_TIMEFRAME_SECONDS[strategyStack.confirmation] ?? 300),
-          )
+              (storedReplayForRequest.confirmationMode === "touch-entry"
+                ? 0
+                : (GOLDILOCKS_TIMEFRAME_SECONDS[strategyStack.confirmation] ??
+                  300)),
+          ))
         : undefined;
     const storedZoneMeetsCurrentAgeRule =
       storedZoneAgeSeconds !== undefined &&
       storedZoneAgeSeconds <= GOLDILOCKS_MAX_ZONE_AGE_SECONDS;
     const storedApproachPressure =
       storedZoneMeetsCurrentAgeRule &&
-      storedZoneForReplay &&
+      storedReplayZone &&
       storedTouchState.touchCandleIndex >= 0 &&
       storedConfirmationIndex >= storedTouchState.touchCandleIndex
         ? measureGoldilocksApproachPressure(
-          storedZoneForReplay,
-          historicalCandles,
-          storedTouchState.touchCandleIndex,
-          storedConfirmationIndex,
-        )
+            storedReplayZone,
+            historicalCandles,
+            storedTouchState.touchCandleIndex,
+            storedConfirmationIndex,
+          )
         : undefined;
     const storedPurity =
-      storedZoneForReplay && storedTouchCandle
+      storedReplayZone && storedTouchCandle
         ? summarizeConfirmationTimeframeTouches(
-            storedZoneForReplay,
+            storedReplayZone,
             historicalCandles,
             confirmationCandleSeconds,
             storedTouchCandle.time,
@@ -965,9 +1000,9 @@ export default async function handler(
         )
       : [];
     const storedProximity =
-      storedZoneForReplay && storedTouchCandle && storedConfirmationCandle
+      storedReplayZone && storedTouchCandle && storedConfirmationCandle
         ? validateGoldilocksEntryProximity(
-            storedZoneForReplay,
+            storedReplayZone,
             storedTouchCandle,
             storedConfirmationCandle.close,
             storedReplayForRequest?.entry,
@@ -981,25 +1016,125 @@ export default async function handler(
           storedReplayForRequest.takeProfit - storedReplayForRequest.entry,
         )
       : 0;
-    const storedExitPrice =
-      storedReplayForRequest?.exitReason === "weekend_close"
-        ? storedReplayForRequest.direction === "BUY"
-          ? storedReplayForRequest.entry +
-            storedReplayForRequest.realizedR * storedRisk
-          : storedReplayForRequest.entry -
-            storedReplayForRequest.realizedR * storedRisk
-        : undefined;
-    const storedPartialExitTime =
+    const storedManagerHasOneRPartial =
       storedReplayForRequest?.tradeManager ===
-        GOLDILOCKS_DEFAULT_MANAGEMENT.policyId &&
+        GOLDILOCKS_DEFAULT_MANAGEMENT.policyId ||
+      storedReplayForRequest?.tradeManager ===
+        GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID ||
+      storedReplayForRequest?.tradeManager ===
+        GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID;
+    const storedPartialExitTime =
+      storedManagerHasOneRPartial &&
       storedReplayForRequest.exitReason !== "stop" &&
-      (storedReplayForRequest.realizedR ?? 0) >= 0.5
+      Number.isFinite(
+        storedReplayForRequest.marketPath?.firstReachedAt?.["+1R"],
+      )
         ? storedReplayForRequest.marketPath?.firstReachedAt?.["+1R"]
+        : undefined;
+    const storedAdaptiveScaleOuts =
+      storedReplayForRequest?.tradeManager ===
+      GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID
+        ? (() => {
+            const reached =
+              storedReplayForRequest.marketPath?.firstReachedAt ?? {};
+            const exits: Array<{
+              time: number;
+              price: number;
+              fraction: number;
+              realizedR: number;
+              milestoneR: number;
+              momentum: "fast" | "slow";
+              attackSeconds: number | null;
+            }> = [];
+            let remaining = 1;
+            for (const milestoneR of [1, 2, 3]) {
+              const time = reached[`+${milestoneR}R`];
+              if (!Number.isFinite(time) || remaining <= 0.25) continue;
+              const halfTime = reached[`+${milestoneR - 0.5}R`];
+              const attackSeconds = Number.isFinite(halfTime)
+                ? Math.max(0, time - halfTime)
+                : null;
+              const momentum =
+                attackSeconds !== null && attackSeconds <= 30 * 60
+                  ? ("fast" as const)
+                  : ("slow" as const);
+              const fraction = Math.min(
+                momentum === "fast" ? 0.25 : 0.5,
+                remaining - 0.25,
+              );
+              if (fraction <= 0) continue;
+              remaining -= fraction;
+              exits.push({
+                time,
+                price:
+                  storedReplayForRequest.direction === "BUY"
+                    ? storedReplayForRequest.entry + milestoneR * storedRisk
+                    : storedReplayForRequest.entry - milestoneR * storedRisk,
+                fraction,
+                realizedR: fraction * milestoneR,
+                milestoneR,
+                momentum,
+                attackSeconds,
+              });
+            }
+            return exits;
+          })()
+        : undefined;
+    const storedExitR = (() => {
+      if (!storedReplayForRequest) return undefined;
+      switch (storedReplayForRequest.exitReason) {
+        case "stop":
+          return -1;
+        case "break_even":
+        case "one_r_protected":
+          return 0;
+        case "target":
+          return storedReward / storedRisk;
+        case "runner_stop":
+          if (
+            storedReplayForRequest.tradeManager ===
+              GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID ||
+            storedReplayForRequest.tradeManager ===
+              GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID
+          )
+            return -1;
+          if (
+            storedReplayForRequest.tradeManager ===
+            GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+          )
+            return 1;
+          return (
+            ((storedReplayForRequest.realizedR ?? 0) -
+              GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR *
+                GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction) /
+            (1 - GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction)
+          );
+        case "runner_target":
+          return storedReplayForRequest.tradeManager ===
+            GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID
+            ? 4
+            : 2;
+        case "weekend_close":
+          return Number.isFinite(storedPartialExitTime)
+            ? ((storedReplayForRequest.realizedR ?? 0) -
+                GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR *
+                  GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction) /
+                (1 - GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction)
+            : storedReplayForRequest.realizedR;
+        default:
+          return undefined;
+      }
+    })();
+    const storedExitPrice =
+      storedReplayForRequest && Number.isFinite(storedExitR)
+        ? storedReplayForRequest.direction === "BUY"
+          ? storedReplayForRequest.entry + storedExitR! * storedRisk
+          : storedReplayForRequest.entry - storedExitR! * storedRisk
         : undefined;
     const storedEntrySetup =
       compatibleTimeframeReplay &&
       storedReplayForRequest &&
-      storedZoneForReplay &&
+      storedReplayZone &&
       storedTouchCandle &&
       storedConfirmationCandle &&
       storedProximity?.allowed
@@ -1007,32 +1142,38 @@ export default async function handler(
             tradeId: storedReplayForRequest.tradeId,
             firstOutsideTime: currentStrategyReplay
               ? storedReplayForRequest.firstOutsideTime
-              : (storedPurity?.firstOutsideTime ?? storedReplayForRequest.firstOutsideTime),
+              : (storedPurity?.firstOutsideTime ??
+                storedReplayForRequest.firstOutsideTime),
             priorTouchDetails: reconcileStoredReplayPriorTouchDetails(
               currentStrategyReplay
                 ? storedReplayForRequest.priorTouches
-                : (storedPurity?.touches ?? storedReplayForRequest.priorTouches),
+                : (storedPurity?.touches ??
+                    storedReplayForRequest.priorTouches),
               currentStrategyReplay
                 ? storedReplayForRequest.firstOutsideTime
-                : (storedPurity?.firstOutsideTime ?? storedReplayForRequest.firstOutsideTime),
+                : (storedPurity?.firstOutsideTime ??
+                    storedReplayForRequest.firstOutsideTime),
               storedTouchCandle.time,
               storedPurity?.touchDetails ?? [],
             ),
             formationCandleDetails: storedFormationCandleDetails,
             zone: {
-              ...storedZoneForReplay,
+              ...storedReplayZone,
               touches: currentStrategyReplay
                 ? storedReplayForRequest.priorTouches
-                : (storedPurity?.touches ?? storedReplayForRequest.priorTouches),
+                : (storedPurity?.touches ??
+                  storedReplayForRequest.priorTouches),
               maxPenetration: 0,
               departureInsideCandleCount:
                 storedZoneFormation?.departureInsideCandleCount ?? 0,
               timeframeConfluence: displayZonesWithConfluence.find(
-                (zone) => zone.id === storedZoneForReplay.id,
+                (zone) => zone.id === storedReplayZone.id,
               )?.timeframeConfluence,
             },
             zoneAgeSeconds: storedZoneAgeSeconds,
             confirmationTimeframe: strategyStack.confirmation,
+            confirmationMode:
+              storedReplayForRequest.confirmationMode ?? "close-through",
             confirmationTime: storedReplayForRequest.confirmationTime,
             confirmationCandle: storedConfirmationCandle,
             touchCandle: storedTouchCandle,
@@ -1066,18 +1207,30 @@ export default async function handler(
             >,
             realizedR: storedReplayForRequest.realizedR,
             tradeManager: storedReplayForRequest.tradeManager,
-            partialExit:
-              Number.isFinite(storedPartialExitTime)
-                ? {
-                    time: storedPartialExitTime!,
-                    price: storedReplayForRequest.oneR,
-                    fraction:
-                      GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
-                    realizedR:
-                      GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR *
-                      GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
-                  }
-                : undefined,
+            setAndForgetTargetMode:
+              storedReplayForRequest.setAndForgetTargetMode,
+            setAndForgetTargetZoneId:
+              storedReplayForRequest.setAndForgetTargetZoneId,
+            partialExit: Number.isFinite(storedPartialExitTime)
+              ? {
+                  time: storedPartialExitTime!,
+                  price: storedReplayForRequest.oneR,
+                  fraction: GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
+                  realizedR:
+                    GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR *
+                    GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
+                }
+              : undefined,
+            partialExits:
+              storedReplayForRequest.partialExits?.map((partial) => ({
+                ...partial,
+                price:
+                  storedReplayForRequest.direction === "BUY"
+                    ? storedReplayForRequest.entry +
+                      partial.milestoneR * storedRisk
+                    : storedReplayForRequest.entry -
+                      partial.milestoneR * storedRisk,
+              })) ?? storedAdaptiveScaleOuts,
             approachPressure: storedApproachPressure,
             zoneCorridors: storedReplayForRequest.zoneCorridors,
             marketPath: storedReplayForRequest.marketPath,
@@ -1087,15 +1240,7 @@ export default async function handler(
               storedReplayForRequest.outcome === "WIN"
                 ? ("win" as const)
                 : ("loss" as const),
-            exitReason:
-              storedReplayForRequest.exitReason === "stop"
-                ? ("stop" as const)
-                : storedReplayForRequest.exitReason === "weekend_close"
-                  ? ("weekend_close" as const)
-                  : storedReplayForRequest.exitReason === "target" ||
-                      storedReplayForRequest.exitReason === "runner_target"
-                    ? ("target" as const)
-                    : ("break_even" as const),
+            exitReason: storedReplayForRequest.exitReason,
             exitPrice: storedExitPrice,
             breakEvenActivated: storedReplayForRequest.exitReason !== "stop",
             outcomeTime: storedReplayForRequest.outcomeTime,
@@ -1126,18 +1271,7 @@ export default async function handler(
                   ? ("win" as const)
                   : reconstructedEntrySetup.outcome,
             exitReason:
-              storedReplay?.exitReason === "stop"
-                ? ("stop" as const)
-                : storedReplay?.exitReason === "break_even" ||
-                    storedReplay?.exitReason === "runner_stop" ||
-                    storedReplay?.exitReason === "one_r_protected"
-                  ? ("break_even" as const)
-                  : storedReplay?.exitReason === "weekend_close"
-                    ? ("weekend_close" as const)
-                    : storedReplay?.exitReason === "target" ||
-                        storedReplay?.exitReason === "runner_target"
-                      ? ("target" as const)
-                      : reconstructedEntrySetup.exitReason,
+              storedReplay?.exitReason ?? reconstructedEntrySetup.exitReason,
             exitPrice: storedExitPrice,
           }
         : reconstructedEntrySetup;

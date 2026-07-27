@@ -19,10 +19,12 @@ import {
   normalizeGoldilocksBacktestGates,
   normalizeGoldilocksBacktestTweaks,
   normalizeGoldilocksScoreWeights,
+  GOLDILOCKS_CONFIRMATION_MODES,
   rebalanceGoldilocksScoreCategories,
   expandGoldilocksScoreCategoryWeights,
   type GoldilocksBacktestGates,
   type GoldilocksBacktestTweaks,
+  type GoldilocksConfirmationMode,
   type GoldilocksScoreWeights,
   type GoldilocksScoreCategory,
   type GoldilocksTimeframeProfileId,
@@ -30,9 +32,10 @@ import {
 import { calculateBacktestPerformance } from "../utils/backtestAnalytics";
 import {
   GOLDILOCKS_BACKTEST_MANAGERS,
-  GOLDILOCKS_DEFAULT_MANAGEMENT,
   GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
   GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+  GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+  GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID,
   getGoldilocksBacktestManager,
   getGoldilocksBacktestManagerForRun,
   type GoldilocksBacktestManagerId,
@@ -61,14 +64,20 @@ const TweakField = styled.label`
   color: #8995a6;
   font-size: 0.64rem;
   font-weight: 800;
-  span { color: #dce7f5; }
+  span {
+    color: #dce7f5;
+  }
   small {
     color: #77869a;
     font-size: 0.61rem;
     font-weight: 650;
     line-height: 1.4;
   }
-  span[title] { cursor: help; text-decoration: underline dotted #647287; text-underline-offset: 3px; }
+  span[title] {
+    cursor: help;
+    text-decoration: underline dotted #647287;
+    text-underline-offset: 3px;
+  }
   input {
     width: 100%;
     border: 1px solid #343d4b;
@@ -83,7 +92,9 @@ const TweakField = styled.label`
     padding: 0;
     accent-color: #61efb3;
   }
-  &[data-tooltip] { cursor: help; }
+  &[data-tooltip] {
+    cursor: help;
+  }
   &[data-tooltip]::after {
     content: attr(data-tooltip);
     position: absolute;
@@ -140,8 +151,13 @@ const RestoreWeightsButton = styled.button`
   font-size: 0.68rem;
   font-weight: 850;
   cursor: pointer;
-  &:hover:not(:disabled) { background: #382043; }
-  &:disabled { opacity: 0.45; cursor: default; }
+  &:hover:not(:disabled) {
+    background: #382043;
+  }
+  &:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
 `;
 const RuleDisclosure = styled.details`
   margin-top: 18px;
@@ -159,9 +175,15 @@ const RuleDisclosure = styled.details`
     text-transform: uppercase;
     user-select: none;
   }
-  summary:hover { background: #121925; }
-  &[open] summary { border-bottom: 1px solid #293445; }
-  .rule-body { padding: 0 14px 16px; }
+  summary:hover {
+    background: #121925;
+  }
+  &[open] summary {
+    border-bottom: 1px solid #293445;
+  }
+  .rule-body {
+    padding: 0 14px 16px;
+  }
 `;
 const Hero = styled.section`
   padding: 24px;
@@ -415,6 +437,28 @@ const TradeSearch = styled.form`
     cursor: pointer;
   }
 `;
+const TradeHeadActions = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+`;
+const ResetTradeSortButton = styled.button`
+  border: 1px solid #3b4656;
+  background: #151a22;
+  color: #c8d1df;
+  border-radius: 9px;
+  padding: 8px 12px;
+  font-size: 0.72rem;
+  font-weight: 850;
+  cursor: pointer;
+  &:hover,
+  &:focus-visible {
+    border-color: #7dffd4;
+    color: #7dffd4;
+  }
+`;
 const TradeSearchResult = styled.div`
   margin: 12px 18px 0;
   padding: 11px 13px;
@@ -601,6 +645,10 @@ type RunConfig = {
   leverage?: number;
   riskProfile?: RiskProfile;
   tradeManager?: GoldilocksBacktestManagerId;
+  confirmationMode?: GoldilocksConfirmationMode;
+  setAndForgetTargetR?: number;
+  setAndForgetTargetMode?: "fixed-r" | "opposing-base";
+  closeTradesBeforeWeekend?: boolean;
   reverseFinalSignal?: boolean;
   protectedWinR?: number;
   timeframeProfile?: GoldilocksTimeframeProfileId;
@@ -614,6 +662,7 @@ type RunConfig = {
 };
 type Run = {
   id: string;
+  runUid?: string;
   status: string;
   label: string;
   createdAt: string;
@@ -678,6 +727,7 @@ type RunResult = Run & {
   maxDrawdownPercent: number;
   peakMargin: number;
   marginBlocked: number;
+  marginBlockReasons?: Array<{ reason: string; count: number }>;
   acceptedTrades: number;
 };
 type Dashboard = {
@@ -688,6 +738,25 @@ type Dashboard = {
   pairs: Array<Record<string, any>>;
   pairResults: PairResult[];
   events: Array<Record<string, any>>;
+  leaderboard: Array<{
+    runUid: string;
+    sourceRunId: string;
+    label: string;
+    completedAt: string;
+    netR: number;
+    config: RunConfig;
+    metrics: {
+      totalSignals: number;
+      acceptedTrades: number;
+      marginBlocked: number;
+      expectancyR: number | null;
+      profitFactor: number | "infinite" | null;
+      netR: number;
+      maxDrawdownR: number;
+      accountReturn: number;
+      endingBalance: number;
+    };
+  }>;
 };
 type SortDirection = "asc" | "desc";
 type ScoreComponent = { name: string; points: number; detail: string };
@@ -708,9 +777,24 @@ const backtestTweakFields: Array<{
   step: number;
   max: number;
 }> = [
-  { key: "maximumPriorTouches", label: "Zone validity · maximum prior touches", short: "3 TOUCHES", explanation: "Maximum completed confirmation-timeframe touch candles before the trade trigger. Three remains valid; the fourth invalidates the zone.", step: 1, max: 3 },
-  { key: "maxTouchRangeZoneFraction", label: "Entry proximity · first-touch range", short: "50% OF ZONE", explanation: "The entire first confirmation-timeframe touch candle may span no more than 50% of one zone width.", step: 0.05, max: 1 },
-  { key: "maxEntryDistanceZoneFraction", label: "Entry proximity · executable distance", short: "50% OF ZONE", explanation: "The executable price may be no more than 50% of one zone width beyond the proximal edge. Historical backtests use the confirmation close because bid/ask history is unavailable.", step: 0.05, max: 1 },
+  {
+    key: "maximumPriorTouches",
+    label: "Zone validity · maximum prior touches",
+    short: "3 TOUCHES",
+    explanation:
+      "Maximum completed confirmation-timeframe touch candles before the trade trigger. Three remains valid; the fourth invalidates the zone.",
+    step: 1,
+    max: 3,
+  },
+  {
+    key: "maxEntryDistanceZoneFraction",
+    label: "Entry proximity · executable distance",
+    short: "50% OF ZONE",
+    explanation:
+      "The executable price may be no more than 50% of one zone width beyond the proximal edge. Historical backtests use the confirmation close because bid/ask history is unavailable.",
+    step: 0.05,
+    max: 1,
+  },
 ];
 const backtestGateFields: Array<{
   key: keyof GoldilocksBacktestGates;
@@ -718,24 +802,88 @@ const backtestGateFields: Array<{
   value: string;
   explanation: string;
 }> = [
-  { key: "weeklyMarketHours", label: "Weekly market hours", value: "Friday 16:00 → Sunday 18:00 New York blocked", explanation: "Matches the chart audit's weekly market-hours gate and prevents entries around the weekly close and reopen." },
-  { key: "holiday", label: "Historical holiday", value: "Configured holiday windows blocked", explanation: "Matches the chart audit's historical-holiday gate." },
-  { key: "pairSession", label: "Historical pair session", value: "At least one pair currency session active", explanation: "Matches the chart audit's historical pair-session gate." },
-  { key: "zoneFormationNews", label: "Zone formation news", value: "High-impact news cannot overlap base through departure", explanation: "Missing historical coverage fails closed. This is separate from the entry-time news gate." },
-  { key: "entryProximity", label: "Entry proximity", value: "Touch range ≤ 50% · executable distance ≤ 50%", explanation: "Matches the chart's entry-proximity hard gate. The numeric limits below are the authoritative defaults." },
-  { key: "entryNews", label: "Historical news", value: "Either currency blocked around high-impact news", explanation: "Matches the chart audit's historical-news gate; missing coverage fails closed." },
-  { key: "twoToOneRunway", label: "2:1 runway", value: "Clear path from entry to the exact 2R target", explanation: "Matches the chart audit's 2:1-runway gate and checks the nearest active opposing zone." },
+  {
+    key: "weeklyMarketHours",
+    label: "Weekly market hours",
+    value: "Friday 16:00 → Sunday 18:00 New York blocked",
+    explanation:
+      "Matches the chart audit's weekly market-hours gate and prevents entries around the weekly close and reopen.",
+  },
+  {
+    key: "holiday",
+    label: "Historical holiday",
+    value: "Configured holiday windows blocked",
+    explanation: "Matches the chart audit's historical-holiday gate.",
+  },
+  {
+    key: "pairSession",
+    label: "Historical pair session",
+    value: "At least one pair currency session active",
+    explanation: "Matches the chart audit's historical pair-session gate.",
+  },
+  {
+    key: "zoneFormationNews",
+    label: "Zone formation news",
+    value: "High-impact news cannot overlap base through departure",
+    explanation:
+      "Missing historical coverage fails closed. This is separate from the entry-time news gate.",
+  },
+  {
+    key: "entryProximity",
+    label: "Entry proximity",
+    value: "Executable distance ≤ 50% of zone",
+    explanation:
+      "Touch-candle size is diagnostic only. This hard gate checks the modeled executable entry; the final runway gate separately requires the configured target from that entry.",
+  },
+  {
+    key: "entryNews",
+    label: "Historical news",
+    value: "Either currency blocked around high-impact news",
+    explanation:
+      "Matches the chart audit's historical-news gate; missing coverage fails closed.",
+  },
+  {
+    key: "twoToOneRunway",
+    label: "2:1 runway",
+    value: "Clear path from entry to the exact 2R target",
+    explanation:
+      "Matches the chart audit's 2:1-runway gate and checks the nearest active opposing zone.",
+  },
 ];
 const scoreWeightFields: Array<{
   key: GoldilocksScoreCategory;
   label: string;
   explanation: string;
 }> = [
-  { key: "trend", label: "Trend-timeframe alignment · default 3", explanation: "Rewards agreement between trade direction and protected structure at trade time. The other four categories rebalance when this research weight changes." },
-  { key: "departure", label: "Zone-timeframe departure quality · default 4", explanation: "Three points cover total formation compactness; one point covers sustained close displacement away from the zone." },
-  { key: "approachWarnings", label: "Confirmation-timeframe approach warnings · default 5", explanation: "Zero warnings earns 5 points, one earns 3, and both earn 0. The categories are a confirmed liquidity-pool sweep and a fast momentum approach. Compression is not penalized." },
-  { key: "purity", label: "Confirmation-timeframe zone purity · default 4", explanation: "Zero prior touch candles earns 4 points, exactly one earns 2, and two or more earn 0." },
-  { key: "zoneInsideZone", label: "Multi-timeframe zone confluence (ZIZ) · default 4", explanation: "ZIZ 1/3 earns 0, ZIZ 2/3 earns 2, and ZIZ 3/3 earns 4." },
+  {
+    key: "trend",
+    label: "Trend-timeframe alignment · default 3",
+    explanation:
+      "Rewards agreement between trade direction and protected structure at trade time. The other four categories rebalance when this research weight changes.",
+  },
+  {
+    key: "departure",
+    label: "Zone-timeframe departure quality · default 4",
+    explanation:
+      "Three points cover total formation compactness; one point covers sustained close displacement away from the zone.",
+  },
+  {
+    key: "approachWarnings",
+    label: "Confirmation-timeframe approach warnings · default 5",
+    explanation:
+      "Zero warnings earns 5 points, one earns 3, and both earn 0. The categories are a confirmed liquidity-pool sweep and a fast momentum approach. Compression is not penalized.",
+  },
+  {
+    key: "purity",
+    label: "Confirmation-timeframe zone purity · default 4",
+    explanation:
+      "Zero prior touch candles earns 4 points, exactly one earns 2, and two or more earn 0.",
+  },
+  {
+    key: "zoneInsideZone",
+    label: "Multi-timeframe zone confluence (ZIZ) · default 4",
+    explanation: "ZIZ 1/3 earns 0, ZIZ 2/3 earns 2, and ZIZ 3/3 earns 4.",
+  },
 ];
 const runSortOptions = [
   ["createdAt", "Run date"],
@@ -756,12 +904,17 @@ const normalizedSortValue = (value: unknown) => {
   const date = typeof value === "string" ? Date.parse(value) : Number.NaN;
   return Number.isNaN(date) ? String(value).toLowerCase() : date;
 };
-const compareValues = (left: unknown, right: unknown, direction: SortDirection) => {
+const compareValues = (
+  left: unknown,
+  right: unknown,
+  direction: SortDirection,
+) => {
   const a = normalizedSortValue(left);
   const b = normalizedSortValue(right);
-  const result = typeof a === "number" && typeof b === "number"
-    ? a - b
-    : String(a).localeCompare(String(b), undefined, { numeric: true });
+  const result =
+    typeof a === "number" && typeof b === "number"
+      ? a - b
+      : String(a).localeCompare(String(b), undefined, { numeric: true });
   return direction === "asc" ? result : -result;
 };
 const formatR = (value: number | null, signed = false) =>
@@ -789,17 +942,24 @@ export default function Backtesting() {
     [minimumScore, setMinimumScore] = useState(14),
     [lookbackDays, setLookbackDays] = useState(730),
     [tradeManager, setTradeManager] = useState<GoldilocksBacktestManagerId>(
-      GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+      GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
     ),
+    [confirmationMode, setConfirmationMode] =
+      useState<GoldilocksConfirmationMode>("close-through"),
+    [setAndForgetTargetR, setSetAndForgetTargetR] = useState(2),
+    [setAndForgetTargetMode, setSetAndForgetTargetMode] = useState<
+      "fixed-r" | "opposing-base"
+    >("opposing-base"),
+    [closeTradesBeforeWeekend, setCloseTradesBeforeWeekend] = useState(true),
     [reverseFinalSignal, setReverseFinalSignal] = useState(false),
     [strategyTweaks, setStrategyTweaks] = useState<GoldilocksBacktestTweaks>(
       () => normalizeGoldilocksBacktestTweaks(undefined),
     ),
-    [gateSettings, setGateSettings] = useState<GoldilocksBacktestGates>(
-      () => normalizeGoldilocksBacktestGates(undefined),
+    [gateSettings, setGateSettings] = useState<GoldilocksBacktestGates>(() =>
+      normalizeGoldilocksBacktestGates(undefined),
     ),
-    [scoreWeights, setScoreWeights] = useState<GoldilocksScoreWeights>(
-      () => normalizeGoldilocksScoreWeights(undefined),
+    [scoreWeights, setScoreWeights] = useState<GoldilocksScoreWeights>(() =>
+      normalizeGoldilocksScoreWeights(undefined),
     ),
     [busy, setBusy] = useState(false),
     [deletingId, setDeletingId] = useState(""),
@@ -817,9 +977,10 @@ export default function Backtesting() {
   const [runSortKey, setRunSortKey] = useState("createdAt");
   const [runSortDirection, setRunSortDirection] =
     useState<SortDirection>("desc");
-  const [tradeSortKey, setTradeSortKey] = useState("confirmationTime");
+  const [tradeSortKey, setTradeSortKey] = useState("recordedOrder");
   const [tradeSortDirection, setTradeSortDirection] =
     useState<SortDirection>("desc");
+  const [runUidQuery, setRunUidQuery] = useState("");
   const load = useCallback(async (runId?: string) => {
     if (dashboardRequestInFlight.current) return;
     dashboardRequestInFlight.current = true;
@@ -851,6 +1012,14 @@ export default function Backtesting() {
     setLeverage(config.leverage ?? 30);
     setProjectionRiskProfile(config.riskProfile ?? "default");
     setTradeManager(managerForRunConfig(config).id);
+    setConfirmationMode(config.confirmationMode ?? "close-through");
+    setSetAndForgetTargetR(config.setAndForgetTargetR ?? 2);
+    setSetAndForgetTargetMode(
+      config.setAndForgetTargetMode === "opposing-base"
+        ? "opposing-base"
+        : "fixed-r",
+    );
+    setCloseTradesBeforeWeekend(config.closeTradesBeforeWeekend !== false);
     setReverseFinalSignal(Boolean(config.reverseFinalSignal));
     setStrategyTweaks(normalizeGoldilocksBacktestTweaks(config.strategyTweaks));
     setGateSettings(normalizeGoldilocksBacktestGates(config.gateSettings));
@@ -889,6 +1058,27 @@ export default function Backtesting() {
     setTradeSearchResult(null);
     setError("");
   };
+  const searchRunUid = async (event: FormEvent) => {
+    event.preventDefault();
+    const query = runUidQuery.trim().toUpperCase();
+    if (!query) return;
+    try {
+      const response = await fetch(
+        `/api/backtests?runId=${encodeURIComponent(query)}`,
+        { cache: "no-store" },
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error);
+      const matched = body.runs?.find(
+        (run: Run) => run.runUid?.toUpperCase() === query,
+      );
+      if (!matched) throw new Error(`Backtest run ${query} was not found.`);
+      setData(body);
+      setError("");
+    } catch (searchError) {
+      setError((searchError as Error).message);
+    }
+  };
   const active =
     data?.runs.some(
       (run) => run.status === "running" || run.status === "queued",
@@ -914,13 +1104,23 @@ export default function Backtesting() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pairs: selected,
-          label,
+          label: label.trim() || undefined,
           minimumScore,
           lookbackDays,
           startingBalance,
           leverage,
           riskProfile,
           tradeManager,
+          confirmationMode,
+          setAndForgetTargetR:
+            tradeManager === GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID
+              ? setAndForgetTargetR
+              : undefined,
+          setAndForgetTargetMode:
+            tradeManager === GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID
+              ? setAndForgetTargetMode
+              : undefined,
+          closeTradesBeforeWeekend,
           reverseFinalSignal,
           timeframeProfile,
           strategyTweaks,
@@ -1003,38 +1203,21 @@ export default function Backtesting() {
     return (row as unknown as Record<string, unknown>)[key];
   }, []);
   const sortedRunResults = useMemo(
-    () => [...(data?.runResults ?? [])].sort((left, right) =>
-      compareValues(
-        runSortValue(left, runSortKey),
-        runSortValue(right, runSortKey),
-        runSortDirection,
-      )),
-    [data?.runResults, runSortDirection, runSortKey, runSortValue],
-  );
-  const visibleTrades = useMemo(
     () =>
-      tradeSearchResult?.tradeId
-        ? (data?.trades ?? []).filter(
-            (trade) => trade.tradeId === tradeSearchResult.tradeId,
-          )
-        : (data?.trades ?? []),
-    [data?.trades, tradeSearchResult?.tradeId],
-  );
-  const tradeSortValue = useCallback((trade: TradeRow, key: string) => {
-    return trade[key];
-  }, []);
-  const sortedTrades = useMemo(
-    () => [...visibleTrades].sort((left, right) =>
-      compareValues(
-        tradeSortValue(left, tradeSortKey),
-        tradeSortValue(right, tradeSortKey),
-        tradeSortDirection,
-      )),
-    [tradeSortDirection, tradeSortKey, tradeSortValue, visibleTrades],
+      [...(data?.runResults ?? [])].sort((left, right) =>
+        compareValues(
+          runSortValue(left, runSortKey),
+          runSortValue(right, runSortKey),
+          runSortDirection,
+        ),
+      ),
+    [data?.runResults, runSortDirection, runSortKey, runSortValue],
   );
   const sortTradesBy = (key: string) => {
     if (tradeSortKey === key) {
-      setTradeSortDirection((direction) => direction === "asc" ? "desc" : "asc");
+      setTradeSortDirection((direction) =>
+        direction === "asc" ? "desc" : "asc",
+      );
     } else {
       setTradeSortKey(key);
       setTradeSortDirection("asc");
@@ -1042,6 +1225,10 @@ export default function Backtesting() {
   };
   const tradeSortMark = (key: string) =>
     tradeSortKey === key ? (tradeSortDirection === "asc" ? " ▲" : " ▼") : "";
+  const resetTradeSort = () => {
+    setTradeSortKey("recordedOrder");
+    setTradeSortDirection("desc");
+  };
   const cancel = async () => {
     if (!current) return;
     setBusy(true);
@@ -1153,6 +1340,73 @@ export default function Backtesting() {
       ),
     [projection.trades],
   );
+  const blockedTradeResults = useMemo(
+    () =>
+      new Map(
+        projection.blockedTrades.map((blocked) => [
+          String(blocked.trade.id),
+          blocked,
+        ]),
+      ),
+    [projection.blockedTrades],
+  );
+  const marginBlockSummary = useMemo(
+    () =>
+      Object.entries(
+        projection.blockedTrades.reduce<Record<string, number>>(
+          (counts, blocked) => {
+            counts[blocked.reason] = (counts[blocked.reason] ?? 0) + 1;
+            return counts;
+          },
+          {},
+        ),
+      )
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((left, right) => right.count - left.count),
+    [projection.blockedTrades],
+  );
+  const visibleTrades = useMemo(
+    () =>
+      tradeSearchResult?.tradeId
+        ? (data?.trades ?? []).filter(
+            (trade) => trade.tradeId === tradeSearchResult.tradeId,
+          )
+        : (data?.trades ?? []),
+    [data?.trades, tradeSearchResult?.tradeId],
+  );
+  const tradeSortValue = useCallback(
+    (trade: TradeRow, key: string) => {
+      const projected = projectedTradeResults.get(String(trade.id));
+      if (key === "recordedOrder") return Number(trade.id);
+      if (key === "result")
+        return projected
+          ? projected.realizedR > 0
+            ? 1
+            : projected.realizedR < 0
+              ? -1
+              : 0
+          : Number.NEGATIVE_INFINITY;
+      if (key === "projectedPnl")
+        return projected?.pnl ?? Number.NEGATIVE_INFINITY;
+      return trade[key];
+    },
+    [projectedTradeResults],
+  );
+  const sortedTrades = useMemo(
+    () =>
+      [...visibleTrades].sort((left, right) => {
+        const selectedComparison = compareValues(
+          tradeSortValue(left, tradeSortKey),
+          tradeSortValue(right, tradeSortKey),
+          tradeSortDirection,
+        );
+        return (
+          selectedComparison ||
+          compareValues(Number(left.id), Number(right.id), "desc")
+        );
+      }),
+    [tradeSortDirection, tradeSortKey, tradeSortValue, visibleTrades],
+  );
   const performance = useMemo(
     () =>
       calculateBacktestPerformance(
@@ -1235,10 +1489,7 @@ export default function Backtesting() {
         Math.abs(scoreCategories[field.key] - defaults[field.key]) < 1e-9,
     );
   }, [scoreCategories]);
-  const updateScoreCategory = (
-    key: GoldilocksScoreCategory,
-    value: number,
-  ) => {
+  const updateScoreCategory = (key: GoldilocksScoreCategory, value: number) => {
     setScoreWeights((current) =>
       expandGoldilocksScoreCategoryWeights(
         rebalanceGoldilocksScoreCategories(
@@ -1263,7 +1514,15 @@ export default function Backtesting() {
         <Controls>
           <Field>
             Run label
-            <input value={label} onChange={(e) => setLabel(e.target.value)} />
+            <input
+              value={label}
+              placeholder={getGoldilocksBacktestRunLabel(timeframeProfile)}
+              onChange={(e) => setLabel(e.target.value)}
+              onBlur={() => {
+                if (!label.trim())
+                  setLabel(getGoldilocksBacktestRunLabel(timeframeProfile));
+              }}
+            />
           </Field>
           <Field>
             Timeframe stack
@@ -1291,6 +1550,29 @@ export default function Backtesting() {
               {Array.from({ length: 21 }, (_, i) => (
                 <option key={i}>{i}</option>
               ))}
+            </select>
+          </Field>
+          <Field
+            title={
+              confirmationMode === "touch-entry"
+                ? GOLDILOCKS_CONFIRMATION_MODES.touchEntry.description
+                : GOLDILOCKS_CONFIRMATION_MODES.closeThrough.description
+            }
+          >
+            Entry confirmation
+            <select
+              aria-label="Entry confirmation"
+              value={confirmationMode}
+              onChange={(event) =>
+                setConfirmationMode(
+                  event.target.value as GoldilocksConfirmationMode,
+                )
+              }
+            >
+              <option value="close-through">
+                First touch + engulf confirmation
+              </option>
+              <option value="touch-entry">Immediate first-touch entry</option>
             </select>
           </Field>
           <Field>
@@ -1324,14 +1606,55 @@ export default function Backtesting() {
               ))}
             </select>
           </Field>
+          {tradeManager === GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID && (
+            <Field title="Choose a fixed RR target or exit at the first touch of the causally available opposing base. This applies only to Set and forget.">
+              Target
+              <select
+                aria-label="Set and forget target"
+                value={
+                  setAndForgetTargetMode === "opposing-base"
+                    ? "opposing-base"
+                    : String(setAndForgetTargetR)
+                }
+                onChange={(event) => {
+                  if (event.target.value === "opposing-base") {
+                    setSetAndForgetTargetMode("opposing-base");
+                    return;
+                  }
+                  setSetAndForgetTargetMode("fixed-r");
+                  setSetAndForgetTargetR(Number(event.target.value));
+                }}
+              >
+                {Array.from({ length: 77 }, (_, index) => 1 + index * 0.25).map(
+                  (targetR) => (
+                    <option key={targetR} value={targetR}>
+                      1:{targetR} ({targetR}R)
+                    </option>
+                  ),
+                )}
+                <option value="opposing-base">
+                  Touch of opposing base (automatic)
+                </option>
+              </select>
+            </Field>
+          )}
           <Field title="Backtest only: after the normal signal qualifies, execute the opposite side with mirrored risk and a fresh reversed 2R runway check.">
             YOLO reverse final signal
             <input
               aria-label="YOLO reverse final signal"
               type="checkbox"
               checked={reverseFinalSignal}
+              onChange={(event) => setReverseFinalSignal(event.target.checked)}
+            />
+          </Field>
+          <Field title="Backtest only. When disabled, simulated trades may remain open across the weekend. Live/demo Friday liquidation is unchanged.">
+            Close trades before weekend
+            <input
+              aria-label="Close trades before weekend"
+              type="checkbox"
+              checked={closeTradesBeforeWeekend}
               onChange={(event) =>
-                setReverseFinalSignal(event.target.checked)
+                setCloseTradesBeforeWeekend(event.target.checked)
               }
             />
           </Field>
@@ -1348,122 +1671,124 @@ export default function Backtesting() {
         <RuleDisclosure>
           <summary>
             Show backtest rule controls · {backtestGateFields.length} gates ·{" "}
-            {scoreWeightFields.length} weights · {backtestTweakFields.length} thresholds
+            {scoreWeightFields.length} weights · {backtestTweakFields.length}{" "}
+            thresholds
           </summary>
           <div className="rule-body">
             <Sub style={{ fontSize: ".72rem", marginTop: 12 }}>
               These settings are saved with the run and affect only backtests.
             </Sub>
-          <ConfigCategory>
-            <h3>1. Hard gates</h3>
-            <p>
-              The names and values below match the chart audit. Liquidity-sweep
-              and fast-approach evidence belong to the five-point warning score;
-              they are not separate hard gates.
-            </p>
-            <TweakGrid>
-              {backtestGateFields.map((field) => (
-                <TweakField key={field.key} data-tooltip={field.explanation}>
-                  <span>{field.label}</span>
-                  {gateSettings[field.key] ? "ENABLED" : "DISABLED"}
-                  <small>{field.value}</small>
-                  <input
-                    aria-label={field.label}
-                    type="checkbox"
-                    checked={gateSettings[field.key]}
-                    onChange={(event) =>
-                      setGateSettings((current) => ({
-                        ...current,
-                        [field.key]: event.target.checked,
-                      }))
-                    }
-                  />
-                </TweakField>
-              ))}
-            </TweakGrid>
-          </ConfigCategory>
-          <ConfigCategory>
-            <h3>2. Score weights</h3>
-            <p>
-              These initialize to the chart&apos;s official 3 + 4 + 5 + 4 + 4
-              distribution. Total: <strong>20.00 points</strong>. Move any
-              slider and the other categories rebalance automatically.
-            </p>
-            <RestoreWeightsButton
-              type="button"
-              disabled={scoreWeightsAreDefault}
-              onClick={() =>
-                setScoreWeights(normalizeGoldilocksScoreWeights(undefined))
-              }
-            >
-              Restore default weights
-            </RestoreWeightsButton>
-            <TweakGrid>
-              {scoreWeightFields.map((field) => (
-                <TweakField key={field.key} data-tooltip={field.explanation}>
-                  <span>{field.label}</span>
-                  {scoreCategories[field.key].toFixed(2)} points
-                  <input
-                    aria-label={`${field.label} score weight slider`}
-                    type="range"
-                    min="0"
-                    max="20"
-                    step="0.5"
-                    value={scoreCategories[field.key]}
-                    onChange={(event) =>
-                      updateScoreCategory(field.key, Number(event.target.value))
-                    }
-                  />
-                  <input
-                    aria-label={`${field.label} score weight`}
-                    type="number"
-                    min="0"
-                    max="20"
-                    step="0.5"
-                    value={Number(scoreCategories[field.key].toFixed(2))}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      if (!Number.isFinite(value) || value < 0) return;
-                      updateScoreCategory(field.key, value);
-                    }}
-                  />
-                </TweakField>
-              ))}
-            </TweakGrid>
-          </ConfigCategory>
-          <ConfigCategory>
-            <h3>3. Numeric thresholds</h3>
-            <p>
-              Only thresholds consumed by the current contract are shown.
-              Decimal zone fractions use 0.50 = 50%.
-            </p>
-          <TweakGrid>
-            {backtestTweakFields.map((field) => (
-              <TweakField key={field.key} data-tooltip={field.explanation}>
-                <span>
-                  {field.short}
-                </span>
-                {field.label}
-                <small>{field.explanation}</small>
-                <input
-                  aria-label={field.label}
-                  type="number"
-                  min="0"
-                  max={field.max}
-                  step={field.step}
-                  value={strategyTweaks[field.key]}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (!Number.isFinite(value) || value < 0) return;
-                    setStrategyTweaks((currentTweaks) => ({
-                      ...currentTweaks,
-                      [field.key]: value,
-                    }));
-                  }}
-                />
-              </TweakField>
-            ))}
-          </TweakGrid>
+            <ConfigCategory>
+              <h3>1. Hard gates</h3>
+              <p>
+                The names and values below match the chart audit.
+                Liquidity-sweep and fast-approach evidence belong to the
+                five-point warning score; they are not separate hard gates.
+              </p>
+              <TweakGrid>
+                {backtestGateFields.map((field) => (
+                  <TweakField key={field.key} data-tooltip={field.explanation}>
+                    <span>{field.label}</span>
+                    {gateSettings[field.key] ? "ENABLED" : "DISABLED"}
+                    <small>{field.value}</small>
+                    <input
+                      aria-label={field.label}
+                      type="checkbox"
+                      checked={gateSettings[field.key]}
+                      onChange={(event) =>
+                        setGateSettings((current) => ({
+                          ...current,
+                          [field.key]: event.target.checked,
+                        }))
+                      }
+                    />
+                  </TweakField>
+                ))}
+              </TweakGrid>
+            </ConfigCategory>
+            <ConfigCategory>
+              <h3>2. Score weights</h3>
+              <p>
+                These initialize to the chart&apos;s official 3 + 4 + 5 + 4 + 4
+                distribution. Total: <strong>20.00 points</strong>. Move any
+                slider and the other categories rebalance automatically.
+              </p>
+              <RestoreWeightsButton
+                type="button"
+                disabled={scoreWeightsAreDefault}
+                onClick={() =>
+                  setScoreWeights(normalizeGoldilocksScoreWeights(undefined))
+                }
+              >
+                Restore default weights
+              </RestoreWeightsButton>
+              <TweakGrid>
+                {scoreWeightFields.map((field) => (
+                  <TweakField key={field.key} data-tooltip={field.explanation}>
+                    <span>{field.label}</span>
+                    {scoreCategories[field.key].toFixed(2)} points
+                    <input
+                      aria-label={`${field.label} score weight slider`}
+                      type="range"
+                      min="0"
+                      max="20"
+                      step="0.5"
+                      value={scoreCategories[field.key]}
+                      onChange={(event) =>
+                        updateScoreCategory(
+                          field.key,
+                          Number(event.target.value),
+                        )
+                      }
+                    />
+                    <input
+                      aria-label={`${field.label} score weight`}
+                      type="number"
+                      min="0"
+                      max="20"
+                      step="0.5"
+                      value={Number(scoreCategories[field.key].toFixed(2))}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (!Number.isFinite(value) || value < 0) return;
+                        updateScoreCategory(field.key, value);
+                      }}
+                    />
+                  </TweakField>
+                ))}
+              </TweakGrid>
+            </ConfigCategory>
+            <ConfigCategory>
+              <h3>3. Numeric thresholds</h3>
+              <p>
+                Only thresholds consumed by the current contract are shown.
+                Decimal zone fractions use 0.50 = 50%.
+              </p>
+              <TweakGrid>
+                {backtestTweakFields.map((field) => (
+                  <TweakField key={field.key} data-tooltip={field.explanation}>
+                    <span>{field.short}</span>
+                    {field.label}
+                    <small>{field.explanation}</small>
+                    <input
+                      aria-label={field.label}
+                      type="number"
+                      min="0"
+                      max={field.max}
+                      step={field.step}
+                      value={strategyTweaks[field.key]}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (!Number.isFinite(value) || value < 0) return;
+                        setStrategyTweaks((currentTweaks) => ({
+                          ...currentTweaks,
+                          [field.key]: value,
+                        }));
+                      }}
+                    />
+                  </TweakField>
+                ))}
+              </TweakGrid>
             </ConfigCategory>
           </div>
         </RuleDisclosure>
@@ -1664,8 +1989,18 @@ export default function Backtesting() {
             : current &&
                 managerForRunConfig(current.config).id ===
                   GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID
-              ? " Under set and forget, the original stop and full 2R target remain untouched until either is hit, except for the mandatory Friday close."
-              : " Under the default manager, reaching +1R banks half and a later break-even exit records +0.5R."}
+              ? current.config.setAndForgetTargetMode === "opposing-base"
+                ? " Under set and forget, the original stop remains untouched and the full position targets first touch of the opposing base, except for the mandatory Friday close."
+                : ` Under set and forget, the original stop and full ${current.config.setAndForgetTargetR ?? 2}R target remain untouched until either is hit, except for the mandatory Friday close.`
+              : current &&
+                  managerForRunConfig(current.config).id ===
+                    GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID
+                ? " Under the untouched-stop runner, +1R banks half while the remaining half keeps the original stop and has no fixed upside target."
+                : current &&
+                    managerForRunConfig(current.config).id ===
+                      GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID
+                  ? " Under adaptive scale-out, fast 0.5R attacks bank 25% and slower attacks bank up to 50% at +1R, +2R, and +3R; a final 25% runner keeps the original stop."
+                  : " Under the default manager, reaching +1R banks half and a later break-even exit records +0.5R."}
           Rankings below use expectancy first.{" "}
           {performance.sampleTrades < 50
             ? `This run has only ${performance.sampleTrades} realized-R trades; treat it as an early signal until it reaches at least 50, ideally 100+.`
@@ -1675,6 +2010,9 @@ export default function Backtesting() {
             : ""}
           {projection.marginBlocked
             ? ` ${projection.marginBlocked} margin-blocked signal(s) were not executed and are excluded from every strategy-edge metric above.`
+            : ""}
+          {marginBlockSummary.length
+            ? ` Main cause: ${marginBlockSummary[0].count} × ${marginBlockSummary[0].reason}`
             : ""}
         </EdgeNote>
       </EdgeLab>
@@ -1790,10 +2128,12 @@ export default function Backtesting() {
           no profit or loss and is not treated as a bad setup. Accepted{" "}
           {projection.acceptedTrades} of {data?.trades.length ?? 0} signals. The
           selected leverage is capped per OANDA US rules at 50:1 for major pairs
-          and 20:1 for other pairs.
-          Spread-only commission is generally included in the spread; exact
-          historical spread and daily/triple-rollover financing remain excluded;
-          simulated positions are force-closed before the Friday weekend cutoff.
+          and 20:1 for other pairs. Spread-only commission is generally included
+          in the spread; exact historical spread and daily/triple-rollover
+          financing remain excluded;
+          {closeTradesBeforeWeekend
+            ? " simulated positions are force-closed before the Friday weekend cutoff."
+            : " weekend holding is enabled for this backtest, while live/demo Friday liquidation remains unchanged."}
         </MoneyNote>
       </MoneyLab>
       <Section>
@@ -1806,26 +2146,31 @@ export default function Backtesting() {
                 : `Trades from the selected backtest run${current ? ` · ${current.label}` : ""}`}
             </span>
           </div>
-          <TradeSearch onSubmit={searchTrade}>
-            <input
-              aria-label="Search trade ID"
-              placeholder="GL-EURUSD-YYYYMMDD-HHMM-XXXXXXXX"
-              value={tradeIdQuery}
-              onChange={(event) => {
-                const value = event.target.value;
-                setTradeIdQuery(value);
-                if (!value.trim()) clearTradeSearch();
-              }}
-            />
-            <button type="submit" disabled={tradeSearching}>
-              {tradeSearching ? "Searching…" : "Find trade"}
-            </button>
-            {tradeIdQuery && (
-              <button type="button" onClick={clearTradeSearch}>
-                Clear
+          <TradeHeadActions>
+            <ResetTradeSortButton type="button" onClick={resetTradeSort}>
+              Reset sort · newest recorded first
+            </ResetTradeSortButton>
+            <TradeSearch onSubmit={searchTrade}>
+              <input
+                aria-label="Search trade ID"
+                placeholder="GL-EURUSD-YYYYMMDD-HHMM-XXXXXXXX"
+                value={tradeIdQuery}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setTradeIdQuery(value);
+                  if (!value.trim()) clearTradeSearch();
+                }}
+              />
+              <button type="submit" disabled={tradeSearching}>
+                {tradeSearching ? "Searching…" : "Find trade"}
               </button>
-            )}
-          </TradeSearch>
+              {tradeIdQuery && (
+                <button type="button" onClick={clearTradeSearch}>
+                  Clear
+                </button>
+              )}
+            </TradeSearch>
+          </TradeHeadActions>
         </Head>
         {tradeSearchResult && (
           <TradeSearchResult>
@@ -1839,11 +2184,11 @@ export default function Backtesting() {
         )}
         {tradeSearchResult && (
           <TradeSearchResult>
-             <ReplayLink
-               href={`/strategy-lab?pair=${encodeURIComponent(tradeSearchResult.pair)}&stack=${replayStack(tradeSearchResult.config)}&timeframe=${replayTimeframe(tradeSearchResult.config)}&tradeTime=${tradeSearchResult.confirmationTime}&exitTime=${tradeSearchResult.outcomeTime}&tradeId=${encodeURIComponent(tradeSearchResult.tradeId)}`}
-               target="_blank"
-               rel="noopener noreferrer"
-             >
+            <ReplayLink
+              href={`/strategy-lab?pair=${encodeURIComponent(tradeSearchResult.pair)}&stack=${replayStack(tradeSearchResult.config)}&timeframe=${replayTimeframe(tradeSearchResult.config)}&tradeTime=${tradeSearchResult.confirmationTime}&exitTime=${tradeSearchResult.outcomeTime}&tradeId=${encodeURIComponent(tradeSearchResult.tradeId)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               View chart
             </ReplayLink>
           </TradeSearchResult>
@@ -1854,23 +2199,45 @@ export default function Backtesting() {
               <tr>
                 <th>Chart</th>
                 {[
-                  ["tradeId", "Trade ID"], ["confirmationTime", "Time"],
-                  ["pair", "Pair"], ["direction", "Side"],
-                  ["score", "Score"], ["realizedR", "Total R"],
+                  ["tradeId", "Trade ID"],
+                  ["confirmationTime", "Time"],
+                  ["pair", "Pair"],
+                  ["direction", "Side"],
+                  ["score", "Score"],
+                  ["realizedR", "Signal R"],
                 ].map(([key, heading]) => (
                   <th key={key}>
-                    <SortableHeading type="button" onClick={() => sortTradesBy(key)}>
-                      {heading}{tradeSortMark(key)}
+                    <SortableHeading
+                      type="button"
+                      onClick={() => sortTradesBy(key)}
+                    >
+                      {heading}
+                      {tradeSortMark(key)}
                     </SortableHeading>
                   </th>
                 ))}
-                <th>Result</th>
-                <th>Projected net P/L</th>
+                <th>
+                  <SortableHeading
+                    type="button"
+                    onClick={() => sortTradesBy("result")}
+                  >
+                    Result{tradeSortMark("result")}
+                  </SortableHeading>
+                </th>
+                <th>
+                  <SortableHeading
+                    type="button"
+                    onClick={() => sortTradesBy("projectedPnl")}
+                  >
+                    Projected net P/L{tradeSortMark("projectedPnl")}
+                  </SortableHeading>
+                </th>
               </tr>
             </thead>
             <tbody>
               {sortedTrades.map((t: TradeRow) => {
                 const projected = projectedTradeResults.get(String(t.id));
+                const blocked = blockedTradeResults.get(String(t.id));
                 const displayedR = projected?.realizedR ?? Number(t.realizedR);
                 const totalR =
                   t.realizedR == null
@@ -1879,17 +2246,27 @@ export default function Backtesting() {
                       : "-1.00R"
                     : `${Number(t.realizedR).toFixed(2)}R`;
                 return (
-                  <tr key={t.id} style={{background:tradeSearchResult?.tradeId===t.tradeId?"#12382e":""}}>
+                  <tr
+                    key={t.id}
+                    style={{
+                      background:
+                        tradeSearchResult?.tradeId === t.tradeId
+                          ? "#12382e"
+                          : "",
+                    }}
+                  >
                     <td>
-                       <ReplayLink
-                         href={`/strategy-lab?pair=${encodeURIComponent(t.pair)}&stack=${replayStack(current?.config)}&timeframe=${replayTimeframe(current?.config)}&tradeTime=${t.confirmationTime}&exitTime=${t.outcomeTime}&tradeId=${encodeURIComponent(t.tradeId)}`}
-                         target="_blank"
-                         rel="noopener noreferrer"
-                       >
+                      <ReplayLink
+                        href={`/strategy-lab?pair=${encodeURIComponent(t.pair)}&stack=${replayStack(current?.config)}&timeframe=${replayTimeframe(current?.config)}&tradeTime=${t.confirmationTime}&exitTime=${t.outcomeTime}&tradeId=${encodeURIComponent(t.tradeId)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
                         View chart
                       </ReplayLink>
                     </td>
-                    <td><TradeId>{t.tradeId}</TradeId></td>
+                    <td>
+                      <TradeId>{t.tradeId}</TradeId>
+                    </td>
                     <td>
                       {new Date(t.confirmationTime * 1000).toLocaleString()}
                     </td>
@@ -1898,6 +2275,17 @@ export default function Backtesting() {
                     <td>{t.score}/20</td>
                     <td className={Number(t.realizedR) >= 0 ? "win" : "loss"}>
                       {totalR}
+                      {!projected && (
+                        <div
+                          style={{
+                            marginTop: 3,
+                            color: "#748195",
+                            fontSize: ".6rem",
+                          }}
+                        >
+                          counterfactual only
+                        </div>
+                      )}
                     </td>
                     <td
                       className={
@@ -1917,6 +2305,25 @@ export default function Backtesting() {
                             ? "Loss"
                             : "Break-even"
                         : "Margin blocked"}
+                      {blocked && (
+                        <div
+                          title={blocked.reason}
+                          style={{
+                            marginTop: 4,
+                            maxWidth: 240,
+                            color: "#ffb65c",
+                            fontSize: ".62rem",
+                            lineHeight: 1.3,
+                          }}
+                        >
+                          Needs {money(blocked.requiredMargin)} margin at{" "}
+                          {blocked.effectiveLeverage}:1 ·{" "}
+                          {(
+                            blocked.projectedAvailableMarginNavFraction * 100
+                          ).toFixed(1)}
+                          % NAV left
+                        </div>
+                      )}
                     </td>
                     <td
                       className={
@@ -1939,6 +2346,110 @@ export default function Backtesting() {
       <Section>
         <Head>
           <div>
+            <h2>🏆 Permanent Top 3</h2>
+            <span className="muted">
+              Highest net realized-R backtests · saved independently from run
+              history · automatically replaces only the lowest record
+            </span>
+          </div>
+        </Head>
+        <LeaderboardTable>
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Run ID</th>
+                <th>Run</th>
+                <th>Manager / target</th>
+                <th>Score</th>
+                <th>Signals / admitted</th>
+                <th>Expectancy</th>
+                <th>Net R</th>
+                <th>Max drawdown</th>
+                <th>Account return</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.leaderboard ?? []).map((record, index) => (
+                <tr key={record.runUid}>
+                  <td>
+                    <strong>{["🥇", "🥈", "🥉"][index]}</strong>
+                  </td>
+                  <td>
+                    <TradeId>{record.runUid}</TradeId>
+                  </td>
+                  <td>
+                    <strong>{record.label}</strong>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        color: "#748195",
+                        fontSize: ".64rem",
+                      }}
+                    >
+                      {new Date(record.completedAt).toLocaleDateString()} ·{" "}
+                      {timeframeLabel(record.config)}
+                    </div>
+                  </td>
+                  <td>
+                    {getGoldilocksBacktestManager(
+                      record.config.tradeManager,
+                    ).label}
+                    <div
+                      style={{
+                        marginTop: 4,
+                        color: "#748195",
+                        fontSize: ".64rem",
+                      }}
+                    >
+                      {record.config.setAndForgetTargetMode === "opposing-base"
+                        ? "Opposing base"
+                        : record.config.setAndForgetTargetR
+                          ? `${record.config.setAndForgetTargetR}R`
+                          : "Manager default"}
+                    </div>
+                  </td>
+                  <td>{record.config.minimumScore}/20</td>
+                  <td>
+                    {record.metrics.totalSignals} /{" "}
+                    {record.metrics.acceptedTrades}
+                  </td>
+                  <td
+                    className={
+                      (record.metrics.expectancyR ?? 0) >= 0 ? "win" : "loss"
+                    }
+                  >
+                    {formatR(record.metrics.expectancyR, true)}
+                  </td>
+                  <td className={record.metrics.netR >= 0 ? "win" : "loss"}>
+                    {formatR(record.metrics.netR, true)}
+                  </td>
+                  <td className="loss">
+                    {formatR(record.metrics.maxDrawdownR)}
+                  </td>
+                  <td
+                    className={
+                      record.metrics.accountReturn >= 0 ? "win" : "loss"
+                    }
+                  >
+                    {record.metrics.accountReturn.toFixed(2)}%
+                  </td>
+                </tr>
+              ))}
+              {!data?.leaderboard?.length && (
+                <tr>
+                  <td colSpan={10} className="muted">
+                    Complete a backtest to establish the first permanent record.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </LeaderboardTable>
+      </Section>
+      <Section>
+        <Head>
+          <div>
             <h2>Backtest runs</h2>
             <span className="muted">
               One row per saved run · click a row to load its settings, account
@@ -1946,34 +2457,47 @@ export default function Backtesting() {
             </span>
           </div>
           <SortControls>
+            <TradeSearch onSubmit={searchRunUid}>
+              <input
+                aria-label="Search backtest run ID"
+                placeholder="GLR-20260727…"
+                value={runUidQuery}
+                onChange={(event) => setRunUidQuery(event.target.value)}
+              />
+              <button type="submit">Find run</button>
+            </TradeSearch>
             <select
               aria-label="Sort backtest runs by"
               value={runSortKey}
               onChange={(event) => setRunSortKey(event.target.value)}
             >
               {runSortOptions.map(([value, text]) => (
-                <option key={value} value={value}>Sort by: {text}</option>
+                <option key={value} value={value}>
+                  Sort by: {text}
+                </option>
               ))}
             </select>
             <select
               aria-label="Backtest run sort direction"
               value={runSortDirection}
-              onChange={(event) => setRunSortDirection(event.target.value as SortDirection)}
+              onChange={(event) =>
+                setRunSortDirection(event.target.value as SortDirection)
+              }
             >
               <option value="desc">Descending</option>
               <option value="asc">Ascending</option>
             </select>
-          <ClearAllButton
-            disabled={active || clearingAll}
-            title={
-              active
-                ? "Cancel the active backtest first"
-                : "Delete all backtest runs, trades, and events"
-            }
-            onClick={() => void clearAllBacktests()}
-          >
-            {clearingAll ? "Clearing…" : "Clear all backtest data"}
-          </ClearAllButton>
+            <ClearAllButton
+              disabled={active || clearingAll}
+              title={
+                active
+                  ? "Cancel the active backtest first"
+                  : "Delete all backtest runs, trades, and events"
+              }
+              onClick={() => void clearAllBacktests()}
+            >
+              {clearingAll ? "Clearing…" : "Clear all backtest data"}
+            </ClearAllButton>
           </SortControls>
         </Head>
         <LeaderboardTable>
@@ -2020,6 +2544,9 @@ export default function Backtesting() {
                     </td>
                     <td>
                       <strong>{row.label}</strong>
+                      <div style={{ marginTop: 5 }}>
+                        <TradeId>{row.runUid ?? "Assigning run ID…"}</TradeId>
+                      </div>
                       <div
                         style={{
                           marginTop: 4,

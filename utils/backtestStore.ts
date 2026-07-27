@@ -19,12 +19,14 @@ import type {
   GoldilocksBacktestTweaks,
   GoldilocksBacktestGates,
   GoldilocksScoreWeights,
+  GoldilocksConfirmationMode,
   GoldilocksTimeframeProfileId,
 } from "./goldilocksConfig.ts";
 import type { GoldilocksResearchManifest } from "./goldilocksResearchManifest.ts";
 import {
   getGoldilocksBacktestManagerForRun,
   type GoldilocksBacktestManagerId,
+  type GoldilocksScaleOut,
 } from "./goldilocksTradeManagement.ts";
 
 export type BacktestStatus =
@@ -35,12 +37,16 @@ export interface BacktestRunConfig {
   minimumScore: number;
   label: string;
   strategyVersion?: string;
+  confirmationMode?: GoldilocksConfirmationMode;
   timeframeProfile?: GoldilocksTimeframeProfileId;
   backfillPages?: number;
   startingBalance?: number;
   leverage?: number;
   riskProfile?: RiskProfile;
   tradeManager?: GoldilocksBacktestManagerId;
+  setAndForgetTargetR?: number;
+  setAndForgetTargetMode?: "fixed-r" | "opposing-base";
+  closeTradesBeforeWeekend?: boolean;
   reverseFinalSignal?: boolean;
   protectedWinR?: number;
   archiveOnly?: boolean;
@@ -86,6 +92,7 @@ export interface BacktestTradeInput {
   approachPressure?: GoldilocksApproachPressure;
   zoneCorridors?: ZoneCorridorMeasurement[];
   marketPath?: TradePathSummary | null;
+  partialExits?: GoldilocksScaleOut[];
   managementPolicyResults?: TradeManagementResearchResult[];
 }
 
@@ -111,6 +118,40 @@ export const stableBacktestTradeId = (
     .toUpperCase();
   return `GL-${pair}-${stamp}-${hash}`;
 };
+
+export const stableBacktestRunUid = (input: {
+  id: string;
+  createdAt: string;
+}) => {
+  const created = new Date(input.createdAt);
+  const stamp = Number.isFinite(created.getTime())
+    ? created
+        .toISOString()
+        .slice(0, 16)
+        .replace(/[-T:]/g, "")
+    : "UNKNOWN";
+  const hash = createHash("sha256")
+    .update(`${input.id}|${input.createdAt}`)
+    .digest("hex")
+    .slice(0, 8)
+    .toUpperCase();
+  return `GLR-${stamp}-${hash}`;
+};
+
+export const selectTopBacktestLeaderboardRecords = <
+  T extends { runUid: string; netR: number; completedAt: string },
+>(
+  records: T[],
+  limit = 3,
+) =>
+  [...records]
+    .sort(
+      (left, right) =>
+        right.netR - left.netR ||
+        right.completedAt.localeCompare(left.completedAt) ||
+        left.runUid.localeCompare(right.runUid),
+    )
+    .slice(0, Math.max(0, limit));
 const database = () => {
   if (db) return db;
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -135,6 +176,7 @@ const database = () => {
       approach_pressure_json TEXT,
       zone_corridors_json TEXT,
       market_path_json TEXT,
+      partial_exits_json TEXT,
       FOREIGN KEY(run_id) REFERENCES backtest_runs(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_backtest_trades_run_pair ON backtest_trades(run_id,pair,confirmation_time);
@@ -150,6 +192,16 @@ const database = () => {
       step TEXT NOT NULL,message TEXT NOT NULL,data_json TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_backtest_events_run ON backtest_events(run_id,id DESC);
+    CREATE TABLE IF NOT EXISTS backtest_leaderboard (
+      run_uid TEXT PRIMARY KEY,source_run_id TEXT NOT NULL,label TEXT NOT NULL,
+      config_json TEXT NOT NULL,completed_at TEXT NOT NULL,net_r REAL NOT NULL,
+      metrics_json TEXT NOT NULL,recorded_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_backtest_leaderboard_rank
+      ON backtest_leaderboard(net_r DESC,completed_at DESC);
+    CREATE TABLE IF NOT EXISTS backtest_leaderboard_considered (
+      run_uid TEXT PRIMARY KEY,evaluated_at TEXT NOT NULL
+    );
   `);
   const columns = new Set(
     (
@@ -168,6 +220,25 @@ const database = () => {
     db.exec(
       "ALTER TABLE backtest_runs ADD COLUMN progress_percent REAL NOT NULL DEFAULT 0",
     );
+  if (!columns.has("run_uid"))
+    db.exec("ALTER TABLE backtest_runs ADD COLUMN run_uid TEXT");
+  const runsMissingUids = db
+    .prepare(
+      "SELECT id,created_at AS createdAt FROM backtest_runs WHERE run_uid IS NULL OR run_uid=''",
+    )
+    .all() as Array<{ id: string; createdAt: string }>;
+  if (runsMissingUids.length) {
+    const updateRunUid = db.prepare(
+      "UPDATE backtest_runs SET run_uid=? WHERE id=?",
+    );
+    db.transaction(() => {
+      for (const run of runsMissingUids)
+        updateRunUid.run(stableBacktestRunUid(run), run.id);
+    })();
+  }
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_backtest_runs_uid ON backtest_runs(run_uid)",
+  );
   const tradeColumns = new Set(
     (
       db.prepare("PRAGMA table_info(backtest_trades)").all() as Array<{
@@ -193,6 +264,8 @@ const database = () => {
     db.exec("ALTER TABLE backtest_trades ADD COLUMN zone_corridors_json TEXT");
   if (!tradeColumns.has("market_path_json"))
     db.exec("ALTER TABLE backtest_trades ADD COLUMN market_path_json TEXT");
+  if (!tradeColumns.has("partial_exits_json"))
+    db.exec("ALTER TABLE backtest_trades ADD COLUMN partial_exits_json TEXT");
   const missingTradeIds = db
     .prepare(
       `SELECT id,run_id AS runId,pair,zone_id AS zoneId,confirmation_time AS confirmationTime FROM backtest_trades WHERE trade_uid IS NULL OR trade_uid=''`,
@@ -228,22 +301,25 @@ const summaryConfig = (value: unknown) => {
   return config;
 };
 
-export const createBacktestRun = (id: string, config: BacktestRunConfig) =>
-  database()
+export const createBacktestRun = (id: string, config: BacktestRunConfig) => {
+  const createdAt = new Date().toISOString();
+  return database()
     .prepare(
       `
-  INSERT INTO backtest_runs(id,status,label,config_json,pairs_json,created_at,progress_total)
-  VALUES(?, 'queued', ?, ?, ?, ?, ?)
+  INSERT INTO backtest_runs(id,run_uid,status,label,config_json,pairs_json,created_at,progress_total)
+  VALUES(?, ?, 'queued', ?, ?, ?, ?, ?)
 `,
     )
     .run(
       id,
+      stableBacktestRunUid({ id, createdAt }),
       config.label,
       json(config),
       json(config.pairs),
-      new Date().toISOString(),
+      createdAt,
       config.pairs.length,
     );
+};
 export const getActiveBacktestRun = () =>
   database()
     .prepare(
@@ -262,7 +338,7 @@ export const getBacktestStatusSnapshot = (id: string) => {
   const d = database();
   const row = d
     .prepare(
-      `SELECT id,status,label,config_json AS configJson,created_at AS createdAt,started_at AS startedAt,
+      `SELECT id,run_uid AS runUid,status,label,config_json AS configJson,created_at AS createdAt,started_at AS startedAt,
     heartbeat_at AS heartbeatAt,progress_pair AS progressPair,progress_done AS progressDone,progress_total AS progressTotal,
     progress_stage AS progressStage,progress_percent AS progressPercent,total_trades AS totalTrades,error
     FROM backtest_runs WHERE id=?`,
@@ -307,10 +383,14 @@ export interface BacktestTradeReplay extends Pick<
   | "approachPressure"
   | "zoneCorridors"
   | "marketPath"
+  | "partialExits"
 > {
   tradeId: string;
   strategyVersion?: string;
+  confirmationMode?: GoldilocksConfirmationMode;
   tradeManager?: GoldilocksBacktestManagerId;
+  setAndForgetTargetMode?: "fixed-r" | "opposing-base";
+  setAndForgetTargetZoneId?: string;
   managementPolicyResults?: TradeManagementResearchResult[];
 }
 export const getBacktestTradeReplay = (
@@ -327,7 +407,7 @@ export const getBacktestTradeReplay = (
     t.entry,t.stop_loss AS stopLoss,t.one_r AS oneR,t.take_profit AS takeProfit,t.score,
     t.score_json AS scoreJson,t.prior_touches AS priorTouches,t.max_penetration AS maxPenetration,
     t.available_rrr AS availableRrr,t.confluence_count AS confluenceCount,t.trend,t.approach_pressure_json AS approachPressureJson,
-    t.zone_corridors_json AS zoneCorridorsJson,t.market_path_json AS marketPathJson,r.config_json AS configJson
+    t.zone_corridors_json AS zoneCorridorsJson,t.market_path_json AS marketPathJson,t.partial_exits_json AS partialExitsJson,r.config_json AS configJson
   FROM backtest_trades t JOIN backtest_runs r ON r.id=t.run_id
   WHERE t.pair=? AND ABS(t.confirmation_time-?)<=60
     AND (? IS NULL OR UPPER(t.trade_uid)=?)
@@ -348,6 +428,7 @@ export const getBacktestTradeReplay = (
         approachPressureJson: string | null;
         zoneCorridorsJson: string | null;
         marketPathJson: string | null;
+        partialExitsJson: string | null;
         configJson: string;
       })
     | undefined;
@@ -357,6 +438,7 @@ export const getBacktestTradeReplay = (
     approachPressureJson,
     zoneCorridorsJson,
     marketPathJson,
+    partialExitsJson,
     ...trade
   } = row;
   const config = JSON.parse(configJson) as BacktestRunConfig;
@@ -366,22 +448,35 @@ export const getBacktestTradeReplay = (
     )
     .all(row.tradeId)
     .map((item: any) => JSON.parse(item.resultJson));
+  const zoneCorridors = zoneCorridorsJson
+    ? (JSON.parse(zoneCorridorsJson) as ZoneCorridorMeasurement[])
+    : undefined;
+  const setAndForgetTargetZoneId =
+    config.setAndForgetTargetMode === "opposing-base"
+      ? zoneCorridors?.find((corridor) =>
+          trade.direction === "SELL"
+            ? corridor.demandZoneId && corridor.demandHigh === trade.takeProfit
+            : corridor.supplyZoneId && corridor.supplyLow === trade.takeProfit,
+        )?.[trade.direction === "SELL" ? "demandZoneId" : "supplyZoneId"]
+      : undefined;
   return {
     ...trade,
     scoreJson: JSON.parse(row.scoreJson),
     approachPressure: approachPressureJson
       ? JSON.parse(approachPressureJson)
       : undefined,
-    zoneCorridors: zoneCorridorsJson
-      ? JSON.parse(zoneCorridorsJson)
-      : undefined,
+    zoneCorridors,
     marketPath: marketPathJson ? JSON.parse(marketPathJson) : undefined,
+    partialExits: partialExitsJson ? JSON.parse(partialExitsJson) : undefined,
     managementPolicyResults,
     strategyVersion: config.strategyVersion,
+    confirmationMode: config.confirmationMode,
     tradeManager: getGoldilocksBacktestManagerForRun(
       config.tradeManager,
       config.strategyVersion,
     ).id,
+    setAndForgetTargetMode: config.setAndForgetTargetMode,
+    setAndForgetTargetZoneId,
   };
 };
 export const getBacktestTradeById = (tradeId: string) => {
@@ -394,7 +489,7 @@ export const getBacktestTradeById = (tradeId: string) => {
     t.exit_reason AS exitReason,t.realized_r AS realizedR,t.entry,t.stop_loss AS stopLoss,t.one_r AS oneR,
     t.take_profit AS takeProfit,t.score,t.prior_touches AS priorTouches,t.max_penetration AS maxPenetration,
     t.available_rrr AS availableRrr,t.confluence_count AS confluenceCount,t.trend,t.approach_pressure_json AS approachPressureJson,
-    t.zone_corridors_json AS zoneCorridorsJson,t.market_path_json AS marketPathJson,r.label AS runLabel,r.config_json AS configJson
+    t.zone_corridors_json AS zoneCorridorsJson,t.market_path_json AS marketPathJson,t.partial_exits_json AS partialExitsJson,r.label AS runLabel,r.config_json AS configJson
     FROM backtest_trades t JOIN backtest_runs r ON r.id=t.run_id WHERE UPPER(t.trade_uid)=? LIMIT 1`,
     )
     .get(normalized) as
@@ -416,6 +511,9 @@ export const getBacktestTradeById = (tradeId: string) => {
       : undefined,
     marketPath: row.marketPathJson
       ? JSON.parse(String(row.marketPathJson))
+      : undefined,
+    partialExits: row.partialExitsJson
+      ? JSON.parse(String(row.partialExitsJson))
       : undefined,
     managementPolicyResults,
     approachPressureJson: undefined,
@@ -528,9 +626,9 @@ export const replaceBacktestTrades = (
   const d = database();
   const insert = d.prepare(`INSERT INTO backtest_trades(
     trade_uid,run_id,pair,zone_id,zone_kind,direction,confirmation_time,zone_age_seconds,first_outside_time,outcome,outcome_time,exit_reason,
-    entry,stop_loss,one_r,take_profit,score,score_json,prior_touches,max_penetration,available_rrr,confluence_count,trend,realized_r,approach_pressure_json,zone_corridors_json,market_path_json
+    entry,stop_loss,one_r,take_profit,score,score_json,prior_touches,max_penetration,available_rrr,confluence_count,trend,realized_r,approach_pressure_json,zone_corridors_json,market_path_json,partial_exits_json
   ) VALUES(@tradeId,@runId,@pair,@zoneId,@zoneKind,@direction,@confirmationTime,@zoneAgeSeconds,@firstOutsideTime,@outcome,@outcomeTime,@exitReason,
-    @entry,@stopLoss,@oneR,@takeProfit,@score,@scoreJson,@priorTouches,@maxPenetration,@availableRrr,@confluenceCount,@trend,@realizedR,@approachPressureJson,@zoneCorridorsJson,@marketPathJson)`);
+    @entry,@stopLoss,@oneR,@takeProfit,@score,@scoreJson,@priorTouches,@maxPenetration,@availableRrr,@confluenceCount,@trend,@realizedR,@approachPressureJson,@zoneCorridorsJson,@marketPathJson,@partialExitsJson)`);
   const insertManagement =
     d.prepare(`INSERT INTO backtest_trade_management_results(
     trade_uid,run_id,pair,confirmation_time,policy_id,policy_version,config_json,result_json,realized_r,exit_time,exit_reason,created_at
@@ -554,6 +652,9 @@ export const replaceBacktestTrades = (
           ? json(trade.zoneCorridors)
           : null,
         marketPathJson: trade.marketPath ? json(trade.marketPath) : null,
+        partialExitsJson: trade.partialExits?.length
+          ? json(trade.partialExits)
+          : null,
         availableRrr: Number.isFinite(trade.availableRrr)
           ? trade.availableRrr
           : null,
@@ -576,17 +677,157 @@ export const replaceBacktestTrades = (
     }
   })();
 };
+
+export const recordBacktestLeaderboardCandidate = (runId: string) => {
+  const d = database();
+  const run = d
+    .prepare(
+      `SELECT id,run_uid AS runUid,label,config_json AS configJson,
+      completed_at AS completedAt,status FROM backtest_runs WHERE id=?`,
+    )
+    .get(runId) as
+    | {
+        id: string;
+        runUid: string;
+        label: string;
+        configJson: string;
+        completedAt: string | null;
+        status: BacktestStatus;
+      }
+    | undefined;
+  if (!run || run.status !== "completed" || !run.completedAt) return false;
+  const config = summaryConfig(run.configJson);
+  const runTrades = d
+    .prepare(
+      `SELECT id,pair,confirmation_time AS confirmationTime,outcome_time AS outcomeTime,
+      score,entry,stop_loss AS stopLoss,outcome,realized_r AS realizedR
+      FROM backtest_trades WHERE run_id=? ORDER BY confirmation_time`,
+    )
+    .all(runId) as PortfolioTrade[];
+  const portfolio = simulateBacktestPortfolio(runTrades, {
+    startingBalance: config.startingBalance ?? 1000,
+    leverage: config.leverage ?? 30,
+    riskProfile: config.riskProfile ?? "default",
+    minimumScore: config.minimumScore,
+  });
+  const performance = calculateBacktestPerformance(
+    portfolio.trades.map(({ trade, realizedR }) => ({
+      confirmationTime: trade.confirmationTime,
+      realizedR,
+    })),
+  );
+  const metrics = {
+    totalSignals: runTrades.length,
+    acceptedTrades: portfolio.acceptedTrades,
+    marginBlocked: portfolio.marginBlocked,
+    expectancyR: performance.expectancyR,
+    profitFactor:
+      performance.profitFactor === Number.POSITIVE_INFINITY
+        ? "infinite"
+        : performance.profitFactor,
+    netR: performance.netR,
+    maxDrawdownR: performance.maxDrawdownR,
+    accountReturn: portfolio.returnPercent,
+    endingBalance: portfolio.ending,
+  };
+  d.transaction(() => {
+    d.prepare(
+      `INSERT INTO backtest_leaderboard(
+        run_uid,source_run_id,label,config_json,completed_at,net_r,metrics_json,recorded_at
+      ) VALUES(?,?,?,?,?,?,?,?)
+      ON CONFLICT(run_uid) DO UPDATE SET
+        source_run_id=excluded.source_run_id,label=excluded.label,
+        config_json=excluded.config_json,completed_at=excluded.completed_at,
+        net_r=excluded.net_r,metrics_json=excluded.metrics_json,
+        recorded_at=excluded.recorded_at`,
+    ).run(
+      run.runUid,
+      run.id,
+      run.label,
+      json(config),
+      run.completedAt,
+      performance.netR,
+      json(metrics),
+      new Date().toISOString(),
+    );
+    const ranked = selectTopBacktestLeaderboardRecords(
+      d.prepare(
+        `SELECT run_uid AS runUid,net_r AS netR,completed_at AS completedAt
+        FROM backtest_leaderboard`,
+      ).all() as Array<{
+        runUid: string;
+        netR: number;
+        completedAt: string;
+      }>,
+    );
+    const retained = new Set(ranked.map((record) => record.runUid));
+    const remove = d.prepare(
+      "DELETE FROM backtest_leaderboard WHERE run_uid=?",
+    );
+    const allIds = d
+      .prepare("SELECT run_uid AS runUid FROM backtest_leaderboard")
+      .all() as Array<{ runUid: string }>;
+    for (const record of allIds)
+      if (!retained.has(record.runUid)) remove.run(record.runUid);
+    d.prepare(
+      `INSERT INTO backtest_leaderboard_considered(run_uid,evaluated_at)
+      VALUES(?,?) ON CONFLICT(run_uid) DO UPDATE SET evaluated_at=excluded.evaluated_at`,
+    ).run(run.runUid, new Date().toISOString());
+  })();
+  return true;
+};
+
+const ensureBacktestLeaderboardSeeded = () => {
+  const completed = database()
+    .prepare(
+      `SELECT r.id FROM backtest_runs r
+      LEFT JOIN backtest_leaderboard_considered c ON c.run_uid=r.run_uid
+      WHERE r.status='completed' AND c.run_uid IS NULL ORDER BY r.completed_at`,
+    )
+    .all() as Array<{ id: string }>;
+  for (const run of completed) recordBacktestLeaderboardCandidate(run.id);
+};
+
+export const getBacktestLeaderboard = () => {
+  ensureBacktestLeaderboardSeeded();
+  return (
+    database()
+      .prepare(
+        `SELECT run_uid AS runUid,source_run_id AS sourceRunId,label,
+        config_json AS configJson,completed_at AS completedAt,net_r AS netR,
+        metrics_json AS metricsJson,recorded_at AS recordedAt
+        FROM backtest_leaderboard
+        ORDER BY net_r DESC,completed_at DESC,run_uid ASC LIMIT 3`,
+      )
+      .all() as Array<Record<string, unknown>>
+  ).map((row) => ({
+    ...row,
+    config: summaryConfig(row.configJson),
+    metrics: JSON.parse(String(row.metricsJson)),
+    configJson: undefined,
+    metricsJson: undefined,
+  }));
+};
 export const getBacktestDashboard = (runId?: string) => {
   const d = database();
   const runs = d
     .prepare(
-      `SELECT id,status,label,config_json AS configJson,created_at AS createdAt,started_at AS startedAt,
+      `SELECT id,run_uid AS runUid,status,label,config_json AS configJson,created_at AS createdAt,started_at AS startedAt,
     completed_at AS completedAt,progress_pair AS progressPair,progress_done AS progressDone,progress_total AS progressTotal,
     progress_stage AS progressStage,progress_percent AS progressPercent,heartbeat_at AS heartbeatAt,
     total_trades AS totalTrades,wins,losses,error FROM backtest_runs ORDER BY created_at DESC LIMIT 30`,
     )
     .all() as Array<Record<string, unknown>>;
-  const selected = runId ?? String(runs[0]?.id ?? "");
+  const selected =
+    (runId
+      ? String(
+          (
+            d.prepare(
+              "SELECT id FROM backtest_runs WHERE id=? OR UPPER(run_uid)=UPPER(?) LIMIT 1",
+            ).get(runId, runId) as { id?: string } | undefined
+          )?.id ?? "",
+        )
+      : String(runs[0]?.id ?? "")) || String(runs[0]?.id ?? "");
   const trades = selected
     ? d
         .prepare(
@@ -643,6 +884,17 @@ export const getBacktestDashboard = (runId?: string) => {
         realizedR,
       })),
     );
+    const marginBlockReasons = Object.entries(
+      portfolio.blockedTrades.reduce<Record<string, number>>(
+        (counts, blocked) => {
+          counts[blocked.reason] = (counts[blocked.reason] ?? 0) + 1;
+          return counts;
+        },
+        {},
+      ),
+    )
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((left, right) => right.count - left.count);
     return {
       ...run,
       config,
@@ -658,6 +910,7 @@ export const getBacktestDashboard = (runId?: string) => {
       maxDrawdownPercent: portfolio.maxDrawdown,
       peakMargin: portfolio.peakMargin,
       marginBlocked: portfolio.marginBlocked,
+      marginBlockReasons,
       acceptedTrades: portfolio.acceptedTrades,
     };
   });
@@ -754,6 +1007,7 @@ export const getBacktestDashboard = (runId?: string) => {
     pairs,
     pairResults,
     events,
+    leaderboard: getBacktestLeaderboard(),
   };
 };
 

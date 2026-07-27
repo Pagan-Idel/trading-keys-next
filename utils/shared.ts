@@ -1,5 +1,5 @@
 // src/utils/shared.ts
-import { ACTION, TYPE } from '../utils/oanda/api/order';
+import { ACTION, TYPE } from './oanda/orderTypes';
 import type { Trade } from './oanda/api/openNow';
 import { handleOandaLogin } from './oanda/api/login';
 import { fetchPriceOnce } from "./oanda/api/priceStreamManager";

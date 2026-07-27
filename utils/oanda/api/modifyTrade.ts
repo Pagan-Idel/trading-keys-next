@@ -6,7 +6,7 @@ import credentials from "../../../credentials.json";
 import { getPipIncrement, getPrecision, normalizePairKeyUnderscore } from "../../shared";
 import type { Trade, TradeById } from "./openNow";
 import { openNow } from "./openNow";
-import { ACTION } from "./order";
+import { ACTION } from "../orderTypes";
 import { getLoginMode } from "../../loginState";
 
 interface ModifyRequest {

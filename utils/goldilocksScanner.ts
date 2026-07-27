@@ -107,10 +107,14 @@ export const annotateConfluenceAt = (
     })),
 )[0];
 
-const isBullishPair = (left: string, right: string) =>
-  ['LL', 'HL', 'L'].includes(left) && ['HH', 'LH', 'H'].includes(right);
-const isBearishPair = (left: string, right: string) =>
-  ['HH', 'LH', 'H'].includes(left) && ['LL', 'HL', 'L'].includes(right);
+export const getGoldilocksStructureBreakingLegDirection = (
+  left: string,
+  right: string,
+): SwingLeg["direction"] | null => {
+  if (["LL", "HL", "L"].includes(left) && right === "HH") return "bullish";
+  if (["HH", "LH", "H"].includes(left) && right === "LL") return "bearish";
+  return null;
+};
 
 export const toStrategyCandles = (candles: Candle[]): StrategyCandle[] => candles
   .map((candle) => ({
@@ -130,11 +134,10 @@ export const buildGoldilocksLegs = (candles: Candle[]): SwingLeg[] => {
   for (let index = 0; index < swings.length - 1; index += 1) {
     const left = swings[index];
     const right = swings[index + 1];
-    const direction = isBullishPair(left.swing, right.swing)
-      ? 'bullish'
-      : isBearishPair(left.swing, right.swing)
-        ? 'bearish'
-        : null;
+    const direction = getGoldilocksStructureBreakingLegDirection(
+      left.swing,
+      right.swing,
+    );
     if (!direction || !left.time || !right.time) continue;
     const startIndex = indexByTime.get(left.time) ?? -1;
     const endIndex = indexByTime.get(right.time) ?? -1;

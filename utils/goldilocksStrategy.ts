@@ -127,19 +127,14 @@ export const validateGoldilocksFirstTouchCandle = (
   const width = Math.max(Number.EPSILON, zone.width);
   const touchRange = Math.max(0, touchCandle.high - touchCandle.low);
   const touchRangeZoneFraction = touchRange / width;
-  const allowed =
-    touchRangeZoneFraction <=
-    thresholds.maxTouchRangeZoneFraction;
   const percent = (value: number) => (value * 100).toFixed(1);
   return {
-    allowed,
+    allowed: true,
     touchRange,
     touchRangeZoneFraction,
     maxTouchRangeZoneFraction:
       thresholds.maxTouchRangeZoneFraction,
-    reason: allowed
-      ? `First M5 touch range ${percent(touchRangeZoneFraction)}% of the M15 zone width.`
-      : `The first M5 touch candle spans ${percent(touchRangeZoneFraction)}% of the M15 zone; maximum ${percent(thresholds.maxTouchRangeZoneFraction)}%.`,
+    reason: `First M5 touch range ${percent(touchRangeZoneFraction)}% of the M15 zone width; touch-candle size is diagnostic only and does not reject the setup.`,
   };
 };
 
@@ -168,19 +163,16 @@ export const validateGoldilocksEntryProximity = (
   const touchRangeZoneFraction = firstTouch.touchRangeZoneFraction;
   const confirmationDistanceZoneFraction = confirmationDistance / width;
   const executableDistanceZoneFraction = executableDistance / width;
-  const touchAllowed = firstTouch.allowed;
   const executableAllowed =
     executableDistanceZoneFraction <=
     thresholds.maxEntryDistanceZoneFraction;
-  const allowed = touchAllowed && (!executableChecked || executableAllowed);
+  const allowed = !executableChecked || executableAllowed;
   const percent = (value: number) => (value * 100).toFixed(1);
-  const reason = !touchAllowed
-    ? firstTouch.reason
-    : executableChecked && !executableAllowed
+  const reason = executableChecked && !executableAllowed
       ? `The executable entry moved ${percent(executableDistanceZoneFraction)}% of one M15 zone width beyond the proximal edge; maximum ${percent(thresholds.maxEntryDistanceZoneFraction)}%.`
       : executableChecked
-        ? `First M5 touch range ${percent(touchRangeZoneFraction)}%; executable-entry distance ${percent(executableDistanceZoneFraction)}% of the M15 zone width.`
-        : `First M5 touch range ${percent(touchRangeZoneFraction)}% of the M15 zone width; executable bid/ask will be checked immediately before entry.`;
+        ? `First M5 touch range ${percent(touchRangeZoneFraction)}% (diagnostic only); executable-entry distance ${percent(executableDistanceZoneFraction)}% of the M15 zone width.`
+        : `First M5 touch range ${percent(touchRangeZoneFraction)}% (diagnostic only); executable bid/ask will be checked immediately before entry.`;
   return {
     allowed,
     touchRange,
@@ -521,6 +513,22 @@ export const getMostRecentActiveOpposingZone = (
     .filter(
       (zone) =>
         zone.id !== entryZone.id &&
+        zone.side !== entryZone.side &&
+        (knownZonesUsableAtEntry ||
+          (zone.state !== "invalidated" && zone.state !== "expired")),
+    )
+    .sort((a, b) => b.candleTime - a.candleTime)[0];
+
+export const getMostRecentActiveOpposingBase = (
+  entryZone: GoldilocksZone,
+  knownZones: GoldilocksZone[],
+  knownZonesUsableAtEntry = false,
+) =>
+  knownZones
+    .filter(
+      (zone) =>
+        zone.id !== entryZone.id &&
+        zone.kind === "base" &&
         zone.side !== entryZone.side &&
         (knownZonesUsableAtEntry ||
           (zone.state !== "invalidated" && zone.state !== "expired")),
@@ -1616,8 +1624,17 @@ export const validateTwoToOneRunway = (
   entryZone: GoldilocksZone,
   knownZones: GoldilocksZone[],
   confirmedEntryPrice?: number,
-  options?: { knownZonesUsableAtEntry?: boolean },
+  options?: {
+    knownZonesUsableAtEntry?: boolean;
+    targetRewardRatio?: number;
+    targetOpposingBase?: boolean;
+  },
 ): TradeRunwayCheck => {
+  const targetRewardRatio =
+    Number.isFinite(options?.targetRewardRatio) &&
+    Number(options?.targetRewardRatio) >= 1
+      ? Number(options?.targetRewardRatio)
+      : 2;
   const direction: TradeRunwayCheck["direction"] =
     entryZone.side === "demand" ? "buy" : "sell";
   const entry =
@@ -1625,7 +1642,20 @@ export const validateTwoToOneRunway = (
     (direction === "buy" ? entryZone.high : entryZone.low);
   const stopLoss = direction === "buy" ? entryZone.low : entryZone.high;
   const risk = direction === "buy" ? entry - stopLoss : stopLoss - entry;
-  const takeProfit = direction === "buy" ? entry + risk * 2 : entry - risk * 2;
+  const targetBase = options?.targetOpposingBase
+    ? getMostRecentActiveOpposingBase(
+        entryZone,
+        knownZones,
+        options.knownZonesUsableAtEntry,
+      )
+    : undefined;
+  const takeProfit = targetBase
+    ? direction === "buy"
+      ? targetBase.low
+      : targetBase.high
+    : direction === "buy"
+      ? entry + risk * targetRewardRatio
+      : entry - risk * targetRewardRatio;
   if (risk <= 0) {
     return {
       allowed: false,
@@ -1642,6 +1672,57 @@ export const validateTwoToOneRunway = (
         "Rejected: engulfing close is beyond the wrong side of the zone stop.",
     };
   }
+  if (options?.targetOpposingBase && !targetBase) {
+    return {
+      allowed: false,
+      direction,
+      entry,
+      stopLoss,
+      takeProfit: entry,
+      risk,
+      reward: 0,
+      ratio: 0,
+      availableReward: 0,
+      availableRatio: 0,
+      reason:
+        "Rejected: no causally available opposing base exists for the fixed target.",
+    };
+  }
+  const selectedReward =
+    direction === "buy" ? takeProfit - entry : entry - takeProfit;
+  if (selectedReward <= 0) {
+    return {
+      allowed: false,
+      direction,
+      entry,
+      stopLoss,
+      takeProfit,
+      risk,
+      reward: selectedReward,
+      ratio: selectedReward / risk,
+      availableReward: 0,
+      availableRatio: 0,
+      blockingZoneId: targetBase?.id,
+      reason: "Rejected: the selected opposing base is not ahead of entry.",
+    };
+  }
+  const selectedRatio = selectedReward / risk;
+  if (options?.targetOpposingBase && selectedRatio < 2) {
+    return {
+      allowed: false,
+      direction,
+      entry,
+      stopLoss,
+      takeProfit,
+      risk,
+      reward: selectedReward,
+      ratio: selectedRatio,
+      availableReward: selectedReward,
+      availableRatio: selectedRatio,
+      blockingZoneId: targetBase?.id,
+      reason: `Rejected: opposing base offers only ${selectedRatio.toFixed(2)}R; minimum required runway is 2.00R.`,
+    };
+  }
   const opposingZone = getMostRecentActiveOpposingZone(
     entryZone,
     knownZones,
@@ -1655,6 +1736,7 @@ export const validateTwoToOneRunway = (
   const availableRatio = availableReward / risk;
   const blockingZone =
     opposingZone &&
+    opposingZone.id !== targetBase?.id &&
     (direction === "buy"
       ? opposingZone.high > entry && opposingZone.low <= takeProfit
       : opposingZone.low < entry && opposingZone.high >= takeProfit)
@@ -1667,8 +1749,8 @@ export const validateTwoToOneRunway = (
     stopLoss,
     takeProfit,
     risk,
-    reward: risk * 2,
-    ratio: 2,
+    reward: selectedReward,
+    ratio: selectedRatio,
     availableReward,
     availableRatio,
   };
@@ -1677,14 +1759,16 @@ export const validateTwoToOneRunway = (
         ...common,
         allowed: false,
         blockingZoneId: blockingZone.id,
-        reason: `Rejected: ${blockingZone.kind} ${blockingZone.side} zone blocks the clear 2:1 path.`,
+        reason: `Rejected: ${blockingZone.kind} ${blockingZone.side} zone blocks the clear path to ${options?.targetOpposingBase ? "the opposing base" : `1:${targetRewardRatio}`}.`,
       }
     : {
         ...common,
         allowed: true,
-        reason: opposingZone
-          ? `Clear 2:1 runway: the most recent active ${opposingZone.kind} ${opposingZone.side} zone begins beyond target.`
-          : "Clear 2:1 runway: no active opposing Goldilocks zone is currently stored.",
+        reason: options?.targetOpposingBase
+          ? `Clear ${common.ratio.toFixed(2)}R runway to first touch of opposing base ${targetBase!.id}.`
+          : opposingZone
+          ? `Clear 1:${targetRewardRatio} runway: the most recent active ${opposingZone.kind} ${opposingZone.side} zone begins beyond target.`
+          : `Clear 1:${targetRewardRatio} runway: no active opposing Goldilocks zone is currently stored.`,
       };
 };
 

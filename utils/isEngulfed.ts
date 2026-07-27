@@ -2,7 +2,7 @@ import { fetchCandles } from "./oanda/api/fetchCandles.ts";
 import { fetchLatestCandles } from "./oanda/api/fetchLatestCandles.ts";
 import { isStrongBody, getAverageRange } from "./swingLabeler.ts";
 import type { SwingResult } from "./swingLabeler.ts";
-import { ACTION } from "./oanda/api/order.ts";
+import { ACTION } from "./oanda/orderTypes.ts";
 import { logMessage } from "./automationLogger.ts";
 import { fetchPriceOnce, killStreamByPair, streamToCandles } from "../utils/oanda/api/priceStreamManager.ts";
 import { toLocalTime, getPrecision } from "./shared.ts";

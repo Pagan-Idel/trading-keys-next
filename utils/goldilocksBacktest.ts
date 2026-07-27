@@ -35,6 +35,7 @@ import {
   normalizeGoldilocksBacktestGates,
   type GoldilocksBacktestTweaks,
   type GoldilocksBacktestGates,
+  type GoldilocksConfirmationMode,
   type GoldilocksScoreWeights,
   type GoldilocksTimeframeContract,
 } from "./goldilocksConfig.ts";
@@ -59,6 +60,9 @@ import {
   GOLDILOCKS_DEFAULT_MANAGEMENT,
   GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
   GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+  GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+  GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID,
+  resolveGoldilocksAdaptiveScaleOut,
   calculateAtr,
   getGoldilocksAtrTrailingStop,
   goldilocksSecuredRAtBreakEven,
@@ -81,6 +85,10 @@ export interface GoldilocksBacktestInput {
   gateSettings?: GoldilocksBacktestGates;
   scoreWeights?: GoldilocksScoreWeights;
   tradeManager?: GoldilocksBacktestManagerId;
+  confirmationMode?: GoldilocksConfirmationMode;
+  setAndForgetTargetR?: number;
+  setAndForgetTargetMode?: "fixed-r" | "opposing-base";
+  closeTradesBeforeWeekend?: boolean;
   reverseFinalSignal?: boolean;
   onProgress?: (progress: {
     stage: string;
@@ -116,8 +124,10 @@ export const reverseGoldilocksExecution = (runway: {
   entry: number;
   risk: number;
   direction: "buy" | "sell";
+  ratio?: number;
 }) => {
   const direction = runway.direction === "buy" ? "SELL" : "BUY";
+  const targetRewardRatio = runway.ratio ?? 2;
   return {
     direction,
     entry: runway.entry,
@@ -132,8 +142,8 @@ export const reverseGoldilocksExecution = (runway: {
         : runway.entry - runway.risk,
     takeProfit:
       direction === "BUY"
-        ? runway.entry + runway.risk * 2
-        : runway.entry - runway.risk * 2,
+        ? runway.entry + runway.risk * targetRewardRatio
+        : runway.entry - runway.risk * targetRewardRatio,
   } as const;
 };
 const lastAtOrBefore = <T extends { time: number }>(
@@ -245,16 +255,13 @@ const marketContextAt = (
 ): { trend: GoldilocksTrend } => {
   const position = lastAtOrBefore(index, time);
   const point = position >= 0 ? index[position] : undefined;
-  if (!point)
-    return { trend: "unknown" };
+  if (!point) return { trend: "unknown" };
   return { trend: point.trend };
 };
 const legacyRunnerFractionForScore = (score?: number) =>
   score == null || score < 16 ? 0 : score < 18 ? 0.25 : 0.5;
-const legacyBlendedRunnerR = (
-  runnerFraction: number,
-  runnerExitR: number,
-) => (1 - runnerFraction) * 2 + runnerFraction * runnerExitR;
+const legacyBlendedRunnerR = (runnerFraction: number, runnerExitR: number) =>
+  (1 - runnerFraction) * 2 + runnerFraction * runnerExitR;
 
 const resolveSetAndForgetOutcome = (
   candles: StrategyCandle[],
@@ -268,8 +275,8 @@ const resolveSetAndForgetOutcome = (
   const entry = (stopLoss + oneR) / 2;
   const risk = Math.abs(entry - stopLoss);
   const target =
-    takeProfit ??
-    (direction === "BUY" ? entry + risk * 2 : entry - risk * 2);
+    takeProfit ?? (direction === "BUY" ? entry + risk * 2 : entry - risk * 2);
+  const targetR = Math.abs(target - entry) / risk;
   for (let index = startIndex; index < candles.length; index += 1) {
     const candle = candles[index];
     if (
@@ -303,8 +310,73 @@ const resolveSetAndForgetOutcome = (
         outcome: "WIN" as const,
         outcomeTime: candle.time,
         exitReason: "target" as const,
-        realizedR: 2,
+        realizedR: targetR,
       };
+  }
+  return null;
+};
+
+const resolveUntouchedStopRunnerOutcome = (
+  candles: StrategyCandle[],
+  startIndex: number,
+  direction: "BUY" | "SELL",
+  stopLoss: number,
+  oneR: number,
+  weekendLiquidationTime?: number,
+) => {
+  const entry = (stopLoss + oneR) / 2;
+  const risk = Math.abs(entry - stopLoss);
+  const partialFraction = GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction;
+  const bankedR = GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR * partialFraction;
+  let partialAt = -1;
+  for (let index = startIndex; index < candles.length; index += 1) {
+    const candle = candles[index];
+    if (
+      weekendLiquidationTime !== undefined &&
+      candle.time >= weekendLiquidationTime
+    ) {
+      const openR =
+        (direction === "BUY" ? candle.open - entry : entry - candle.open) /
+        risk;
+      const boundedOpenR = Math.max(-1, openR);
+      const realizedR =
+        partialAt >= 0
+          ? bankedR + (1 - partialFraction) * boundedOpenR
+          : boundedOpenR;
+      return {
+        outcome: (realizedR > 0 || partialAt >= 0 ? "WIN" : "LOSS") as
+          "WIN" | "LOSS",
+        outcomeTime: candle.time,
+        exitReason: "weekend_close" as const,
+        realizedR,
+      };
+    }
+    const stopped =
+      direction === "BUY" ? candle.low <= stopLoss : candle.high >= stopLoss;
+    if (stopped)
+      return {
+        outcome: (partialAt >= 0 ? "WIN" : "LOSS") as "WIN" | "LOSS",
+        outcomeTime: candle.time,
+        exitReason:
+          partialAt >= 0 ? ("runner_stop" as const) : ("stop" as const),
+        realizedR: partialAt >= 0 ? 0 : -1,
+      };
+    if (
+      partialAt < 0 &&
+      (direction === "BUY" ? candle.high >= oneR : candle.low <= oneR)
+    )
+      partialAt = index;
+  }
+  if (partialAt >= 0 && candles.length) {
+    const last = candles[candles.length - 1];
+    const endingR =
+      (direction === "BUY" ? last.close - entry : entry - last.close) / risk;
+    return {
+      outcome: "WIN" as const,
+      outcomeTime: last.time,
+      exitReason: "runner_open" as const,
+      realizedR: bankedR + (1 - partialFraction) * Math.max(-1, endingR),
+    };
   }
   return null;
 };
@@ -322,8 +394,7 @@ const resolveLegacyScoreTieredOutcome = (
   const entry = (stopLoss + oneR) / 2;
   const risk = Math.abs(entry - stopLoss);
   const target =
-    takeProfit ??
-    (direction === "BUY" ? entry + risk * 2 : entry - risk * 2);
+    takeProfit ?? (direction === "BUY" ? entry + risk * 2 : entry - risk * 2);
   const runnerTarget =
     direction === "BUY" ? entry + risk * 4 : entry - risk * 4;
   const runnerFraction = legacyRunnerFractionForScore(score);
@@ -476,6 +547,24 @@ export const resolveProtectedOutcome = (
       score,
       weekendLiquidationTime,
     );
+  if (manager === GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID)
+    return resolveUntouchedStopRunnerOutcome(
+      candles,
+      startIndex,
+      direction,
+      stopLoss,
+      oneR,
+      weekendLiquidationTime,
+    );
+  if (manager === GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID)
+    return resolveGoldilocksAdaptiveScaleOut({
+      candles,
+      startIndex,
+      direction,
+      stopLoss,
+      oneR,
+      weekendLiquidationTime,
+    });
   const entry = (stopLoss + oneR) / 2;
   const risk = Math.abs(entry - stopLoss);
   const target =
@@ -682,10 +771,7 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
         direction === "BUY"
           ? firstHighAtLeast(startIndex, target)
           : firstLowAtMost(startIndex, target);
-      if (
-        stopIndex >= 0 &&
-        (targetIndex < 0 || stopIndex <= targetIndex)
-      )
+      if (stopIndex >= 0 && (targetIndex < 0 || stopIndex <= targetIndex))
         return {
           outcome: "LOSS" as const,
           outcomeTime: candles[stopIndex].time,
@@ -697,7 +783,7 @@ export const buildProtectedOutcomeResolver = (candles: StrategyCandle[]) => {
             outcome: "WIN" as const,
             outcomeTime: candles[targetIndex].time,
             exitReason: "target" as const,
-            realizedR: 2,
+            realizedR: Math.abs(target - entry) / risk,
           }
         : null;
     }
@@ -907,7 +993,9 @@ export const simulateGoldilocksPair = (
     for (let index = firstIndex; index < zoneSignalCandles.length; index += 1) {
       const candle = zoneSignalCandles[index];
       const broken =
-        zone.side === "demand" ? candle.low < zone.low : candle.high > zone.high;
+        zone.side === "demand"
+          ? candle.low < zone.low
+          : candle.high > zone.high;
       if (broken)
         return { zoneArmedAt: undefined, invalidatedBeforeArmed: true };
       const outside =
@@ -922,11 +1010,13 @@ export const simulateGoldilocksPair = (
     }
     return { zoneArmedAt: undefined, invalidatedBeforeArmed: false };
   };
-  const pending = zoneHistory.zones.filter((zone)=>zone.kind==="base").sort(
-    (left, right) =>
-      (left.availableAt ?? left.candleTime) -
-      (right.availableAt ?? right.candleTime),
-  );
+  const pending = zoneHistory.zones
+    .filter((zone) => zone.kind === "base")
+    .sort(
+      (left, right) =>
+        (left.availableAt ?? left.candleTime) -
+        (right.availableAt ?? right.candleTime),
+    );
   const active = new Map<string, ZoneScanState>();
   let pendingIndex = 0;
   const progressEvery = Math.max(1, Math.floor(confirmation.length / 100));
@@ -957,9 +1047,19 @@ export const simulateGoldilocksPair = (
     }
     for (const [zoneId, state] of active) {
       const { zone } = state;
+      const touched = candle.high >= zone.low && candle.low <= zone.high;
+      const eligibleImmediateTouch =
+        input.confirmationMode === "touch-entry" &&
+        state.touch.touchCandleIndex < 0 &&
+        !state.invalidatedBeforeArmed &&
+        state.zoneArmedAt !== undefined &&
+        candle.time >= state.zoneArmedAt &&
+        touched;
       if (
         candle.time > expiresAt(zone.candleTime) ||
-        (zone.invalidatedAt && candle.time >= zone.invalidatedAt)
+        (zone.invalidatedAt &&
+          candle.time >= zone.invalidatedAt &&
+          !eligibleImmediateTouch)
       ) {
         active.delete(zoneId);
         continue;
@@ -968,36 +1068,46 @@ export const simulateGoldilocksPair = (
         zone.side === "demand"
           ? candle.low < zone.low
           : candle.high > zone.high;
-      if (broken) {
+      if (broken && !eligibleImmediateTouch) {
         active.delete(zoneId);
         continue;
+      }
+      if (state.touch.touchCandleIndex < 0) {
+        if (state.invalidatedBeforeArmed) {
+          active.delete(zoneId);
+          continue;
+        }
+        if (
+          state.zoneArmedAt !== undefined &&
+          candle.time >= state.zoneArmedAt &&
+          touched
+        )
+          state.touch.touchCandleIndex = index;
       }
       const pendingTouch =
         state.touch.touchCandleIndex >= 0
           ? confirmation[state.touch.touchCandleIndex]
           : undefined;
+      const immediateTouchEntry =
+        input.confirmationMode === "touch-entry" &&
+        state.touch.touchCandleIndex === index;
       const confirmed =
         pendingTouch !== undefined &&
-        (zone.side === "demand"
-          ? candle.close > candle.open && candle.close > pendingTouch.high
-          : candle.close < candle.open && candle.close < pendingTouch.low);
+        (immediateTouchEntry ||
+          (zone.side === "demand"
+            ? candle.close > candle.open && candle.close > pendingTouch.high
+            : candle.close < candle.open && candle.close < pendingTouch.low));
       if (!confirmed) {
-        if (state.touch.touchCandleIndex < 0) {
-          const touched = candle.high >= zone.low && candle.low <= zone.high;
-          if (state.invalidatedBeforeArmed) {
-            active.delete(zoneId);
-            continue;
-          }
-          if (
-            state.zoneArmedAt !== undefined &&
-            candle.time >= state.zoneArmedAt &&
-            touched
-          )
-            state.touch.touchCandleIndex = index;
-        }
         continue;
       }
-      const confirmationCloseTime = candle.time + confirmationSeconds;
+      const signalEntry = immediateTouchEntry
+        ? zone.side === "demand"
+          ? zone.high
+          : zone.low
+        : candle.close;
+      const confirmationCloseTime = immediateTouchEntry
+        ? candle.time
+        : candle.time + confirmationSeconds;
       const entryDate = new Date(confirmationCloseTime * 1000);
       const marketHoursAllowed =
         isForexMarketOpenAt(entryDate) &&
@@ -1016,7 +1126,10 @@ export const simulateGoldilocksPair = (
         state.touch.touchCandleIndex = -1;
         continue;
       }
-      if (gateSettings.pairSession && !isTradeSessionOpen(input.pair, entryDate)) {
+      if (
+        gateSettings.pairSession &&
+        !isTradeSessionOpen(input.pair, entryDate)
+      ) {
         input.onSessionRejected?.(
           confirmationCloseTime,
           "Neither pair currency is inside its DST-aware local trading session at entry eligibility.",
@@ -1068,8 +1181,8 @@ export const simulateGoldilocksPair = (
       const proximity = validateGoldilocksEntryProximity(
         zone,
         pendingTouch,
-        candle.close,
-        candle.close,
+        signalEntry,
+        signalEntry,
         strategyTweaks,
       );
       const entryProximityAllowed = proximity.allowed;
@@ -1106,10 +1219,19 @@ export const simulateGoldilocksPair = (
         continue;
       }
       const known = zoneHistory.zones.filter((item) =>
-        zoneUsableAt(item, candle.time),
+        zoneUsableAt(item, confirmationCloseTime),
       );
-      const runway = validateTwoToOneRunway(zone, known, candle.close, {
+      const runway = validateTwoToOneRunway(zone, known, signalEntry, {
         knownZonesUsableAtEntry: true,
+        targetRewardRatio:
+          normalizeGoldilocksBacktestManager(input.tradeManager) ===
+          GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID
+            ? input.setAndForgetTargetR
+            : 2,
+        targetOpposingBase:
+          normalizeGoldilocksBacktestManager(input.tradeManager) ===
+            GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID &&
+          input.setAndForgetTargetMode === "opposing-base",
       });
       if (runway.allowed || !gateSettings.twoToOneRunway) {
         const scoredZone = annotateConfluenceAt(
@@ -1123,16 +1245,13 @@ export const simulateGoldilocksPair = (
           sources,
         );
         const direction = zone.side === "demand" ? "BUY" : "SELL";
-        const context = marketContextAt(
-          marketContext,
-          candle.time,
-        );
+        const context = marketContextAt(marketContext, confirmationCloseTime);
         const trend = context.trend;
         const approachPressure = measureGoldilocksApproachPressure(
           zone,
           confirmation,
           state.touch.touchCandleIndex,
-          index,
+          immediateTouchEntry ? Math.max(0, index - 1) : index,
         );
         const score = scoreGoldilocksSetup({
           zone: scoredZone,
@@ -1141,8 +1260,8 @@ export const simulateGoldilocksPair = (
           minimumScore: input.minimumScore,
           purityTouches: purity.touches,
           adverseWarningCount: approachPressure.adversePressureScore,
-            strategyTweaks,
-            scoreWeights: input.scoreWeights,
+          strategyTweaks,
+          scoreWeights: input.scoreWeights,
           timeframes,
           gates: [
             {
@@ -1153,7 +1272,9 @@ export const simulateGoldilocksPair = (
             {
               name: "Confirmation freshness",
               passed: true,
-              reason: `${timeframes.confirmation} close-through completed after its touch candle.`,
+              reason: immediateTouchEntry
+                ? `${timeframes.confirmation} first touch triggered a resting entry at the zone proximal edge.`
+                : `${timeframes.confirmation} close-through completed after its touch candle.`,
             },
             { name: "Entry proximity", passed: true, reason: proximity.reason },
             {
@@ -1179,15 +1300,18 @@ export const simulateGoldilocksPair = (
                 "At least one pair currency is inside its DST-aware local trading session.",
             },
             { name: "Historical news", passed: true, reason: newsGate.reason },
-            { name: "2:1 runway", passed: true, reason: runway.reason },
+            {
+              name: `1:${runway.ratio} runway`,
+              passed: true,
+              reason: runway.reason,
+            },
           ],
         });
         if (score.eligible) {
           let executionDirection: "BUY" | "SELL" = direction;
           let executionRunway = runway;
           let reversedExecution:
-            | ReturnType<typeof reverseGoldilocksExecution>
-            | undefined;
+            ReturnType<typeof reverseGoldilocksExecution> | undefined;
           if (input.reverseFinalSignal) {
             reversedExecution = reverseGoldilocksExecution(runway);
             const reversedZone: GoldilocksZone = {
@@ -1206,7 +1330,18 @@ export const simulateGoldilocksPair = (
               reversedZone,
               known,
               reversedExecution.entry,
-              { knownZonesUsableAtEntry: true },
+              {
+                knownZonesUsableAtEntry: true,
+                targetRewardRatio:
+                  normalizeGoldilocksBacktestManager(input.tradeManager) ===
+                  GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID
+                    ? input.setAndForgetTargetR
+                    : 2,
+                targetOpposingBase:
+                  normalizeGoldilocksBacktestManager(input.tradeManager) ===
+                    GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID &&
+                  input.setAndForgetTargetMode === "opposing-base",
+              },
             );
             executionDirection = reversedExecution.direction;
             if (gateSettings.twoToOneRunway && !executionRunway.allowed) {
@@ -1237,9 +1372,10 @@ export const simulateGoldilocksPair = (
             state.touch.touchCandleIndex = -1;
             continue;
           }
-          const weekendLiquidationTime = nextForexWeekendLiquidationTime(
-            confirmationCloseTime,
-          );
+          const weekendLiquidationTime =
+            input.closeTradesBeforeWeekend === false
+              ? undefined
+              : nextForexWeekendLiquidationTime(confirmationCloseTime);
           const resolved = resolveOutcome(
             outcomeStart,
             executionDirection,
@@ -1281,17 +1417,25 @@ export const simulateGoldilocksPair = (
                 oneR,
                 takeProfit: executionRunway.takeProfit,
                 score: score.total,
-                scoreJson: input.reverseFinalSignal
-                  ? {
-                      ...score,
-                      executionAssumption: {
-                        id: "yolo-reverse-final-signal-v1",
-                        originalDirection: direction,
-                        executedDirection: executionDirection,
-                        reversedRunwayReason: executionRunway.reason,
-                      },
-                    }
-                  : score,
+                scoreJson: {
+                  ...score,
+                  confirmationAssumption: {
+                    id: immediateTouchEntry ? "touch-entry" : "close-through",
+                    entryTime: confirmationCloseTime,
+                    entryPrice: signalEntry,
+                    touchTime: pendingTouch.time,
+                  },
+                  ...(input.reverseFinalSignal
+                    ? {
+                        executionAssumption: {
+                          id: "yolo-reverse-final-signal-v1",
+                          originalDirection: direction,
+                          executedDirection: executionDirection,
+                          reversedRunwayReason: executionRunway.reason,
+                        },
+                      }
+                    : {}),
+                },
                 priorTouches: purity.touches,
                 maxPenetration: 0,
                 availableRrr: executionRunway.availableRatio,
@@ -1322,7 +1466,9 @@ export const simulateGoldilocksPair = (
     const entryEligibilityTime = trade.confirmationTime + confirmationSeconds;
     const startIndex = firstAtOrAfter(outcomeCandles, entryEligibilityTime);
     const weekendLiquidationTime =
-      nextForexWeekendLiquidationTime(entryEligibilityTime);
+      input.closeTradesBeforeWeekend === false
+        ? undefined
+        : nextForexWeekendLiquidationTime(entryEligibilityTime);
     trade.marketPath = summarizeTradeMarketPath({
       candles: outcomeCandles,
       startIndex,

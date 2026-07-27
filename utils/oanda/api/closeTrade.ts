@@ -2,7 +2,7 @@
 
 import credentials from "../../../credentials.json";
 import type { Trade } from "./openNow";
-import { ACTION } from "./order";
+import { ACTION } from "../orderTypes";
 import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
 import { recentTrade } from "../../shared";

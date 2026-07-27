@@ -142,8 +142,11 @@ export const buildGoldilocksResearchManifest = (
       {
         id: "entry_proximity",
         name: "Entry proximity",
-        rule: "First-touch range, confirmation distance, and executable-entry distance must stay within the configured zone-width limits.",
-        value: GOLDILOCKS_ENTRY_PROXIMITY,
+        rule: "Touch-candle range is recorded as a diagnostic only. The executable-entry distance must stay within its configured zone-width limit, and the final runway is rechecked from that executable entry.",
+        value: {
+          maxEntryDistanceZoneFraction:
+            GOLDILOCKS_ENTRY_PROXIMITY.maxEntryDistanceZoneFraction,
+        },
       },
       {
         id: "departure_shock",

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import styled from 'styled-components';
 import { buildDomId, buildDataTestId } from '../../utils/dom';
-import { ACTION, TYPE } from '../../utils/oanda/api/order';
+import { ACTION, TYPE } from '../../utils/oanda/orderTypes';
 import { forexPairs } from '../../utils/constants';
 import Notification from '../Notification';
 

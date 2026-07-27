@@ -21,6 +21,18 @@ export const simulateBacktestPortfolio=(source:PortfolioTrade[],config:Portfolio
   const positions=new Map<string,{riskAmount:number;margin:number;trade:PortfolioTrade}>();
   const byPair=new Map<string,{pair:string;trades:number;wins:number;losses:number;net:number;totalR:number}>();
   const trades:Array<{trade:PortfolioTrade;riskAmount:number;realizedR:number;pnl:number}>=[];
+  const blockedTrades:Array<{
+    trade:PortfolioTrade;
+    riskAmount:number;
+    requiredMargin:number;
+    effectiveLeverage:number;
+    stopFraction:number;
+    reason:string;
+    projectedAvailableMargin:number;
+    projectedAvailableMarginNavFraction:number;
+    projectedCloseoutPercent:number;
+    projectedPortfolioRiskFraction:number;
+  }>=[];
   const events=source.flatMap(trade=>[
     {time:Number(trade.confirmationTime),kind:'entry' as const,trade},
     {time:Number(trade.outcomeTime),kind:'exit' as const,trade},
@@ -53,7 +65,22 @@ export const simulateBacktestPortfolio=(source:PortfolioTrade[],config:Portfolio
         proposedMargin:requiredMargin,
         proposedRiskAmount:desiredRisk,
       });
-      if(!admission.allowed){marginBlocked+=1;continue}
+      if(!admission.allowed){
+        marginBlocked+=1;
+        blockedTrades.push({
+          trade:event.trade,
+          riskAmount:desiredRisk,
+          requiredMargin,
+          effectiveLeverage,
+          stopFraction:marginEstimate.stopFraction,
+          reason:admission.reason,
+          projectedAvailableMargin:admission.projectedAvailableMargin,
+          projectedAvailableMarginNavFraction:admission.projectedAvailableMarginNavFraction,
+          projectedCloseoutPercent:admission.projectedCloseoutPercent,
+          projectedPortfolioRiskFraction:admission.projectedPortfolioRiskFraction,
+        });
+        continue
+      }
       positions.set(key,{riskAmount:desiredRisk,margin:requiredMargin,trade:event.trade});
       usedMargin+=requiredMargin;openRisk+=desiredRisk;peakMargin=Math.max(peakMargin,usedMargin);totalRisked+=desiredRisk;
       continue;
@@ -68,5 +95,5 @@ export const simulateBacktestPortfolio=(source:PortfolioTrade[],config:Portfolio
     row.trades+=1;row.wins+=realizedR>0?1:0;row.losses+=realizedR<0?1:0;row.net+=pnl;row.totalR+=realizedR;byPair.set(position.trade.pair,row);
   }
   trades.sort((left,right)=>left.trade.confirmationTime-right.trade.confirmationTime);
-  return {initial,ending:equity,net:equity-initial,returnPercent:(equity-initial)/initial*100,maxDrawdown,totalRisked,marginBlocked,peakMargin,acceptedTrades:trades.length,trades,byPair:[...byPair.values()].sort((a,b)=>b.net-a.net)};
+  return {initial,ending:equity,net:equity-initial,returnPercent:(equity-initial)/initial*100,maxDrawdown,totalRisked,marginBlocked,peakMargin,acceptedTrades:trades.length,trades,blockedTrades,byPair:[...byPair.values()].sort((a,b)=>b.net-a.net)};
 };

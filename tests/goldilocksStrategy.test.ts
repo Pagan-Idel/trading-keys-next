@@ -46,6 +46,7 @@ import {
 } from "../utils/spreadGuard";
 import {
   findFreshGoldilocksConfirmations,
+  getGoldilocksStructureBreakingLegDirection,
   getProtectedStructureTrend,
   zoneUsableAt,
 } from "../utils/goldilocksScanner";
@@ -66,6 +67,7 @@ import {
 } from "../utils/goldilocksBacktest";
 import {
   GOLDILOCKS_CHART_STACKS,
+  GOLDILOCKS_CONFIRMATION_MODES,
   GOLDILOCKS_BACKTEST_GATE_DEFAULTS,
   GOLDILOCKS_BACKTEST_TWEAK_DEFAULTS,
   GOLDILOCKS_DEMO_TIMEFRAMES,
@@ -79,6 +81,7 @@ import {
   isGoldilocksIntradayStrategyVersion,
   isGoldilocksReplayStrategyCompatible,
   normalizeGoldilocksBacktestGates,
+  normalizeGoldilocksConfirmationMode,
   normalizeGoldilocksBacktestTweaks,
   normalizeGoldilocksScoreWeights,
   rebalanceGoldilocksScoreCategories,
@@ -86,6 +89,7 @@ import {
 } from "../utils/goldilocksConfig";
 import {
   annotateReplayZonePurityAt,
+  buildStoredReplayZoneFallback,
   filterReplayRejectedFirstTouchesAt,
   formatStrategyReplayEnid,
   formatStrategyReplayNewYork,
@@ -100,6 +104,7 @@ import {
   getStrategyReplayZoneFormationDetails,
   getStrategyReplayBaseContextStart,
   getStrategyReplayContextAnchor,
+  getStrategyReplayForwardPageWindow,
   getStrategyReplayRequestEnd,
   getStrategyReplayWindow,
   isStoredReplayZoneMatch,
@@ -108,7 +113,11 @@ import {
   STRATEGY_REPLAY_BASE_CONTEXT_SECONDS,
 } from "../utils/strategyReplay";
 import { evaluateHistoricalNewsGate } from "../utils/historicalNewsStore";
-import { stableBacktestTradeId } from "../utils/backtestStore";
+import {
+  selectTopBacktestLeaderboardRecords,
+  stableBacktestRunUid,
+  stableBacktestTradeId,
+} from "../utils/backtestStore";
 import {
   getForexHolidayStatusAt,
   isForexMarketOpenAt,
@@ -133,14 +142,40 @@ import {
   GOLDILOCKS_DEFAULT_MANAGEMENT,
   GOLDILOCKS_LEGACY_SCORE_TIERED_MANAGEMENT_ID,
   GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+  GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+  GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID,
   getGoldilocksPartialClosePlan,
   normalizeGoldilocksBacktestManager,
 } from "../utils/goldilocksTradeManagement";
 import { measureZoneCorridor } from "../utils/zoneCorridor";
 import { mergeCandleCoverageRanges } from "../utils/candleArchive";
 import { buildAutoResearchConfigurations } from "../utils/autoResearchRunner";
+import { normalizeBacktestConfig } from "../utils/backtestRunner";
 import { researchConfigHash } from "../utils/autoResearchStore";
 import { buildGoldilocksResearchManifest } from "../utils/goldilocksResearchManifest";
+
+test("creates swing legs only when the destination breaks structure", () => {
+  assert.equal(
+    getGoldilocksStructureBreakingLegDirection("HL", "HH"),
+    "bullish",
+  );
+  assert.equal(
+    getGoldilocksStructureBreakingLegDirection("LL", "HH"),
+    "bullish",
+  );
+  assert.equal(
+    getGoldilocksStructureBreakingLegDirection("LH", "LL"),
+    "bearish",
+  );
+  assert.equal(
+    getGoldilocksStructureBreakingLegDirection("HH", "LL"),
+    "bearish",
+  );
+
+  assert.equal(getGoldilocksStructureBreakingLegDirection("LL", "LH"), null);
+  assert.equal(getGoldilocksStructureBreakingLegDirection("HH", "HL"), null);
+  assert.equal(getGoldilocksStructureBreakingLegDirection("L", "H"), null);
+});
 
 test("stored replay compatibility preserves numeric and exact research stacks", () => {
   assert.equal(isGoldilocksIntradayStrategyVersion("0.31"), true);
@@ -168,10 +203,7 @@ test("stored replay compatibility preserves numeric and exact research stacks", 
     ),
     false,
   );
-  assert.equal(
-    isGoldilocksReplayStrategyCompatible("0.39", "0.40"),
-    true,
-  );
+  assert.equal(isGoldilocksReplayStrategyCompatible("0.39", "0.40"), true);
 });
 
 const imbalanceBalanceFixture = (
@@ -491,7 +523,7 @@ test("measures backtest edge from realized R instead of protected-win labels", (
 });
 
 test("labels a new run with only its strategy version and run date", () => {
-  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.42");
+  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.49");
   assert.equal(
     getGoldilocksBacktestRunLabel(
       "lowerTimeframe",
@@ -515,7 +547,7 @@ test("labels a new run with only its strategy version and run date", () => {
 test("shows research profiles with the current score-component maximums", () => {
   assert.equal(
     goldilocksScoreContractVersionNumber("m15-m5-m1-research-v3"),
-    42,
+    49,
   );
   assert.equal(
     goldilocksScoreComponentMaximum(
@@ -532,10 +564,7 @@ test("shows research profiles with the current score-component maximums", () => 
     4,
   );
   assert.equal(
-    goldilocksScoreComponentMaximum(
-      "M15 trend",
-      "m15-m5-m1-research-v3",
-    ),
+    goldilocksScoreComponentMaximum("M15 trend", "m15-m5-m1-research-v3"),
     3,
   );
   assert.equal(
@@ -589,6 +618,34 @@ test("keeps the live intraday contract locked while exposing lower- and higher-t
   assert.equal(higher.strategyVersion, "d1-h4-h1-research-v3");
 });
 
+test("normalizes the two explicit confirmation modes and defaults safely", () => {
+  assert.equal(
+    normalizeGoldilocksConfirmationMode(
+      GOLDILOCKS_CONFIRMATION_MODES.touchEntry.id,
+    ),
+    "touch-entry",
+  );
+  assert.equal(
+    normalizeGoldilocksConfirmationMode("close-through"),
+    "close-through",
+  );
+  assert.equal(normalizeGoldilocksConfirmationMode("unknown"), "close-through");
+  assert.equal(normalizeGoldilocksConfirmationMode(undefined), "close-through");
+});
+
+test("defaults new manual backtests to set-and-forget at the opposing base", () => {
+  const config = normalizeBacktestConfig({
+    pairs: ["EUR/USD"],
+    label: "   ",
+  });
+  assert.equal(
+    config.tradeManager,
+    GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+  );
+  assert.equal(config.setAndForgetTargetMode, "opposing-base");
+  assert.match(config.label, /^0\.49 .* \d{4}-\d{2}-\d{2}$/);
+});
+
 test("normalizes a complete backtest-only numeric tweak snapshot", () => {
   const tweaks = normalizeGoldilocksBacktestTweaks({
     maxTouchRangeZoneFraction: 0.35,
@@ -639,11 +696,7 @@ test("normalizes saved backtest gate switches and score weights", () => {
 
 test("rebalances editable score categories to exactly twenty points", () => {
   const current = getGoldilocksScoreCategoryWeights();
-  const rebalanced = rebalanceGoldilocksScoreCategories(
-    current,
-    "trend",
-    6,
-  );
+  const rebalanced = rebalanceGoldilocksScoreCategories(current, "trend", 6);
   assert.ok(
     Math.abs(
       Object.values(rebalanced).reduce((sum, value) => sum + value, 0) - 20,
@@ -659,7 +712,7 @@ test("rebalances editable score categories to exactly twenty points", () => {
   );
 });
 
-test("applies an edited touch-range gate to the backtest validator", () => {
+test("keeps first-touch candle size diagnostic instead of rejecting the setup", () => {
   const zone = {
     id: "editable-touch-gate",
     kind: "base" as const,
@@ -679,7 +732,7 @@ test("applies an edited touch-range gate to the backtest validator", () => {
     reasons: [],
   };
   const touch = { time: 2, open: 100, high: 100.3, low: 99.7, close: 100.1 };
-  assert.equal(validateGoldilocksFirstTouchCandle(zone, touch).allowed, false);
+  assert.equal(validateGoldilocksFirstTouchCandle(zone, touch).allowed, true);
   assert.equal(
     validateGoldilocksFirstTouchCandle(zone, touch, {
       maxTouchRangeZoneFraction: 0.7,
@@ -753,9 +806,11 @@ test("builds a deterministic overnight matrix without varying account risk", () 
   assert.ok(
     configurations.every((config) => {
       const categories = getGoldilocksScoreCategoryWeights(config.scoreWeights);
-      return Math.abs(
-        Object.values(categories).reduce((sum, value) => sum + value, 0) - 20,
-      ) < 1e-9;
+      return (
+        Math.abs(
+          Object.values(categories).reduce((sum, value) => sum + value, 0) - 20,
+        ) < 1e-9
+      );
     }),
   );
   assert.equal(
@@ -791,7 +846,7 @@ test("freezes every gate, score component, diagnostic, risk profile, and manager
         item.name === "Approach pressure / confirmation bias" && item.scored,
     ),
   );
-  assert.equal(manifest.managementPolicies.length, 23);
+  assert.equal(manifest.managementPolicies.length, 25);
   assert.deepEqual(Object.keys(manifest.riskProfiles).sort(), [
     "aggressive",
     "default",
@@ -834,7 +889,13 @@ test("measures mirrored approach pressure causally without using candles after c
     low: values[2],
     close: values[3],
   }));
-  const supplyZone = { side: "supply" as const, low: 110, high: 111, width: 1, candleTime: 0 };
+  const supplyZone = {
+    side: "supply" as const,
+    low: 110,
+    high: 111,
+    width: 1,
+    candleTime: 0,
+  };
   const measured = measureGoldilocksApproachPressure(
     supplyZone,
     supplyCandles,
@@ -962,7 +1023,9 @@ test("separates tightening compression from a momentum drive into a zone", () =>
   assert.ok((measured.approachAverageOverlapFraction ?? 0) > 0.5);
   assert.ok(measured.approachCompressionScore >= 0.6);
   assert.ok(!measured.adversePressureFlags.includes("compression_into_supply"));
-  assert.ok(!measured.adversePressureFlags.includes("momentum_drive_into_supply"));
+  assert.ok(
+    !measured.adversePressureFlags.includes("momentum_drive_into_supply"),
+  );
   assert.equal(measured.adversePressureScore, 0);
 });
 
@@ -1091,15 +1154,15 @@ test("checks the complete close-away-to-touch leg instead of a fixed warning win
 
 test("does not treat rolling lower lows without an established pivot as sweeps", () => {
   const candles: StrategyCandle[] = [
-    [0.58430, 0.58440, 0.58411, 0.58425],
-    [0.58425, 0.58435, 0.58420, 0.58430],
-    [0.58428, 0.58440, 0.58406, 0.58437],
-    [0.58437, 0.58442, 0.58420, 0.58425],
-    [0.58425, 0.58430, 0.58418, 0.58420],
-    [0.58416, 0.58428, 0.58402, 0.58420],
-    [0.58420, 0.58435, 0.58410, 0.58430],
-    [0.58585, 0.58600, 0.58580, 0.58590],
-    [0.58590, 0.58595, 0.58570, 0.58575],
+    [0.5843, 0.5844, 0.58411, 0.58425],
+    [0.58425, 0.58435, 0.5842, 0.5843],
+    [0.58428, 0.5844, 0.58406, 0.58437],
+    [0.58437, 0.58442, 0.5842, 0.58425],
+    [0.58425, 0.5843, 0.58418, 0.5842],
+    [0.58416, 0.58428, 0.58402, 0.5842],
+    [0.5842, 0.58435, 0.5841, 0.5843],
+    [0.58585, 0.586, 0.5858, 0.5859],
+    [0.5859, 0.58595, 0.5857, 0.58575],
   ].map((values, index) => ({
     time: index + 1,
     open: values[0],
@@ -1140,17 +1203,17 @@ test("requires both a sideways liquidity pool and an opposite reaction for a swe
 test("confirms a downside pool sweep only after its adverse reaction completes", () => {
   const candles: StrategyCandle[] = [
     { time: 1, open: 0.78339, high: 0.78364, low: 0.78298, close: 0.78316 },
-    { time: 2, open: 0.78312, high: 0.78333, low: 0.78292, close: 0.78320 },
-    { time: 3, open: 0.78322, high: 0.78353, low: 0.78300, close: 0.78302 },
-    { time: 4, open: 0.78302, high: 0.78334, low: 0.78299, close: 0.78300 },
-    { time: 5, open: 0.78300, high: 0.78335, low: 0.78295, close: 0.78312 },
-    { time: 6, open: 0.78312, high: 0.78380, low: 0.78275, close: 0.78359 },
-    { time: 7, open: 0.78359, high: 0.78400, low: 0.78340, close: 0.78385 },
-    { time: 8, open: 0.78460, high: 0.78480, low: 0.78450, close: 0.78470 },
-    { time: 9, open: 0.78470, high: 0.78480, low: 0.78440, close: 0.78445 },
+    { time: 2, open: 0.78312, high: 0.78333, low: 0.78292, close: 0.7832 },
+    { time: 3, open: 0.78322, high: 0.78353, low: 0.783, close: 0.78302 },
+    { time: 4, open: 0.78302, high: 0.78334, low: 0.78299, close: 0.783 },
+    { time: 5, open: 0.783, high: 0.78335, low: 0.78295, close: 0.78312 },
+    { time: 6, open: 0.78312, high: 0.7838, low: 0.78275, close: 0.78359 },
+    { time: 7, open: 0.78359, high: 0.784, low: 0.7834, close: 0.78385 },
+    { time: 8, open: 0.7846, high: 0.7848, low: 0.7845, close: 0.7847 },
+    { time: 9, open: 0.7847, high: 0.7848, low: 0.7844, close: 0.78445 },
   ];
   const measured = measureGoldilocksApproachPressure(
-    { side: "supply", low: 0.7845, high: 0.7850, width: 0.0005, candleTime: 0 },
+    { side: "supply", low: 0.7845, high: 0.785, width: 0.0005, candleTime: 0 },
     candles,
     7,
     8,
@@ -1162,11 +1225,11 @@ test("confirms a downside pool sweep only after its adverse reaction completes",
   assert.ok(measured.adversePressureFlags.includes("downside_sweep"));
 
   const beforeReaction = measureGoldilocksApproachPressure(
-    { side: "supply", low: 0.7845, high: 0.7850, width: 0.0005, candleTime: 0 },
+    { side: "supply", low: 0.7845, high: 0.785, width: 0.0005, candleTime: 0 },
     [
       ...candles.slice(0, 5),
-      { time: 6, open: 0.78312, high: 0.78325, low: 0.78289, close: 0.78300 },
-      { time: 7, open: 0.78300, high: 0.78315, low: 0.78296, close: 0.78305 },
+      { time: 6, open: 0.78312, high: 0.78325, low: 0.78289, close: 0.783 },
+      { time: 7, open: 0.783, high: 0.78315, low: 0.78296, close: 0.78305 },
       ...candles.slice(8),
     ],
     7,
@@ -1254,10 +1317,7 @@ test("rejects the shallow July 2 probe from GL-GBPJPY-20260706-0305-2C94E8FA", (
     { time: 17, open: 215.35, high: 215.36, low: 215.309, close: 215.34 },
     { time: 18, open: 215.34, high: 215.362, low: 215.311, close: 215.351 },
   ];
-  const measureCandidate = (
-    sweepLow: number,
-    recoveryClose: number,
-  ) => {
+  const measureCandidate = (sweepLow: number, recoveryClose: number) => {
     const candles: StrategyCandle[] = [
       ...baseline,
       ...pool,
@@ -1401,9 +1461,9 @@ test(`keeps ${GBPUSD_20260331_1210_REGRESSION.tradeId} as the structural-sweep r
 
 test("checks sweeps only from the opposite extreme through first touch", () => {
   const supplyCandles: StrategyCandle[] = [
-    { time: 1, open: 100.3, high: 100.6, low: 100.00, close: 100.35 },
-    { time: 2, open: 100.3, high: 100.7, low: 100.04, close: 100.40 },
-    { time: 3, open: 100.4, high: 100.65, low: 99.98, close: 100.20 },
+    { time: 1, open: 100.3, high: 100.6, low: 100.0, close: 100.35 },
+    { time: 2, open: 100.3, high: 100.7, low: 100.04, close: 100.4 },
+    { time: 3, open: 100.4, high: 100.65, low: 99.98, close: 100.2 },
     { time: 4, open: 100.2, high: 100.6, low: 100.02, close: 100.35 },
     // Complete pool sweep, but it occurs before the later opposite extreme.
     { time: 5, open: 100.35, high: 101.2, low: 99.5, close: 101.1 },
@@ -1442,13 +1502,16 @@ test("checks sweeps only from the opposite extreme through first touch", () => {
 });
 
 test("classifies approach shape only from the opposite extreme back to the zone", () => {
-  const earlyPath: StrategyCandle[] = Array.from({ length: 20 }, (_, index) => ({
-    time: index + 1,
-    open: 103 + (index % 2) * 0.2,
-    high: 103.5,
-    low: 102.5,
-    close: 103.2 - (index % 2) * 0.2,
-  }));
+  const earlyPath: StrategyCandle[] = Array.from(
+    { length: 20 },
+    (_, index) => ({
+      time: index + 1,
+      open: 103 + (index % 2) * 0.2,
+      high: 103.5,
+      low: 102.5,
+      close: 103.2 - (index % 2) * 0.2,
+    }),
+  );
   const supplyReturn: StrategyCandle[] = [
     { time: 21, open: 100.0, high: 100.4, low: 99.8, close: 100.2 },
     { time: 22, open: 100.2, high: 100.5, low: 100.1, close: 100.4 },
@@ -1551,6 +1614,30 @@ test("creates stable unique searchable IDs for stored backtest trades", () => {
   assert.notEqual(stableBacktestTradeId({ ...trade, runId: "run-b" }), id);
 });
 
+test("creates stable human-searchable IDs for backtest runs", () => {
+  const input = {
+    id: "9f1ad0d8-39df-4d7a-8cc0-ff2c88fc6c5d",
+    createdAt: "2026-07-27T02:15:33.000Z",
+  };
+  const uid = stableBacktestRunUid(input);
+  assert.match(uid, /^GLR-202607270215-[A-F0-9]{8}$/);
+  assert.equal(stableBacktestRunUid(input), uid);
+  assert.notEqual(stableBacktestRunUid({ ...input, id: "another-run" }), uid);
+});
+
+test("keeps only the three highest net-R leaderboard snapshots", () => {
+  const records = [
+    { runUid: "GLR-A", netR: 4, completedAt: "2026-07-01T00:00:00Z" },
+    { runUid: "GLR-B", netR: 12, completedAt: "2026-07-02T00:00:00Z" },
+    { runUid: "GLR-C", netR: -1, completedAt: "2026-07-03T00:00:00Z" },
+    { runUid: "GLR-D", netR: 7, completedAt: "2026-07-04T00:00:00Z" },
+  ];
+  assert.deepEqual(
+    selectTopBacktestLeaderboardRecords(records).map((record) => record.runUid),
+    ["GLR-B", "GLR-D", "GLR-A"],
+  );
+});
+
 const candles: StrategyCandle[] = [
   [104.8, 105.4, 103.5, 104.0],
   [104.0, 104.3, 102.7, 103.1],
@@ -1601,6 +1688,26 @@ test("replay labels distinguish a banked partial from the final remainder exit",
       realizedR: 0,
     }),
     "FINAL EXIT · WIN · BREAK EVEN · TOTAL 0.00R",
+  );
+});
+
+test("replay labels and places a runner stop at its actual exit", () => {
+  assert.match(
+    getReplayFinalExitMarkerText({
+      outcome: "win",
+      exitReason: "runner_stop",
+      realizedR: 0.9636,
+      partialExit: { fraction: 0.5 },
+    }),
+    /FINAL 50% EXIT.*AT RUNNER STOP.*TOTAL \+0\.96R/,
+  );
+  assert.equal(
+    getReplayExitMarkerPrice({
+      exitReason: "runner_stop",
+      exitPrice: 183.627,
+      runway: { entry: 183.15, stopLoss: 182.636, takeProfit: 184.178 },
+    }),
+    183.627,
   );
 });
 
@@ -1877,6 +1984,118 @@ test("backtests can select the previous break-even and score-tiered runner strat
   );
 });
 
+test("untouched-stop runner banks half at +1R without moving or trailing the original stop", () => {
+  const retraceAndRun = [
+    { time: 1, open: 100, high: 102.1, low: 99.5, close: 102 },
+    { time: 2, open: 102, high: 103, low: 98.5, close: 99 },
+    { time: 3, open: 99, high: 110, low: 98.2, close: 109 },
+    { time: 4, open: 109, high: 109.2, low: 97.9, close: 98 },
+  ];
+  assert.deepEqual(
+    resolveProtectedOutcome(
+      retraceAndRun,
+      0,
+      "BUY",
+      98,
+      102,
+      104,
+      18,
+      undefined,
+      GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+    ),
+    {
+      outcome: "WIN",
+      outcomeTime: 4,
+      exitReason: "runner_stop",
+      realizedR: 0,
+    },
+  );
+  assert.equal(
+    normalizeGoldilocksBacktestManager(
+      GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+    ),
+    GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+  );
+});
+
+test("adaptive attack scale-out banks more on slow momentum and preserves a final untouched-stop runner", () => {
+  const candles = [
+    { time: 0, open: 100, high: 101.1, low: 99.5, close: 101 },
+    { time: 2400, open: 101, high: 102.1, low: 100.5, close: 102 },
+    { time: 3000, open: 102, high: 103.1, low: 101.8, close: 103 },
+    { time: 3600, open: 103, high: 104.1, low: 102.8, close: 104 },
+    { time: 4000, open: 104, high: 106.1, low: 97.9, close: 98 },
+  ];
+  assert.deepEqual(
+    resolveProtectedOutcome(
+      candles,
+      0,
+      "BUY",
+      98,
+      102,
+      104,
+      18,
+      undefined,
+      GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID,
+    ),
+    {
+      outcome: "WIN",
+      outcomeTime: 4000,
+      exitReason: "runner_stop",
+      realizedR: 0.75,
+      partialExits: [
+        {
+          time: 2400,
+          milestoneR: 1,
+          fraction: 0.5,
+          realizedR: 0.5,
+          attackSeconds: 2400,
+          momentum: "slow",
+          kind: "milestone",
+        },
+        {
+          time: 3600,
+          milestoneR: 2,
+          fraction: 0.25,
+          realizedR: 0.5,
+          attackSeconds: 600,
+          momentum: "fast",
+          kind: "milestone",
+        },
+      ],
+    },
+  );
+});
+
+test("adaptive scale-out banks the excess runner when momentum retraces 0.5R", () => {
+  const result = resolveProtectedOutcome(
+    [
+      { time: 0, open: 100, high: 102.1, low: 99.5, close: 102 },
+      { time: 60, open: 102, high: 102.2, low: 100.8, close: 101 },
+      { time: 120, open: 101, high: 101.1, low: 97.9, close: 98 },
+    ],
+    0,
+    "BUY",
+    98,
+    102,
+    104,
+    18,
+    undefined,
+    GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID,
+  );
+  assert.equal(result?.exitReason, "runner_stop");
+  assert.ok(Math.abs((result?.realizedR ?? 0) - 0.275) < 1e-9);
+  const partials = (
+    result as {
+      partialExits?: Array<{ kind: string }>;
+    } | null
+  )?.partialExits;
+  assert.deepEqual(
+    partials?.map((partial) => partial.kind),
+    ["milestone", "risk_off"],
+  );
+});
+
 test("set-and-forget backtests leave the original stop and full 2R target untouched", () => {
   const retraceThenTarget = [
     { time: 1, open: 100, high: 102.1, low: 99.5, close: 102 },
@@ -1930,6 +2149,29 @@ test("set-and-forget backtests leave the original stop and full 2R target untouc
     ),
     GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
   );
+  const fixedFiveR = [
+    { time: 1, open: 100, high: 108, low: 99, close: 107 },
+    { time: 2, open: 107, high: 110.1, low: 106, close: 110 },
+  ];
+  assert.deepEqual(
+    resolveProtectedOutcome(
+      fixedFiveR,
+      0,
+      "BUY",
+      98,
+      102,
+      110,
+      15,
+      undefined,
+      GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+    ),
+    {
+      outcome: "WIN",
+      outcomeTime: 2,
+      exitReason: "target",
+      realizedR: 5,
+    },
+  );
 });
 
 test("plans an exact restart-safe 50% partial close for integer broker units", () => {
@@ -1980,6 +2222,10 @@ test("portfolio simulation reserves concurrent margin and rejects trades that do
   });
   assert.equal(result.acceptedTrades, 1);
   assert.equal(result.marginBlocked, 1);
+  assert.equal(result.blockedTrades.length, 1);
+  assert.match(result.blockedTrades[0].reason, /available-margin headroom/);
+  assert.equal(result.blockedTrades[0].effectiveLeverage, 2);
+  assert.equal(result.blockedTrades[0].requiredMargin, 50);
   assert.equal(result.peakMargin, 50);
   assert.equal(result.ending, 102);
   assert.equal(result.trades.length, 1);
@@ -2179,10 +2425,18 @@ test("accepts only the latest completed confirmation candle after a zone departu
   );
   assert.equal(fresh.length, 1);
   assert.equal(fresh[0].touchCandle.time, 200);
-  const continuation = { ...zone, id: "continuation-context-only", kind: "continuation" as const };
+  const continuation = {
+    ...zone,
+    id: "continuation-context-only",
+    kind: "continuation" as const,
+  };
   assert.equal(
     findFreshGoldilocksConfirmations(
-      { zones: [continuation], activeZones: [continuation], activeDemand: continuation },
+      {
+        zones: [continuation],
+        activeZones: [continuation],
+        activeDemand: continuation,
+      },
       confirmationCandles,
       300,
       600_000,
@@ -2471,7 +2725,7 @@ test("can measure prior-touch visits on the selected confirmation timeframe", ()
   );
 });
 
-test("rejects oversized first-touch candles and close-through entries over half a zone width away", () => {
+test("allows oversized first-touch candles but still rejects a far executable entry", () => {
   const zone = {
     id: "proximity-supply",
     kind: "base" as const,
@@ -2505,7 +2759,7 @@ test("rejects oversized first-touch candles and close-through entries over half 
     close: 100,
   };
   const firstTouch = validateGoldilocksFirstTouchCandle(zone, oversizedTouch);
-  assert.equal(firstTouch.allowed, false);
+  assert.equal(firstTouch.allowed, true);
   assert.ok(
     firstTouch.touchRangeZoneFraction > firstTouch.maxTouchRangeZoneFraction,
   );
@@ -2514,8 +2768,8 @@ test("rejects oversized first-touch candles and close-through entries over half 
     oversizedTouch,
     99.5,
   );
-  assert.equal(oversized.allowed, false);
-  assert.match(oversized.reason, /first M5 touch candle/i);
+  assert.equal(oversized.allowed, true);
+  assert.match(oversized.reason, /diagnostic only/i);
   const farClose = validateGoldilocksEntryProximity(
     zone,
     { time: 1, open: 99.8, high: 100.1, low: 99.8, close: 100 },
@@ -2783,10 +3037,15 @@ test("weights departure at four and approach warnings at five while capping the 
     baseCandleCount: 1,
     departureInsideCandleCount: 0,
     departureQuality: {
-      departureCandleTime: 2, departureCandleIndex: 1, candleRange: 1,
-      bodyFraction: 0.8, rejectionWickFraction: 0.1,
-      closeDepartureZoneMultiple: 6, wickDepartureZoneMultiple: 6,
-      shockRejected: false, reason: "clean",
+      departureCandleTime: 2,
+      departureCandleIndex: 1,
+      candleRange: 1,
+      bodyFraction: 0.8,
+      rejectionWickFraction: 0.1,
+      closeDepartureZoneMultiple: 6,
+      wickDepartureZoneMultiple: 6,
+      shockRejected: false,
+      reason: "clean",
     },
     brokeOppositeLegIn: true,
     touches: 1,
@@ -2818,12 +3077,19 @@ test("weights departure at four and approach warnings at five while capping the 
     4,
   );
   assert.equal(
-    score.components.find((component) => component.name === "M5 approach warnings")
-      ?.points,
+    score.components.find(
+      (component) => component.name === "M5 approach warnings",
+    )?.points,
     5,
   );
-  assert.equal(score.components.some((component) => component.name === "Available RRR"), false);
-  assert.equal(score.components.some((component) => component.name.includes("range")), false);
+  assert.equal(
+    score.components.some((component) => component.name === "Available RRR"),
+    false,
+  );
+  assert.equal(
+    score.components.some((component) => component.name.includes("range")),
+    false,
+  );
   assert.equal(
     score.components.find((component) => component.name === "Zone inside zone")
       ?.points,
@@ -2941,38 +3207,87 @@ test("combines base and lingering M15 candles into one formation count", () => {
 
 test("caps sustained departure strength at one point", () => {
   const zone = {
-    id: "dynamic-departure-zone", kind: "base" as const, side: "demand" as const,
-    candleIndex: 0, candleTime: 1, low: 99, high: 100, width: 1,
-    legMidpoint: 105, legRange: 12, strength2x: true, baseCandleCount: 4,
-    departureInsideCandleCount: 0, touches: 0, maxPenetration: 0,
-    state: "fresh" as const, reasons: [],
+    id: "dynamic-departure-zone",
+    kind: "base" as const,
+    side: "demand" as const,
+    candleIndex: 0,
+    candleTime: 1,
+    low: 99,
+    high: 100,
+    width: 1,
+    legMidpoint: 105,
+    legRange: 12,
+    strength2x: true,
+    baseCandleCount: 4,
+    departureInsideCandleCount: 0,
+    touches: 0,
+    maxPenetration: 0,
+    state: "fresh" as const,
+    reasons: [],
   };
-  const pointsAt = (departureMultiple:number) => scoreGoldilocksSetup({
-    zone:{...zone,departureMultiple},tradeDirection:"BUY",trend:"unknown",
-    minimumScore:0,adverseWarningCount:3,gates:[{name:"all",passed:true,reason:"passed"}],
-  }).components.find((component)=>component.name==="M15 departure quality")?.points;
-  assert.deepEqual([1.99,2,3,3.99,4,6,9].map(pointsAt),[0,0.5,0.5,0.5,1,1,1]);
+  const pointsAt = (departureMultiple: number) =>
+    scoreGoldilocksSetup({
+      zone: { ...zone, departureMultiple },
+      tradeDirection: "BUY",
+      trend: "unknown",
+      minimumScore: 0,
+      adverseWarningCount: 3,
+      gates: [{ name: "all", passed: true, reason: "passed" }],
+    }).components.find(
+      (component) => component.name === "M15 departure quality",
+    )?.points;
+  assert.deepEqual(
+    [1.99, 2, 3, 3.99, 4, 6, 9].map(pointsAt),
+    [0, 0.5, 0.5, 0.5, 1, 1, 1],
+  );
 });
 
 test("scores approach warnings without turning departure shock diagnostics into a veto", () => {
   const zone = {
-    id:"warning-score-zone",kind:"base" as const,side:"supply" as const,
-    candleIndex:0,candleTime:1,low:100,high:101,width:1,legMidpoint:95,
-    legRange:12,departureMultiple:4,strength2x:true,baseCandleCount:4,
-    departureInsideCandleCount:0,touches:0,maxPenetration:0,state:"fresh" as const,
-    reasons:[],departureQuality:{
-      departureCandleTime:2,departureCandleIndex:1,candleRange:3,priorAtr14:1,
-      rangeAtrMultiple:3,bodyFraction:0.3,rejectionWickFraction:0.6,
-      closeDepartureZoneMultiple:0.5,wickDepartureZoneMultiple:4,
-      shockRejected:true,reason:"warning",
+    id: "warning-score-zone",
+    kind: "base" as const,
+    side: "supply" as const,
+    candleIndex: 0,
+    candleTime: 1,
+    low: 100,
+    high: 101,
+    width: 1,
+    legMidpoint: 95,
+    legRange: 12,
+    departureMultiple: 4,
+    strength2x: true,
+    baseCandleCount: 4,
+    departureInsideCandleCount: 0,
+    touches: 0,
+    maxPenetration: 0,
+    state: "fresh" as const,
+    reasons: [],
+    departureQuality: {
+      departureCandleTime: 2,
+      departureCandleIndex: 1,
+      candleRange: 3,
+      priorAtr14: 1,
+      rangeAtrMultiple: 3,
+      bodyFraction: 0.3,
+      rejectionWickFraction: 0.6,
+      closeDepartureZoneMultiple: 0.5,
+      wickDepartureZoneMultiple: 4,
+      shockRejected: true,
+      reason: "warning",
     },
   };
-  assert.equal(validateGoldilocksDepartureQuality(zone).allowed,true);
-  const pointsAt=(adverseWarningCount:number)=>scoreGoldilocksSetup({
-    zone,tradeDirection:"SELL",trend:"unknown",minimumScore:0,adverseWarningCount,
-    gates:[{name:"all",passed:true,reason:"passed"}],
-  }).components.find((component)=>component.name==="M5 approach warnings")?.points;
-  assert.deepEqual([0,1,2,3].map(pointsAt),[5,3,0,0]);
+  assert.equal(validateGoldilocksDepartureQuality(zone).allowed, true);
+  const pointsAt = (adverseWarningCount: number) =>
+    scoreGoldilocksSetup({
+      zone,
+      tradeDirection: "SELL",
+      trend: "unknown",
+      minimumScore: 0,
+      adverseWarningCount,
+      gates: [{ name: "all", passed: true, reason: "passed" }],
+    }).components.find((component) => component.name === "M5 approach warnings")
+      ?.points;
+  assert.deepEqual([0, 1, 2, 3].map(pointsAt), [5, 3, 0, 0]);
 });
 
 test("does not include available reward-to-risk in the quality score", () => {
@@ -3001,7 +3316,10 @@ test("does not include available reward-to-risk in the quality score", () => {
     minimumScore: 0,
     gates: [{ name: "all", passed: true, reason: "passed" }],
   });
-  assert.equal(score.components.some((component) => component.name === "Available RRR"), false);
+  assert.equal(
+    score.components.some((component) => component.name === "Available RRR"),
+    false,
+  );
 });
 
 test("uses a 14 point live threshold by default and clamps configured thresholds to the 20 point scale", () => {
@@ -3279,6 +3597,108 @@ test("blocks a 2:1 entry when another Goldilocks zone intersects the target path
   const check = validateTwoToOneRunway(base, [...result.zones, opposing]);
   assert.equal(check.allowed, false);
   assert.ok(check.blockingZoneId);
+});
+
+test("set-and-forget target RR overrides both the target and runway requirement", () => {
+  const result = detectGoldilocksZones(candles, {
+    direction: "bullish",
+    startIndex: 5,
+    endIndex: 13,
+  });
+  const base = result.zones.find((zone) => zone.kind === "base");
+  assert.ok(base);
+  const entry = base.high;
+  const risk = entry - base.low;
+  const opposing = {
+    ...base,
+    id: "supply-between-3r-and-5r",
+    side: "supply" as const,
+    low: entry + risk * 4,
+    high: entry + risk * 4.5,
+  };
+  const threeR = validateTwoToOneRunway(base, [base, opposing], entry, {
+    targetRewardRatio: 3,
+  });
+  const fiveR = validateTwoToOneRunway(base, [base, opposing], entry, {
+    targetRewardRatio: 5,
+  });
+  assert.equal(threeR.allowed, true);
+  assert.equal(threeR.ratio, 3);
+  assert.equal(threeR.takeProfit, entry + risk * 3);
+  assert.equal(fiveR.allowed, false);
+  assert.equal(fiveR.ratio, 5);
+  assert.equal(fiveR.takeProfit, entry + risk * 5);
+});
+
+test("set-and-forget can target the causal first touch of the opposing base", () => {
+  const result = detectGoldilocksZones(candles, {
+    direction: "bullish",
+    startIndex: 5,
+    endIndex: 13,
+  });
+  const base = result.zones.find((zone) => zone.kind === "base");
+  assert.ok(base);
+  const entry = base.high;
+  const risk = entry - base.low;
+  const opposingBase = {
+    ...base,
+    id: "automatic-target-supply-base",
+    kind: "base" as const,
+    side: "supply" as const,
+    low: entry + risk * 4.25,
+    high: entry + risk * 4.75,
+  };
+  const check = validateTwoToOneRunway(base, [base, opposingBase], entry, {
+    targetOpposingBase: true,
+  });
+  assert.equal(check.allowed, true);
+  assert.equal(check.takeProfit, opposingBase.low);
+  assert.ok(Math.abs(check.ratio - 4.25) < 1e-9);
+  assert.ok(check.reason.includes(opposingBase.id));
+
+  const missing = validateTwoToOneRunway(base, [base], entry, {
+    targetOpposingBase: true,
+  });
+  assert.equal(missing.allowed, false);
+  assert.match(missing.reason, /no causally available opposing base/i);
+});
+
+test("opposing-base set-and-forget retains the hard 2R minimum runway", () => {
+  const result = detectGoldilocksZones(candles, {
+    direction: "bullish",
+    startIndex: 5,
+    endIndex: 13,
+  });
+  const base = result.zones.find((zone) => zone.kind === "base");
+  assert.ok(base);
+  const entry = base.high;
+  const risk = entry - base.low;
+  const belowMinimum = {
+    ...base,
+    id: "opposing-base-at-1.79r",
+    kind: "base" as const,
+    side: "supply" as const,
+    low: entry + risk * 1.79,
+    high: entry + risk * 2.1,
+  };
+  const rejected = validateTwoToOneRunway(base, [base, belowMinimum], entry, {
+    targetOpposingBase: true,
+  });
+  assert.equal(rejected.allowed, false);
+  assert.ok(Math.abs(rejected.ratio - 1.79) < 1e-9);
+  assert.match(rejected.reason, /minimum required runway is 2\.00R/i);
+
+  const exactlyMinimum = {
+    ...belowMinimum,
+    id: "opposing-base-at-2r",
+    low: entry + risk * 2,
+    high: entry + risk * 2.25,
+  };
+  const allowed = validateTwoToOneRunway(base, [base, exactlyMinimum], entry, {
+    targetOpposingBase: true,
+  });
+  assert.equal(allowed.allowed, true);
+  assert.ok(Math.abs(allowed.ratio - 2) < 1e-9);
 });
 
 test("does not treat an earlier same-side continuation as a runway blocker", () => {
@@ -3718,11 +4138,38 @@ test("historical replay requests never send OANDA a future end time", () => {
   assert.equal(getStrategyReplayRequestEnd(now - 3600, now), now - 3600);
 });
 
+test("newer replay pagination spans a closed forex weekend", () => {
+  const fridayLastM1 = 1782507540;
+  const window = getStrategyReplayForwardPageWindow(fridayLastM1, 60);
+  assert.equal(window.start, fridayLastM1 + 60);
+  assert.ok(window.end - fridayLastM1 >= 4 * 24 * 60 * 60);
+});
+
 test("backtest replay charts start with context before the M15 trade-zone base", () => {
   const baseTime = 1777420800;
   const chartStart = getStrategyReplayBaseContextStart(baseTime);
   assert.equal(chartStart, baseTime - STRATEGY_REPLAY_BASE_CONTEXT_SECONDS);
   assert.ok(chartStart < baseTime);
+});
+
+test("stored replay geometry survives a missing current zone reconstruction", () => {
+  const zone = buildStoredReplayZoneFallback({
+    zoneId: "bearish-273-284-base-supply-1782115500",
+    zoneKind: "base",
+    direction: "SELL",
+    zoneCandleTime: 1782115500,
+    firstOutsideTime: 1782115800,
+    entry: 0.80858,
+    stopLoss: 0.80918,
+    takeProfit: 0.80414,
+    priorTouches: 0,
+    maxPenetration: 0,
+    supplyLow: 0.8087,
+  });
+  assert.equal(zone.side, "supply");
+  assert.equal(zone.low, 0.8087);
+  assert.equal(zone.high, 0.80918);
+  assert.equal(zone.candleTime, 1782115500);
 });
 
 test("replay context includes every projected zone base so no chart box floats without its source candle", () => {
@@ -4203,7 +4650,7 @@ test("replays multiple versioned managers on the identical M1 path", () => {
 });
 
 test("research manager grid spans target, break-even, and partial-runner choices without changing entry risk", () => {
-  assert.equal(GOLDILOCKS_MANAGEMENT_POLICIES.length, 23);
+  assert.equal(GOLDILOCKS_MANAGEMENT_POLICIES.length, 25);
   assert.equal(
     GOLDILOCKS_MANAGEMENT_POLICIES[0]?.id,
     GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
@@ -4227,6 +4674,21 @@ test("research manager grid spans target, break-even, and partial-runner choices
     GOLDILOCKS_MANAGEMENT_POLICIES.some(
       (policy) => policy.id === "partial-75-runner-5r-v1",
     ),
+  );
+  assert.deepEqual(
+    GOLDILOCKS_MANAGEMENT_POLICIES.find(
+      (policy) => policy.id === GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+    ),
+    {
+      id: GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+      version: 1,
+      label: "Bank Half + Untouched-Stop Runner",
+      breakEvenAtR: null,
+      primaryTargetR: 1,
+      primaryExitFraction: 0.5,
+      runnerTargetR: null,
+      runnerStopR: -1,
+    },
   );
   assert.ok(
     GOLDILOCKS_MANAGEMENT_POLICIES.every((policy) => policy.version === 1),

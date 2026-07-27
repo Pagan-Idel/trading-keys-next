@@ -34,6 +34,7 @@ import {
   getReplayExitMarkerPrice,
   getReplayFinalExitMarkerText,
   getReplayPartialExitMarkerText,
+  getReplayScaleOutMarkerText,
   getReplayVisibleEnd,
   getReplayVisibleStart,
   sortUniqueReplayCandleItems,
@@ -326,6 +327,7 @@ type HistoricalTradeSetup = {
     price: number;
   }>;
   confirmationTimeframe: string;
+  confirmationMode?: "close-through" | "touch-entry";
   confirmationTime: number;
   confirmationCandle: StrategyCandle;
   touchCandle?: StrategyCandle;
@@ -335,12 +337,23 @@ type HistoricalTradeSetup = {
   exitPrice?: number;
   realizedR?: number | null;
   tradeManager?: string;
+  setAndForgetTargetMode?: "fixed-r" | "opposing-base";
+  setAndForgetTargetZoneId?: string;
   partialExit?: {
     time: number;
     price: number;
     fraction: number;
     realizedR: number;
   };
+  partialExits?: Array<{
+    time: number;
+    price: number;
+    fraction: number;
+    realizedR: number;
+    milestoneR: number;
+    momentum: "fast" | "slow";
+    attackSeconds: number | null;
+  }>;
   outcomeTime?: number;
   approachPressure?: GoldilocksApproachPressure;
 };
@@ -903,26 +916,47 @@ export default function StrategyLabChart({
           ];
         })()
       : [];
-    const partialExitMarker = scenario?.tradeSetup?.partialExit
+    const replayPartials =
+      scenario?.tradeSetup?.partialExits ??
+      (scenario?.tradeSetup?.partialExit
+        ? [scenario.tradeSetup.partialExit]
+        : []);
+    const partialExitMarker = replayPartials.length
       ? (() => {
-          const partial = scenario.tradeSetup!.partialExit!;
-          const partialCandleIndex = getReplayCandleIndexAtOrBefore(
-            candles.map((candle) => ({ time: Number(candle.time) })),
-            partial.time,
-          );
-          const partialCandle = candles[Math.max(0, partialCandleIndex)];
-          return partialCandle
-            ? [
-                {
-                  time: partialCandle.time as UTCTimestamp,
-                  position: "atPriceMiddle" as const,
-                  price: partial.price,
-                  color: "#55dff5",
-                  shape: "circle" as const,
-                  text: getReplayPartialExitMarkerText(partial),
-                },
-              ]
-            : [];
+          return replayPartials.flatMap((partial) => {
+            const partialCandleIndex = getReplayCandleIndexAtOrBefore(
+              candles.map((candle) => ({ time: Number(candle.time) })),
+              partial.time,
+            );
+            const partialCandle = candles[Math.max(0, partialCandleIndex)];
+            return partialCandle
+              ? [
+                  {
+                    time: partialCandle.time as UTCTimestamp,
+                    position: "atPriceMiddle" as const,
+                    price: partial.price,
+                    color: "#55dff5",
+                    shape: "circle" as const,
+                    text: scenario?.tradeSetup?.partialExits
+                      ? getReplayScaleOutMarkerText({
+                          fraction: partial.fraction,
+                          realizedR: partial.realizedR,
+                          milestoneR:
+                            "milestoneR" in partial
+                              ? Number(partial.milestoneR)
+                              : 1,
+                          momentum:
+                            "momentum" in partial &&
+                            (partial.momentum === "fast" ||
+                              partial.momentum === "slow")
+                              ? partial.momentum
+                              : undefined,
+                        })
+                      : getReplayPartialExitMarkerText(partial),
+                  },
+                ]
+              : [];
+          });
         })()
       : [];
     const candleTimes = candles.map((candle) => ({
@@ -979,83 +1013,89 @@ export default function StrategyLabChart({
       departureQuality &&
       departureQuality.departureCandleTime >= firstCandleTime &&
       departureQuality.departureCandleTime <= lastCandleTime
-      ? (() => {
-          const candleIndex = getReplayCandleIndexAtOrBefore(
-            candleTimes,
-            departureQuality.departureCandleTime,
-          );
-          const candle = candles[candleIndex];
-          if (!candle) return [];
-          return [
-            {
-              time: candle.time as UTCTimestamp,
-              position:
-                scenario!.tradeSetup!.zone.side === "supply"
-                  ? ("aboveBar" as const)
-                  : ("belowBar" as const),
-              color: "#ff9f43",
-              shape:
-                scenario!.tradeSetup!.zone.side === "supply"
-                  ? ("arrowDown" as const)
-                  : ("arrowUp" as const),
-              text: "DEPARTURE",
-            },
-          ];
-        })()
-      : [];
+        ? (() => {
+            const candleIndex = getReplayCandleIndexAtOrBefore(
+              candleTimes,
+              departureQuality.departureCandleTime,
+            );
+            const candle = candles[candleIndex];
+            if (!candle) return [];
+            return [
+              {
+                time: candle.time as UTCTimestamp,
+                position:
+                  scenario!.tradeSetup!.zone.side === "supply"
+                    ? ("aboveBar" as const)
+                    : ("belowBar" as const),
+                color: "#ff9f43",
+                shape:
+                  scenario!.tradeSetup!.zone.side === "supply"
+                    ? ("arrowDown" as const)
+                    : ("arrowUp" as const),
+                text: "DEPARTURE",
+              },
+            ];
+          })()
+        : [];
     const approachPressure = scenario?.tradeSetup?.approachPressure;
     const approachEvidenceMarkers = approachPressure
       ? [
-          ...(approachPressure.liquiditySweepTimes ??
+          ...(
+            approachPressure.liquiditySweepTimes ??
             (approachPressure.latestSweepTime === null
               ? []
               : [approachPressure.latestSweepTime])
           ).map((time) => ({
-                time,
-                text: "LIQUIDITY SWEEP",
-                color: "#f7c948",
-                position: "belowBar" as const,
-                shape: "circle" as const,
-              })),
-          ...(approachPressure.adversePressureFlags.some(
-            (flag) => flag.startsWith("momentum_drive_into_"),
+            time,
+            text:
+              scenario!.tradeSetup!.zone.side === "demand"
+                ? "LIQUIDITY SWEEP · HIGHS SWEPT"
+                : "LIQUIDITY SWEEP · LOWS SWEPT",
+            color: "#f7c948",
+            position:
+              scenario!.tradeSetup!.zone.side === "demand"
+                ? ("aboveBar" as const)
+                : ("belowBar" as const),
+            shape: "circle" as const,
+          })),
+          ...(approachPressure.adversePressureFlags.some((flag) =>
+            flag.startsWith("momentum_drive_into_"),
           )
             ? (approachPressure.fastApproachPushStartTimes ??
-                approachPressure.approachEvidenceTimes ??
-                (approachPressure.approachEvidenceTime
-                  ? [approachPressure.approachEvidenceTime]
-                  : []))
+              approachPressure.approachEvidenceTimes ??
+              (approachPressure.approachEvidenceTime
+                ? [approachPressure.approachEvidenceTime]
+                : []))
             : []
           ).map((time) => ({
-                time,
-                text: "FAST ATTACK",
-                color: "#d977ff",
-                position:
-                  scenario!.tradeSetup!.zone.side === "supply"
-                    ? ("belowBar" as const)
-                    : ("aboveBar" as const),
-                shape: "square" as const,
-              })),
-        ]
-          .flatMap((marker) => {
-            if (marker.time < firstCandleTime || marker.time > lastCandleTime)
-              return [];
-            const candleIndex = getReplayCandleIndexAtOrBefore(
-              candleTimes,
-              marker.time,
-            );
-            const candle = candles[candleIndex];
-            return candle
-              ? [{ ...marker, time: candle.time as UTCTimestamp }]
-              : [];
-          })
+            time,
+            text: "FAST ATTACK",
+            color: "#d977ff",
+            position:
+              scenario!.tradeSetup!.zone.side === "supply"
+                ? ("belowBar" as const)
+                : ("aboveBar" as const),
+            shape: "square" as const,
+          })),
+        ].flatMap((marker) => {
+          if (marker.time < firstCandleTime || marker.time > lastCandleTime)
+            return [];
+          const candleIndex = getReplayCandleIndexAtOrBefore(
+            candleTimes,
+            marker.time,
+          );
+          const candle = candles[candleIndex];
+          return candle
+            ? [{ ...marker, time: candle.time as UTCTimestamp }]
+            : [];
+        })
       : [];
     const focusedTrade = scenario?.tradeSetup;
     const isFocusedTrade = (setup: HistoricalTradeSetup) =>
       Boolean(
         focusedTrade &&
-          setup.zone.id === focusedTrade.zone.id &&
-          setup.confirmationTime === focusedTrade.confirmationTime,
+        setup.zone.id === focusedTrade.zone.id &&
+        setup.confirmationTime === focusedTrade.confirmationTime,
       );
     const indicatorTrades = (scenario?.tradeSetups ?? []).filter(
       (setup) => !isFocusedTrade(setup),
@@ -1237,7 +1277,7 @@ export default function StrategyLabChart({
     });
     if (scenario?.tradeSetup) {
       const setup = scenario.tradeSetup;
-      if (setup.touchCandle) {
+      if (setup.touchCandle && setup.confirmationMode !== "touch-entry") {
         const touchSeries = chart.addSeries(CandlestickSeries, {
           upColor: "#64dff3",
           downColor: "#64dff3",
@@ -1305,7 +1345,10 @@ export default function StrategyLabChart({
           position: setup.zone.side === "supply" ? "aboveBar" : "belowBar",
           color: "#ffd84d",
           shape: setup.zone.side === "supply" ? "arrowDown" : "arrowUp",
-          text: `${setup.confirmationTimeframe} ${setup.zone.side === "supply" ? "SELL" : "BUY"} ENGULF`,
+          text:
+            setup.confirmationMode === "touch-entry"
+              ? `${setup.confirmationTimeframe} FIRST TOUCH ENTRY`
+              : `${setup.confirmationTimeframe} ${setup.zone.side === "supply" ? "SELL" : "BUY"} ENGULF`,
         },
       ]);
     }
@@ -1339,9 +1382,19 @@ export default function StrategyLabChart({
           { time: lineEnd, value },
         ]);
       };
-      addRunwayLine(runway.entry, "#ffd84d", "ENGULF CLOSE · ENTRY");
+      addRunwayLine(
+        runway.entry,
+        "#ffd84d",
+        scenario?.tradeSetup?.confirmationMode === "touch-entry"
+          ? "FIRST TOUCH · ENTRY"
+          : "ENGULF CLOSE · ENTRY",
+      );
       addRunwayLine(runway.stopLoss, "#ff5f70", "STOP · 1R");
-      addRunwayLine(runway.takeProfit, "#2edb91", "TARGET · 2R");
+      addRunwayLine(
+        runway.takeProfit,
+        "#2edb91",
+        `TARGET · ${runway.ratio.toFixed(2)}R`,
+      );
     }
     chart.timeScale().fitContent();
     if (visibleTimeRangeRef.current) {
@@ -1476,50 +1529,50 @@ export default function StrategyLabChart({
         (scenario?.tradeSetups ?? [])
           .filter((setup) => !isFocusedTrade(setup))
           .flatMap((setup, index) => {
-          if (
-            setup.confirmationTime < Number(candles[0]?.time) ||
-            setup.confirmationTime > Number(candles.at(-1)?.time)
-          )
-            return [];
-          const start = chart
-            .timeScale()
-            .timeToCoordinate(
-              atOrAfterChartTime(candles, setup.confirmationTime),
-            );
-          const end = chart
-            .timeScale()
-            .timeToCoordinate(
-              atOrBeforeChartTime(
-                candles,
-                setup.outcomeTime ?? Number(candles.at(-1)?.time),
-              ),
-            );
-          const entryY = series.priceToCoordinate(setup.runway.entry);
-          const stopY = series.priceToCoordinate(setup.runway.stopLoss);
-          const targetY = series.priceToCoordinate(setup.runway.takeProfit);
-          if (
-            start === null ||
-            end === null ||
-            entryY === null ||
-            stopY === null ||
-            targetY === null ||
-            end <= 0 ||
-            start >= viewportWidth ||
-            end <= start
-          )
-            return [];
-          const visibleLeft = Math.max(0, start);
-          const visibleRight = Math.min(viewportWidth, end);
-          return [
-            {
-              id: `${setup.zone.id}-${setup.confirmationTime}-${index}`,
-              left: visibleLeft,
-              width: Math.max(3, visibleRight - visibleLeft),
-              entryY,
-              stopY,
-              targetY,
-            },
-          ];
+            if (
+              setup.confirmationTime < Number(candles[0]?.time) ||
+              setup.confirmationTime > Number(candles.at(-1)?.time)
+            )
+              return [];
+            const start = chart
+              .timeScale()
+              .timeToCoordinate(
+                atOrAfterChartTime(candles, setup.confirmationTime),
+              );
+            const end = chart
+              .timeScale()
+              .timeToCoordinate(
+                atOrBeforeChartTime(
+                  candles,
+                  setup.outcomeTime ?? Number(candles.at(-1)?.time),
+                ),
+              );
+            const entryY = series.priceToCoordinate(setup.runway.entry);
+            const stopY = series.priceToCoordinate(setup.runway.stopLoss);
+            const targetY = series.priceToCoordinate(setup.runway.takeProfit);
+            if (
+              start === null ||
+              end === null ||
+              entryY === null ||
+              stopY === null ||
+              targetY === null ||
+              end <= 0 ||
+              start >= viewportWidth ||
+              end <= start
+            )
+              return [];
+            const visibleLeft = Math.max(0, start);
+            const visibleRight = Math.min(viewportWidth, end);
+            return [
+              {
+                id: `${setup.zone.id}-${setup.confirmationTime}-${index}`,
+                left: visibleLeft,
+                width: Math.max(3, visibleRight - visibleLeft),
+                entryY,
+                stopY,
+                targetY,
+              },
+            ];
           }),
       );
     };
@@ -1619,7 +1672,11 @@ export default function StrategyLabChart({
       {resolvedTradeId && (
         <TradeIdBadge
           type="button"
-          title={tradeIdCopied ? "Copied to clipboard" : "Permanent trade ID · click to copy"}
+          title={
+            tradeIdCopied
+              ? "Copied to clipboard"
+              : "Permanent trade ID · click to copy"
+          }
           aria-label={`Copy trade ID ${resolvedTradeId}`}
           onClick={() => void copyTradeId()}
         >
@@ -1742,7 +1799,9 @@ export default function StrategyLabChart({
                 top: ratioPosition.targetY,
               }}
             >
-              TARGET · 2R
+              {scenario?.tradeSetup?.setAndForgetTargetMode === "opposing-base"
+                ? `TARGET · OPPOSING BASE · ${(runway?.ratio ?? 2).toFixed(2)}R`
+                : `TARGET · ${(runway?.ratio ?? 2).toFixed(2)}R`}
             </TradeLevelLabel>
           </>
         )}

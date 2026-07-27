@@ -5,7 +5,7 @@ import { getTradeDetailsById } from '../utils/oanda/api/getTradeDetails.ts';
 import { modifyTrade, replaceTradeProtection } from '../utils/oanda/api/modifyTrade.ts';
 import { closeTrade } from '../utils/oanda/api/closeTrade.ts';
 import { closeTradePartial } from '../utils/oanda/api/close-partial.ts';
-import { ACTION } from '../utils/oanda/api/order.ts';
+import { ACTION } from '../utils/oanda/orderTypes.ts';
 import { placeTrade } from '../utils/placeTrade.ts';
 import { annotateConfluenceAt, buildGoldilocksHistory, buildGoldilocksHistoryChunked, findFreshGoldilocksConfirmations, getGoldilocksTrend, toStrategyCandles } from '../utils/goldilocksScanner.ts';
 import { getGoldilocksZoneFormationWindow, validateFinalEntryAfterEngulf, validateGoldilocksDepartureQuality, validateGoldilocksEntryProximity, validateGoldilocksFinalExecutableEntry } from '../utils/goldilocksStrategy.ts';

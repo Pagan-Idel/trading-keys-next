@@ -1,4 +1,5 @@
-import { ACTION, order, TYPE } from "./oanda/api/order";
+import { order } from "./oanda/api/order";
+import { ACTION, TYPE } from "./oanda/orderTypes";
 import { logMessage } from "./automationLogger";
 import { openNow } from "./oanda/api/openNow";
 import { wait, getPrecision } from "./shared";

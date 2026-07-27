@@ -9,6 +9,7 @@ import {
   getActiveBacktestRun,
   getBacktestRuntime,
   replaceBacktestTrades,
+  recordBacktestLeaderboardCandidate,
   updateBacktestRun,
   type BacktestRunConfig,
   type BacktestTradeInput,
@@ -23,11 +24,15 @@ import {
   getGoldilocksBacktestRunLabel,
   getGoldilocksTimeframeProfile,
   isGoldilocksTimeframeProfileId,
+  normalizeGoldilocksConfirmationMode,
   normalizeGoldilocksBacktestGates,
   normalizeGoldilocksBacktestTweaks,
   normalizeGoldilocksScoreWeights,
 } from "./goldilocksConfig.ts";
-import { normalizeGoldilocksBacktestManager } from "./goldilocksTradeManagement.ts";
+import {
+  GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
+  normalizeGoldilocksBacktestManager,
+} from "./goldilocksTradeManagement.ts";
 
 export const BACKTEST_CANDLE_LIMITS: Record<string, number> = {
   M1: 800_000,
@@ -179,6 +184,10 @@ export const executeBacktestRun = async (
         gateSettings: config.gateSettings,
         scoreWeights: config.scoreWeights,
         tradeManager: config.tradeManager,
+        confirmationMode: config.confirmationMode,
+        setAndForgetTargetR: config.setAndForgetTargetR,
+        setAndForgetTargetMode: config.setAndForgetTargetMode,
+        closeTradesBeforeWeekend: config.closeTradesBeforeWeekend,
         reverseFinalSignal: config.reverseFinalSignal,
         timeframes: profile,
         trendCandles,
@@ -251,7 +260,7 @@ export const executeBacktestRun = async (
         addBacktestEvent(
           id,
           "entry_proximity_rejected",
-          `ENTRY PROXIMITY · rejected ${proximityRejected} ${pair} setup(s) whose first M5 touch, close-through, or entry exceeded the 50% M15-zone-width limit.`,
+          `ENTRY PROXIMITY · rejected ${proximityRejected} ${pair} setup(s) whose modeled executable entry exceeded the 50% zone-width limit.`,
           pair,
           { rejectedSetups: proximityRejected, maxZoneWidthFraction: 0.5 },
         );
@@ -333,6 +342,7 @@ export const executeBacktestRun = async (
       wins,
       losses: all.length - wins,
     });
+    recordBacktestLeaderboardCandidate(id);
     addBacktestEvent(
       id,
       "run_complete",
@@ -366,6 +376,10 @@ export const normalizeBacktestConfig = (
     ? input.timeframeProfile
     : "intraday";
   const profile = getGoldilocksTimeframeProfile(timeframeProfile);
+  const requestedTradeManager =
+    input.tradeManager === undefined
+      ? GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID
+      : normalizeGoldilocksBacktestManager(input.tradeManager);
   const config: BacktestRunConfig = {
     pairs: [...new Set(pairs)],
     lookbackDays: Math.min(
@@ -404,7 +418,22 @@ export const normalizeBacktestConfig = (
     riskProfile: isRiskProfile(input.riskProfile)
       ? input.riskProfile
       : "default",
-    tradeManager: normalizeGoldilocksBacktestManager(input.tradeManager),
+    tradeManager: requestedTradeManager,
+    confirmationMode: normalizeGoldilocksConfirmationMode(
+      input.confirmationMode,
+    ),
+    setAndForgetTargetR:
+      requestedTradeManager === "set-and-forget-2r-v1"
+        ? Math.min(20, Math.max(1, Number(input.setAndForgetTargetR ?? 2)))
+        : undefined,
+    setAndForgetTargetMode:
+      requestedTradeManager === "set-and-forget-2r-v1" &&
+      input.setAndForgetTargetMode !== "fixed-r"
+        ? "opposing-base"
+        : requestedTradeManager === "set-and-forget-2r-v1"
+          ? "fixed-r"
+          : undefined,
+    closeTradesBeforeWeekend: input.closeTradesBeforeWeekend !== false,
     reverseFinalSignal: Boolean(input.reverseFinalSignal),
     archiveOnly: Boolean(input.archiveOnly),
     datasetEndTime: Number.isFinite(input.datasetEndTime)

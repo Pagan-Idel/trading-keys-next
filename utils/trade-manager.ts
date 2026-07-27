@@ -2,7 +2,7 @@
 import { logMessage } from "./automationLogger.ts";
 import { modifyTrade } from "./oanda/api/modifyTrade.ts";
 import { openNow } from "./oanda/api/openNow.ts";
-import { ACTION } from "./oanda/api/order.ts";
+import { ACTION } from "./oanda/orderTypes.ts";
 import { wait, getPipIncrement, normalizePairKeyUnderscore } from "./shared.ts";
 import { fetchPriceOnce } from "./oanda/api/priceStreamManager.ts";
 

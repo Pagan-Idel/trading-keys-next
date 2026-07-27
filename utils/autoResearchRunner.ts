@@ -16,6 +16,7 @@ import {
   type GoldilocksTimeframeProfileId,
 } from './goldilocksConfig.ts';
 import { buildGoldilocksResearchManifest } from './goldilocksResearchManifest.ts';
+import { GOLDILOCKS_DEFAULT_MANAGEMENT } from './goldilocksTradeManagement.ts';
 import { fetchCandleHistory } from './oanda/api/fetchCandleHistory.ts';
 import {
   addAutoResearchEvent, cancelAutoResearchCampaign, claimNextAutoResearchTrial, completeAutoResearchTrial,
@@ -68,6 +69,7 @@ export const buildAutoResearchConfigurations=(input:StartAutoResearchInput={}):B
         backfillPages:0,
         label:`${profile.label} | ${family.label} | score ${minimumScore}`,
         riskProfile:'default',startingBalance:1000,leverage:30,
+        tradeManager:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
         scoreWeights:expandGoldilocksScoreCategoryWeights(family.scoreCategories),
         gateSettings:normalizeGoldilocksBacktestGates(
           family.disabledGate?{[family.disabledGate]:false}:undefined,

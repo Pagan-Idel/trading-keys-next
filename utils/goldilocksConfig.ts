@@ -1,10 +1,33 @@
-export const GOLDILOCKS_STRATEGY_VERSION = "0.42";
+export const GOLDILOCKS_STRATEGY_VERSION = "0.49";
 
 export const GOLDILOCKS_RESEARCH_VERSION = "goldilocks-auto-research-v1";
 
-export const isGoldilocksIntradayStrategyVersion = (
-  strategyVersion?: string,
-) =>
+export const GOLDILOCKS_CONFIRMATION_MODES = {
+  closeThrough: {
+    id: "close-through",
+    label: "First touch + engulf confirmation",
+    description:
+      "Wait for a later confirmation candle to close through the first-touch candle wick before entering at that close.",
+  },
+  touchEntry: {
+    id: "touch-entry",
+    label: "Immediate first-touch entry",
+    description:
+      "Model a resting entry at the zone proximal edge as soon as the first eligible candle touches it.",
+  },
+} as const;
+
+export type GoldilocksConfirmationMode =
+  (typeof GOLDILOCKS_CONFIRMATION_MODES)[keyof typeof GOLDILOCKS_CONFIRMATION_MODES]["id"];
+
+export const normalizeGoldilocksConfirmationMode = (
+  value?: string,
+): GoldilocksConfirmationMode =>
+  value === GOLDILOCKS_CONFIRMATION_MODES.touchEntry.id
+    ? GOLDILOCKS_CONFIRMATION_MODES.touchEntry.id
+    : GOLDILOCKS_CONFIRMATION_MODES.closeThrough.id;
+
+export const isGoldilocksIntradayStrategyVersion = (strategyVersion?: string) =>
   typeof strategyVersion === "string" &&
   (/^0\.\d+$/.test(strategyVersion) ||
     /^h1-m15-m5-v\d+$/.test(strategyVersion));
@@ -15,10 +38,10 @@ export const isGoldilocksReplayStrategyCompatible = (
 ) =>
   Boolean(
     storedStrategyVersion &&
-      selectedStrategyVersion &&
-      (storedStrategyVersion === selectedStrategyVersion ||
-        (isGoldilocksIntradayStrategyVersion(storedStrategyVersion) &&
-          isGoldilocksIntradayStrategyVersion(selectedStrategyVersion))),
+    selectedStrategyVersion &&
+    (storedStrategyVersion === selectedStrategyVersion ||
+      (isGoldilocksIntradayStrategyVersion(storedStrategyVersion) &&
+        isGoldilocksIntradayStrategyVersion(selectedStrategyVersion))),
   );
 
 export const GOLDILOCKS_TIMEFRAME_PROFILES = {
@@ -229,17 +252,16 @@ export const normalizeGoldilocksScoreWeights = (
   return Object.fromEntries(
     Object.entries(GOLDILOCKS_SCORE_WEIGHTS).map(([key, fallback]) => {
       const candidate = Number(source[key as keyof GoldilocksScoreWeights]);
-      return [key, Number.isFinite(candidate) ? Math.max(0, candidate) : fallback];
+      return [
+        key,
+        Number.isFinite(candidate) ? Math.max(0, candidate) : fallback,
+      ];
     }),
   ) as GoldilocksScoreWeights;
 };
 
 export type GoldilocksScoreCategory =
-  | "trend"
-  | "departure"
-  | "purity"
-  | "approachWarnings"
-  | "zoneInsideZone";
+  "trend" | "departure" | "purity" | "approachWarnings" | "zoneInsideZone";
 
 export type GoldilocksScoreCategoryWeights = Record<
   GoldilocksScoreCategory,
@@ -252,9 +274,7 @@ export const getGoldilocksScoreCategoryWeights = (
   const weights = normalizeGoldilocksScoreWeights(value);
   const categories: GoldilocksScoreCategoryWeights = {
     trend: weights.trendAlignment,
-    departure:
-      weights.departureSingleCandleBase +
-      weights.departureStrength,
+    departure: weights.departureSingleCandleBase + weights.departureStrength,
     purity: weights.purityFresh,
     approachWarnings: weights.approachNoWarnings,
     zoneInsideZone: weights.zoneInsideZoneThreeTimeframes,
@@ -389,14 +409,10 @@ export const normalizeGoldilocksBacktestTweaks = (
   return Object.fromEntries(
     Object.entries(GOLDILOCKS_BACKTEST_TWEAK_DEFAULTS).map(
       ([key, fallback]) => {
-        const candidate = Number(
-          source[key as keyof GoldilocksBacktestTweaks],
-        );
+        const candidate = Number(source[key as keyof GoldilocksBacktestTweaks]);
         return [
           key,
-          Number.isFinite(candidate) && candidate >= 0
-            ? candidate
-            : fallback,
+          Number.isFinite(candidate) && candidate >= 0 ? candidate : fallback,
         ];
       },
     ),

@@ -55,8 +55,7 @@ const scoreComponentDisplayName = (name: string) => {
     return "Zone-timeframe departure quality";
   if (name.endsWith(" approach warnings"))
     return "Confirmation-timeframe approach warnings";
-  if (name.endsWith(" purity"))
-    return "Confirmation-timeframe zone purity";
+  if (name.endsWith(" purity")) return "Confirmation-timeframe zone purity";
   if (name === "Available RRR") return "Available reward-to-risk";
   if (name === "Zone inside zone")
     return "Multi-timeframe zone confluence (ZIZ)";
@@ -69,7 +68,7 @@ const hardGatePurpose = (name: string) => {
   if (normalized.includes("confirmation"))
     return "Requires a later completed confirmation candle and prevents stale signals from being chased.";
   if (normalized.includes("entry proximity"))
-    return "Prevents an oversized first touch or an executable price that has moved too far from the zone.";
+    return "Prevents entry after the executable price has moved too far from the zone; touch-candle size is diagnostic only.";
   if (normalized.includes("runway"))
     return "Requires a clear path to the fixed target before entry.";
   if (normalized.includes("news"))
@@ -459,6 +458,7 @@ type HistoricalEntrySetup = {
   }>;
   zone: GoldilocksDetection["zones"][number];
   confirmationTimeframe: string;
+  confirmationMode?: "close-through" | "touch-entry";
   confirmationTime: number;
   confirmationCandle: StrategyCandle;
   touchCandle: StrategyCandle;
@@ -475,18 +475,38 @@ type HistoricalEntrySetup = {
   score: GoldilocksScoreResult;
   realizedR?: number | null;
   tradeManager?: string;
+  setAndForgetTargetMode?: "fixed-r" | "opposing-base";
+  setAndForgetTargetZoneId?: string;
   partialExit?: {
     time: number;
     price: number;
     fraction: number;
     realizedR: number;
   };
+  partialExits?: Array<{
+    time: number;
+    price: number;
+    fraction: number;
+    realizedR: number;
+    milestoneR: number;
+    momentum: "fast" | "slow";
+    attackSeconds: number | null;
+  }>;
   approachPressure?: GoldilocksApproachPressure;
   zoneCorridors?: ZoneCorridorMeasurement[];
   marketPath?: TradePathSummary | null;
   managementPolicyResults?: TradeManagementResearchResult[];
   outcome: "win" | "loss" | "open";
-  exitReason: "target" | "stop" | "break_even" | "weekend_close" | "open";
+  exitReason:
+    | "target"
+    | "stop"
+    | "break_even"
+    | "runner_target"
+    | "runner_stop"
+    | "runner_open"
+    | "one_r_protected"
+    | "weekend_close"
+    | "open";
   exitPrice?: number;
   breakEvenActivated: boolean;
   outcomeTime?: number;
@@ -930,9 +950,19 @@ export default function StrategyLab() {
     timeframe,
   ]);
   const replayOpposingZone = live?.historicalEntrySetup
-    ? live.zoneHistory.nearestZones.find(
-        (zone) => zone.side !== live.historicalEntrySetup?.zone.side,
-      )
+    ? live.historicalEntrySetup.setAndForgetTargetMode === "opposing-base"
+      ? live.zoneHistory.displayZones.find(
+          (zone) =>
+            zone.id === live.historicalEntrySetup?.setAndForgetTargetZoneId ||
+            (zone.kind === "base" &&
+              zone.side !== live.historicalEntrySetup?.zone.side &&
+              (live.historicalEntrySetup?.zone.side === "supply"
+                ? zone.high === live.historicalEntrySetup?.runway.takeProfit
+                : zone.low === live.historicalEntrySetup?.runway.takeProfit)),
+        )
+      : live.zoneHistory.nearestZones.find(
+          (zone) => zone.side !== live.historicalEntrySetup?.zone.side,
+        )
     : undefined;
   const scenario =
     source === "live" && live && replayCandles
@@ -1027,8 +1057,8 @@ export default function StrategyLab() {
                   : `Deterministic test candles · current trend: ${direction.toUpperCase()}.`}{" "}
                 M15 owns the zones and first outside candle. M5 owns prior-touch
                 purity, the first trade touch, and later confirmation. Switch
-                between H1, M15, and M5 while keeping the
-                same M15 zones projected; M1 remains post-entry only.
+                between H1, M15, and M5 while keeping the same M15 zones
+                projected; M1 remains post-entry only.
               </>
             )}
           </Copy>
@@ -1107,8 +1137,8 @@ export default function StrategyLab() {
           </strong>
           <br />
           This saved row used {live.replayStrategyVersion}. Its stored trade and
-          compatible trend→zone→confirmation candle audit remain visible, but it is not
-          treated as a valid {live.currentStrategyVersion} setup.
+          compatible trend→zone→confirmation candle audit remain visible, but it
+          is not treated as a valid {live.currentStrategyVersion} setup.
           {recalculatedFocusedSetup && (
             <>
               {" "}
@@ -1147,8 +1177,8 @@ export default function StrategyLab() {
             trade.confirmationTimeframe === "M1"
               ? { trend: "M15", zone: "M5", trigger: "M1", execution: "M1" }
               : trade.confirmationTimeframe === "H1"
-              ? { trend: "D1", zone: "H4", trigger: "H1", execution: "M5" }
-              : { trend: "H1", zone: "M15", trigger: "M5", execution: "M1" };
+                ? { trend: "D1", zone: "H4", trigger: "H1", execution: "M5" }
+                : { trend: "H1", zone: "M15", trigger: "M5", execution: "M1" };
           const departureScore = trade.score?.components.find((component) =>
             component.name.endsWith(" departure quality"),
           )?.points;
@@ -1185,7 +1215,10 @@ export default function StrategyLab() {
               {live.legacyReplay && (
                 <Diagnostic>
                   <strong>
-                    Current {live.currentStrategyVersion}: {trade.zone.touches > 3 ? "FAIL BEFORE SCORE" : "NOT RESCORED"}
+                    Current {live.currentStrategyVersion}:{" "}
+                    {trade.zone.touches > 3
+                      ? "FAIL BEFORE SCORE"
+                      : "NOT RESCORED"}
                   </strong>
                   <br />
                   {trade.zone.touches > 3
@@ -1226,9 +1259,7 @@ export default function StrategyLab() {
                       );
                       return (
                         <tr key={component.name}>
-                          <td>
-                            {scoreComponentDisplayName(component.name)}
-                          </td>
+                          <td>{scoreComponentDisplayName(component.name)}</td>
                           <td>Points</td>
                           <td className="points">
                             {maximum === null
@@ -1304,8 +1335,7 @@ export default function StrategyLab() {
                       : `${trade.realizedR > 0 ? "+" : ""}${trade.realizedR.toFixed(2)}R`}
                   </div>
                   <div className="meta">
-                    {trade.partialExit &&
-                    trade.exitReason === "break_even"
+                    {trade.partialExit && trade.exitReason === "break_even"
                       ? "50% at +1R · remainder exited at entry"
                       : trade.exitReason.replaceAll("_", " ")}{" "}
                     {trade.outcomeTime
@@ -1365,29 +1395,44 @@ export default function StrategyLab() {
                 </SnapshotCard>
                 <SnapshotCard
                   $tone={
-                    trade.approachPressure?.weakConfirmation ? "warn" : "good"
+                    trade.confirmationMode === "touch-entry"
+                      ? "good"
+                      : trade.approachPressure?.weakConfirmation
+                        ? "warn"
+                        : "good"
                   }
                 >
-                  <div className="label">Confirmation timeframe</div>
+                  <div className="label">Entry confirmation</div>
                   <div className="value">
-                    {confirmationStrength === undefined
-                      ? "PASS"
-                      : `${(confirmationStrength * 100).toFixed(0)}% strength`}
+                    {trade.confirmationMode === "touch-entry"
+                      ? "FIRST TOUCH"
+                      : confirmationStrength === undefined
+                        ? "PASS"
+                        : `${(confirmationStrength * 100).toFixed(0)}% strength`}
                   </div>
                   <div className="meta">
-                    Final confirmation{" "}
-                    {confirmationStrength === undefined
-                      ? "legacy"
-                      : confirmationStrength >= 0.35
-                        ? "PASS"
-                        : "FAIL"}{" "}
+                    {trade.confirmationMode === "touch-entry" ? (
+                      <>Proximal-edge entry</>
+                    ) : (
+                      <>
+                        Final confirmation{" "}
+                        {confirmationStrength === undefined
+                          ? "legacy"
+                          : confirmationStrength >= 0.35
+                            ? "PASS"
+                            : "FAIL"}
+                      </>
+                    )}{" "}
                     · adverse warnings{" "}
-                    {trade.approachPressure ? adverseWarnings.length : "legacy"}/2
+                    {trade.approachPressure ? adverseWarnings.length : "legacy"}
+                    /2
                   </div>
                 </SnapshotCard>
               </SnapshotGrid>
-              <AuditDetails open>
-                <summary>Review points, hard gates, and supporting evidence</summary>
+              <AuditDetails>
+                <summary>
+                  Review points, hard gates, and supporting evidence
+                </summary>
                 <AuditGrid>
                   {scoreAudit}
                   <AuditCard>
@@ -1417,7 +1462,9 @@ export default function StrategyLab() {
                           {gate.name}: {gate.passed ? "PASS" : "FAIL"}
                         </strong>
                         <br />
-                        <span className="muted">{hardGatePurpose(gate.name)}</span>
+                        <span className="muted">
+                          {hardGatePurpose(gate.name)}
+                        </span>
                         {gate.reason && (
                           <>
                             <br />
@@ -1445,9 +1492,10 @@ export default function StrategyLab() {
                     <strong>Base candles:</strong>{" "}
                     {trade.zone.baseCandleCount ?? 1}
                     <br />
-                    <strong>Additional candles before first outside:</strong>{" "}
-                    {trade.zone.departureInsideCandleCount ?? 0}{" "}
-                    candle(s)
+                    <strong>
+                      Additional candles before first outside:
+                    </strong>{" "}
+                    {trade.zone.departureInsideCandleCount ?? 0} candle(s)
                     <br />
                     <strong>Sustained departure:</strong>{" "}
                     {trade.zone.departureMultiple.toFixed(2)}x zone
@@ -1455,15 +1503,15 @@ export default function StrategyLab() {
                   <AuditCard>
                     <h3>Entry proximity · hard gate</h3>
                     <span className="why">
-                      Why: protects against a violent first touch and against
-                      chasing an executable price too far from the zone. Touch
-                      range measures the entire first confirmation-timeframe
-                      candle; executable distance measures the fresh broker
+                      Why: protects against chasing an executable price too far
+                      from the zone. Touch range still measures the entire first
+                      confirmation-timeframe candle as context, but it does not
+                      reject a setup. Executable distance measures the fresh
+                      broker
                       {trade.zone.side === "demand" ? " ask" : " bid"} beyond
-                      the proximal edge. Both must be no more than 50% of one{" "}
-                      zone width. If price is too far
-                      away, skip the trade rather than trying to improve it
-                      manually.
+                      the proximal edge and must be no more than 50% of one zone
+                      width. If price is too far away, skip the trade rather
+                      than trying to improve it manually.
                     </span>
                     <strong>Touch wick:</strong>{" "}
                     {trade.zone.side === "supply"
@@ -1475,7 +1523,7 @@ export default function StrategyLab() {
                     <br />
                     {trade.proximity && (
                       <>
-                        <strong>Touch range:</strong>{" "}
+                        <strong>Touch range (diagnostic only):</strong>{" "}
                         {(trade.proximity.touchRangeZoneFraction * 100).toFixed(
                           1,
                         )}
@@ -1509,23 +1557,20 @@ export default function StrategyLab() {
                     <br />
                     <br />
                     <span className="muted">
-                      Every completed confirmation-timeframe candle touching
-                      the zone after the zone-timeframe first-outside
-                      candle and before the trade trigger counts individually.
-                      Fresh = 4 pts; one prior touch = 2 pts;
-                      otherwise = 0 pts.
+                      Every completed confirmation-timeframe candle touching the
+                      zone after the zone-timeframe first-outside candle and
+                      before the trade trigger counts individually. Fresh = 4
+                      pts; one prior touch = 2 pts; otherwise = 0 pts.
                     </span>
                   </AuditCard>
                   <AuditCard>
-                    <h3>
-                      Confirmation-timeframe approach warnings · scored
-                    </h3>
+                    <h3>Confirmation-timeframe approach warnings · scored</h3>
                     <span className="why">
                       Why: these warnings describe dangerous pre-touch pressure.
-                      Zero, one, or both warnings award 5, 3, or 0 points.
-                      The two categories are a confirmed liquidity sweep and a
-                      fast momentum approach. Compression is measured as
-                      context but is not a warning.
+                      Zero, one, or both warnings award 5, 3, or 0 points. The
+                      two categories are a confirmed liquidity sweep and a fast
+                      momentum approach. Compression is measured as context but
+                      is not a warning.
                     </span>
                     {trade.approachPressure ? (
                       <>
@@ -1540,41 +1585,40 @@ export default function StrategyLab() {
                               .join(", ")
                           : "none"}
                         <span className="why">
-                          The two possible warnings are a confirmed
-                          liquidity sweep and a fast momentum drive into
-                          the zone. Compression is not penalized. A liquidity
-                          sweep can qualify in either of two ways. The standard
-                          path clears and reclaims a sideways or equal-pivot
-                          pool by at least 0.15 prior ATR, closes
-                          back inside by at least 0.02 prior ATR or 1% of the
-                          zone width, and recovers at least 1.25 ATR through the
-                          pool midpoint. Equal lows or highs are not required
-                          when a wick instead clears one prior swing by at
-                          least 3.25 ATR, then reclaims that swing with at
-                          least 1.25 ATR of recovery within three analysis
-                          candles. A newer adverse extreme cancels either
-                          pattern. Sweeps are checked only on the return
-                          toward the base: from the latest lowest low for
-                          supply or latest highest high for demand through
-                          first touch. There is no fixed lookback count. The
-                          breach and reaction are one warning,
-                          and multiple sweeps still count as one category.
-                          Confirmation is reported
-                          separately as PASS or FAIL at 35% and is not an
-                          adverse-warning category.
+                          The two possible warnings are a confirmed liquidity
+                          sweep and a fast momentum drive into the zone.
+                          Compression is not penalized. A liquidity sweep can
+                          qualify in either of two ways. The standard path
+                          clears and reclaims a sideways or equal-pivot pool by
+                          at least 0.15 prior ATR, closes back inside by at
+                          least 0.02 prior ATR or 1% of the zone width, and
+                          recovers at least 1.25 ATR through the pool midpoint.
+                          Equal lows or highs are not required when a wick
+                          instead clears one prior swing by at least 3.25 ATR,
+                          then reclaims that swing with at least 1.25 ATR of
+                          recovery within three analysis candles. A newer
+                          adverse extreme cancels either pattern. Sweeps are
+                          checked only on the return toward the base: from the
+                          latest lowest low for supply or latest highest high
+                          for demand through first touch. There is no fixed
+                          lookback count. The breach and reaction are one
+                          warning, and multiple sweeps still count as one
+                          category. Confirmation is reported separately as PASS
+                          or FAIL at 35% and is not an adverse-warning category.
                         </span>
                         <strong>Full causal span:</strong>{" "}
                         {trade.approachPressure.sourceApproachCandles ??
-                          trade.approachPressure.approachWindowCandles} source
-                        candle(s), from first close-away through the candle
-                        before first touch.
+                          trade.approachPressure.approachWindowCandles}{" "}
+                        source candle(s), from first close-away through the
+                        candle before first touch.
                         <br />
                         <strong>Return leg analyzed:</strong>{" "}
                         {trade.approachPressure.approachReturnLegCandles ??
                           trade.approachPressure.approachWindowCandles}{" "}
                         {formatWarningResolution(
                           trade.approachPressure.analysisTimeframeSeconds,
-                        )} candle(s)
+                        )}{" "}
+                        candle(s)
                         {trade.approachPressure.approachReturnLegStartTime
                           ? ` from ${formatStrategyReplayEnid(
                               trade.approachPressure.approachReturnLegStartTime,
@@ -1593,21 +1637,38 @@ export default function StrategyLab() {
                             <strong>Sweep return-leg start:</strong>{" "}
                             {formatStrategyReplayEnid(
                               trade.approachPressure.sweepReturnLegStartTime,
-                            )}. Earlier departure-side sweeps are ignored.
+                            )}
+                            . Earlier departure-side sweeps are ignored.
                             <br />
                           </>
                         ) : null}
                         <strong>Approach classification:</strong>{" "}
-                        {trade.approachPressure.approachClassification
-                          ?.replaceAll("_", " ") ?? "legacy directional-pressure estimate"}{" "}
+                        {trade.approachPressure.approachClassification?.replaceAll(
+                          "_",
+                          " ",
+                        ) ?? "legacy directional-pressure estimate"}{" "}
                         {trade.approachPressure.version >= 2 && (
                           <>
                             <br />
                             Range ratio{" "}
-                            {trade.approachPressure.approachRangeContractionRatio?.toFixed(2)} · body ratio{" "}
-                            {trade.approachPressure.approachBodyContractionRatio?.toFixed(2)} · overlap{" "}
-                            {((trade.approachPressure.approachAverageOverlapFraction ?? 0) * 100).toFixed(1)}% · progress efficiency{" "}
-                            {((trade.approachPressure.approachProgressEfficiency ?? 0) * 100).toFixed(1)}%
+                            {trade.approachPressure.approachRangeContractionRatio?.toFixed(
+                              2,
+                            )}{" "}
+                            · body ratio{" "}
+                            {trade.approachPressure.approachBodyContractionRatio?.toFixed(
+                              2,
+                            )}{" "}
+                            · overlap{" "}
+                            {(
+                              (trade.approachPressure
+                                .approachAverageOverlapFraction ?? 0) * 100
+                            ).toFixed(1)}
+                            % · progress efficiency{" "}
+                            {(
+                              (trade.approachPressure
+                                .approachProgressEfficiency ?? 0) * 100
+                            ).toFixed(1)}
+                            %
                             <span className="why">
                               Compression remains descriptive context and does
                               not create a warning. A FAST ATTACK is a distinct
@@ -1626,23 +1687,28 @@ export default function StrategyLab() {
                             {(
                               trade.approachPressure
                                 .fastApproachMaximumDisplacementAtr ??
-                              trade.approachPressure.fastApproachMaximumBodyAtr ??
+                              trade.approachPressure
+                                .fastApproachMaximumBodyAtr ??
                               0
-                            ).toFixed(2)} ATR
+                            ).toFixed(2)}{" "}
+                            ATR
                           </>
                         )}
                       </>
                     ) : (
-                      <>Legacy trade: confirmation diagnostics were not recorded.</>
+                      <>
+                        Legacy trade: confirmation diagnostics were not
+                        recorded.
+                      </>
                     )}
                   </AuditCard>
                   <AuditCard>
                     <h3>Path and management research · no score</h3>
                     <span className="why">
                       Why: records post-entry path behavior and alternative
-                      management evidence for later research. These
-                      measurements do not change the official result or the
-                      stored 20-point score.
+                      management evidence for later research. These measurements
+                      do not change the official result or the stored 20-point
+                      score.
                     </span>
                     {trade.departureSpeed && (
                       <>
@@ -1673,8 +1739,7 @@ export default function StrategyLab() {
                         {Math.round(trade.partialExit.fraction * 100)}% at +1R
                         {" · banked "}
                         {trade.partialExit.realizedR > 0 ? "+" : ""}
-                        {trade.partialExit.realizedR.toFixed(2)}R
-                        {" · "}
+                        {trade.partialExit.realizedR.toFixed(2)}R{" · "}
                         {formatStrategyReplayEnid(trade.partialExit.time)}
                         <br />
                         <strong>Final remainder exit:</strong>{" "}
@@ -1746,10 +1811,7 @@ export default function StrategyLab() {
           timeframe={timeframe}
           drilldownTimeframe={
             (live?.strategyStack?.drilldown ?? selectedStack.drilldown) as
-              | "M1"
-              | "M5"
-              | "M15"
-              | "H1"
+              "M1" | "M5" | "M15" | "H1"
           }
           drawingStorageKey={`${pair}:${timeframe}`}
           timeframeLoading={loading}
@@ -1894,7 +1956,8 @@ export default function StrategyLab() {
               <strong>Demo pipeline</strong>
               <br />
               H1 trend → M15 zones and outside candle → M5 prior touches, trade
-              touch, and later close-through confirmation → M1 outcome sequencing.
+              touch, and later close-through confirmation → M1 outcome
+              sequencing.
             </Rule>
             <Rule>
               <strong>Continuation</strong>

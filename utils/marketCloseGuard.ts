@@ -1,6 +1,6 @@
 import { openNow } from "./oanda/api/openNow.ts";
 import { closeTrade } from "./oanda/api/closeTrade.ts";
-import { ACTION } from "./oanda/api/order.ts";
+import { ACTION } from "./oanda/orderTypes.ts";
 import { logMessage } from "./automationLogger.ts";
 import { isForexHolidayAt, isForexWeekendEntryBlocked, isForexWeekendLiquidationWindow } from './forexMarketHours.ts';
 

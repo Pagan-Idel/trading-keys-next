@@ -1,5 +1,5 @@
 import type { StrategyCandle } from './goldilocksStrategy.ts';
-import { GOLDILOCKS_DEFAULT_MANAGEMENT, calculateAtr, getGoldilocksAtrTrailingStop } from './goldilocksTradeManagement.ts';
+import { GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID, GOLDILOCKS_DEFAULT_MANAGEMENT, GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID, calculateAtr, getGoldilocksAtrTrailingStop, resolveGoldilocksAdaptiveScaleOut, type GoldilocksScaleOut } from './goldilocksTradeManagement.ts';
 
 export const GOLDILOCKS_RESEARCH_SCHEMA_VERSION='goldilocks-ai-research-v1';
 
@@ -31,6 +31,26 @@ export const GOLDILOCKS_MANAGEMENT_POLICIES:TradeManagementPolicy[]=[
     primaryExitFraction:GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
     runnerTargetR:null,
     runnerStopR:0,
+  },
+  {
+    id:GOLDILOCKS_UNTOUCHED_STOP_RUNNER_MANAGEMENT_ID,
+    version:1,
+    label:'Bank Half + Untouched-Stop Runner',
+    breakEvenAtR:null,
+    primaryTargetR:1,
+    primaryExitFraction:.5,
+    runnerTargetR:null,
+    runnerStopR:-1,
+  },
+  {
+    id:GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID,
+    version:1,
+    label:'Adaptive Attack Scale-Out + Untouched Runner',
+    breakEvenAtR:null,
+    primaryTargetR:1,
+    primaryExitFraction:.25,
+    runnerTargetR:null,
+    runnerStopR:-1,
   },
   ...setAndForgetTargets.map(primaryTargetR=>(
     {id:`set-forget-${targetId(primaryTargetR)}-v1`,version:1 as const,label:`Set and forget ${primaryTargetR}R`,breakEvenAtR:null,primaryTargetR,primaryExitFraction:1,runnerTargetR:null,runnerStopR:null}
@@ -71,6 +91,7 @@ export interface TradeManagementResearchResult {
   markToMarketR:number;
   breakEvenActivatedAt:number|null;
   partialExitAt:number|null;
+  partialExits?:GoldilocksScaleOut[];
   path:TradePathSummary;
 }
 
@@ -117,6 +138,11 @@ export const evaluateTradeManagementPolicy=(args:{
   const risk=Math.abs(entry-stopLoss);
   if(!(risk>0))throw new Error('Trade-management research requires a positive initial risk distance.');
   const summary=pathFor(candles,startIndex,direction,entry,risk,weekendLiquidationTime);
+  if(policy.id===GOLDILOCKS_ADAPTIVE_SCALE_OUT_MANAGEMENT_ID){
+    const resolved=resolveGoldilocksAdaptiveScaleOut({candles,startIndex,direction,stopLoss,oneR:thresholdPrice(direction,entry,risk,1),weekendLiquidationTime});
+    const firstPartial=resolved?.partialExits?.[0]?.time??null;
+    return {policyId:policy.id,policyVersion:policy.version,policy,status:resolved?'closed':'open',exitTime:resolved?.outcomeTime??summary.coverageEndTime,exitReason:(resolved?.exitReason??'archive_end') as TradeManagementResearchResult['exitReason'],realizedR:resolved?.realizedR??null,markToMarketR:summary.endingR,breakEvenActivatedAt:null,partialExitAt:firstPartial,partialExits:resolved?.partialExits,path:summary};
+  }
   let breakEvenActivatedAt:number|null=null;
   let partialExitAt:number|null=null;
   let realizedPrimary=0;

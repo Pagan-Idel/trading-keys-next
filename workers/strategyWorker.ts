@@ -3,7 +3,7 @@ import { determineSwingPoints, type Candle as SwingCandle, type SwingResult } fr
 import { placeTrade } from "../utils/placeTrade.ts";
 import { openNow } from "../utils/oanda/api/openNow.ts";
 import { logMessage } from "../utils/automationLogger.ts";
-import { ACTION } from "../utils/oanda/api/order.ts";
+import { ACTION } from "../utils/oanda/orderTypes.ts";
 import { wait, normalizePairKeyUnderscore, logSwingSummary, tfToMs } from "../utils/shared.ts";
 import { isEngulfed } from "../utils/isEngulfed.ts";
 import { throttleConnection } from "../utils/throttleConnections.ts";

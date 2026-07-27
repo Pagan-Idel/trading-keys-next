@@ -76,6 +76,51 @@ export const annotateReplayZonePurityAt = (
 export const getStrategyReplayBaseContextStart = (zoneBaseTime: number) =>
   zoneBaseTime - STRATEGY_REPLAY_BASE_CONTEXT_SECONDS;
 
+export const buildStoredReplayZoneFallback = (trade: {
+  zoneId: string;
+  zoneKind: GoldilocksZone["kind"];
+  direction: "BUY" | "SELL";
+  zoneCandleTime: number;
+  firstOutsideTime?: number;
+  entry: number;
+  stopLoss: number;
+  takeProfit: number;
+  priorTouches: number;
+  maxPenetration: number;
+  demandHigh?: number;
+  supplyLow?: number;
+}): GoldilocksZone => {
+  const low =
+    trade.direction === "BUY"
+      ? trade.stopLoss
+      : (trade.supplyLow ?? trade.entry);
+  const high =
+    trade.direction === "BUY"
+      ? (trade.demandHigh ?? trade.entry)
+      : trade.stopLoss;
+  return {
+    id: trade.zoneId,
+    kind: trade.zoneKind,
+    side: trade.direction === "BUY" ? "demand" : "supply",
+    candleIndex: 0,
+    candleTime: trade.zoneCandleTime,
+    availableAt: trade.firstOutsideTime ?? trade.zoneCandleTime,
+    low,
+    high,
+    width: high - low,
+    legMidpoint: trade.entry,
+    legRange: Math.abs(trade.takeProfit - trade.stopLoss),
+    departureMultiple: 0,
+    strength2x: false,
+    touches: trade.priorTouches,
+    maxPenetration: trade.maxPenetration,
+    state: "fresh",
+    reasons: [
+      "Replay fallback restored from the immutable stored trade and entry-time zone corridor because current reconstruction did not reproduce the historical zone.",
+    ],
+  };
+};
+
 export const getStrategyReplayContextAnchor = (
   tradeZoneBaseTime: number,
   priorTouchTimes: number[] = [],
@@ -112,7 +157,7 @@ export const getReplayExitMarkerPrice = (trade: {
   exitPrice?: number;
   runway: { entry: number; stopLoss: number; takeProfit: number };
 }) =>
-  trade.exitReason === "weekend_close" && Number.isFinite(trade.exitPrice)
+  Number.isFinite(trade.exitPrice)
     ? trade.exitPrice!
     : trade.exitReason === "stop"
       ? trade.runway.stopLoss
@@ -129,22 +174,42 @@ export const getReplayPartialExitMarkerText = (partial: {
 }) =>
   `PARTIAL EXIT · ${Math.round(partial.fraction * 100)}% AT +1R · BANKED ${formatReplayR(partial.realizedR)}`;
 
+export const getReplayScaleOutMarkerText = (partial: {
+  fraction: number;
+  realizedR: number;
+  milestoneR?: number;
+  momentum?: "fast" | "slow";
+}) =>
+  `SCALE OUT · ${Math.round(partial.fraction * 100)}% AT +${partial.milestoneR ?? 1}R · BANKED ${formatReplayR(partial.realizedR)}${partial.momentum ? ` · ${partial.momentum.toUpperCase()} ATTACK` : ""}`;
+
 export const getReplayFinalExitMarkerText = (trade: {
   outcome: string;
   exitReason?: string;
   realizedR?: number | null;
   partialExit?: { fraction: number };
+  partialExits?: Array<{ fraction: number }>;
 }) => {
   const realized =
     trade.realizedR == null ? "" : ` · TOTAL ${formatReplayR(trade.realizedR)}`;
   if (trade.partialExit) {
-    const remaining = Math.round((1 - trade.partialExit.fraction) * 100);
+    const closedFraction = trade.partialExits?.length
+      ? trade.partialExits.reduce((sum, partial) => sum + partial.fraction, 0)
+      : trade.partialExit.fraction;
+    const remaining = Math.round((1 - closedFraction) * 100);
     const location =
       trade.exitReason === "break_even" || trade.exitReason === "one_r_protected"
         ? "AT ENTRY"
-        : trade.exitReason === "target" || trade.exitReason === "runner_target"
-          ? "AT 2R"
-          : (trade.exitReason ?? "closed").replaceAll("_", " ").toUpperCase();
+        : trade.exitReason === "target"
+          ? "AT TARGET"
+          : trade.exitReason === "runner_target"
+            ? "AT RUNNER TARGET"
+            : trade.exitReason === "runner_stop"
+              ? "AT RUNNER STOP"
+              : trade.exitReason === "stop"
+                ? "AT ORIGINAL STOP"
+                : (trade.exitReason ?? "closed")
+                    .replaceAll("_", " ")
+                    .toUpperCase();
     return `FINAL ${remaining}% EXIT · ${location}${realized}`;
   }
   return `FINAL EXIT · ${trade.outcome.toUpperCase()} · ${(trade.exitReason ?? "closed").replaceAll("_", " ").toUpperCase()}${realized}`;
@@ -164,6 +229,24 @@ export const getReplayVisibleEnd = (
     Math.max(entryIndex, exitIndex) + normalPadding,
   );
   return Math.max(normalEnd, exitIndex + minimumPostExitBars);
+};
+
+export const getStrategyReplayForwardPageWindow = (
+  after: number,
+  timeframeSeconds: number,
+  pageCandles = 1500,
+) => {
+  const safeTimeframeSeconds = Math.max(1, timeframeSeconds);
+  const minimumWeekendSpanSeconds = 4 * 24 * 60 * 60;
+  return {
+    start: after + safeTimeframeSeconds,
+    end:
+      after +
+      Math.max(
+        safeTimeframeSeconds * Math.max(1, pageCandles),
+        minimumWeekendSpanSeconds,
+      ),
+  };
 };
 
 export const getReplayVisibleStart = (

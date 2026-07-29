@@ -19,3 +19,4 @@ tmp/
 dev-server.*.log
 data/dev-server*.log
 tsconfig.tsbuildinfo
+/artifacts/

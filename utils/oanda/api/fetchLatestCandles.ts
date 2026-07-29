@@ -1,5 +1,5 @@
 import { logMessage } from "../../logger";
-import credentials from "../../../credentials.json";
+import credentials from "../../oandaCredentials";
 import type { Candle } from "../../swingLabeler";
 import { normalizePairKeyUnderscore } from "../../shared";
 import { getLoginMode } from "../../loginState";

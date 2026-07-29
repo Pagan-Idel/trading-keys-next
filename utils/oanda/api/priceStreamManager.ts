@@ -1,4 +1,4 @@
-import credentials from "../../../credentials.json";
+import credentials from "../../oandaCredentials";
 import { normalizePairKeyUnderscore, tfToMs } from "../../shared";
 import { logMessage } from "../../logger";
 import { getLoginMode } from "../../loginState";

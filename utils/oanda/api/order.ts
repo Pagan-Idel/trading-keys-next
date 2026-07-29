@@ -2,7 +2,7 @@
 
 import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
-import credentials from "../../../credentials.json";
+import credentials from "../../oandaCredentials";
 import { type RISK, calculateRisk, getPrecision, normalizeOandaSymbol } from "../../shared";
 import { getLoginMode } from "../../loginState";
 import { estimateMarginFromStopRisk } from "../../portfolioMargin";

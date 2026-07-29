@@ -2,7 +2,7 @@
 
 import type { OrderParameters } from "../../shared";
 import { logMessage } from "../../logger";
-import credentials from "../../../credentials.json";
+import credentials from "../../oandaCredentials";
 import { getPipIncrement, getPrecision, normalizePairKeyUnderscore } from "../../shared";
 import type { Trade, TradeById } from "./openNow";
 import { openNow } from "./openNow";

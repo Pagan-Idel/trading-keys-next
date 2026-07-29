@@ -1,6 +1,6 @@
 // src/utils/oanda/api/closeTrade.ts
 
-import credentials from "../../../credentials.json";
+import credentials from "../../oandaCredentials";
 import type { Trade } from "./openNow";
 import { ACTION } from "../orderTypes";
 import type { OrderParameters } from "../../shared";

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import credentials from "../../../credentials.json";
+import credentials from "../../oandaCredentials";
 import { logMessage } from "../../logger";
 import { getLoginMode } from "../../loginState";
 

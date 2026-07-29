@@ -1,5 +1,5 @@
 import { logMessage } from "../../logger";
-import credentials from "../../../credentials.json";
+import credentials from "../../oandaCredentials";
 import { getLoginMode } from "../../loginState";
 import { normalizePairKeyUnderscore } from "../../shared";
 

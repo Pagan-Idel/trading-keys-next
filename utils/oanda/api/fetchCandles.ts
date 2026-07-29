@@ -1,4 +1,4 @@
-import credentials from "../../../credentials.json";
+import credentials from "../../oandaCredentials";
 import { logMessage } from "../../logger";
 import { OANDA_GRANULARITIES, INTERVAL_TO_GRANULARITY } from "../../constants";
 import type { Candle } from "../../swingLabeler";

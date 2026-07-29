@@ -1,0 +1,21 @@
+[Unit]
+Description=Trading Keys Automation Pulse control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradingkeys
+WorkingDirectory=/srv/trading-keys/app
+EnvironmentFile=/etc/trading-keys/automation.env
+Environment=TRADING_KEYS_PI_RUNTIME=true
+Environment=TRADING_KEYS_RUNNER_ENTRY=/srv/trading-keys/app/startRunner.mjs
+Environment=TRADING_KEYS_WORKER_ENTRY=/srv/trading-keys/app/goldilocksWorker.mjs
+ExecStart=/usr/bin/node --enable-source-maps /srv/trading-keys/app/controlServer.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,7 @@
 import { executeAutoResearchCampaign } from '../utils/autoResearchRunner.ts';
+import { assertResearchAllowed } from '../utils/piRuntimeGuard.ts';
 
+assertResearchAllowed();
 const campaignId=process.argv[2];
 if(!campaignId)throw new Error('Auto research worker requires a campaign ID.');
 

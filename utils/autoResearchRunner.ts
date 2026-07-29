@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { spawn } from 'child_process';
+import { assertResearchAllowed } from './piRuntimeGuard.ts';
 import { forexPairs } from './constants.ts';
 import { calculateBacktestPerformance } from './backtestAnalytics.ts';
 import { simulateBacktestPortfolio } from './backtestPortfolio.ts';
@@ -178,6 +179,7 @@ const acquireSealedDataset=async(campaignId:string,configurations:BacktestRunCon
   addAutoResearchEvent(campaignId,'dataset_sealed',`DATASET SEALED · ${datasetKey} · OANDA access is disabled for all queued trials.`,undefined,{datasetKey,datasetEndTime,archive:getCandleArchiveStorageUsage()});
   return datasetKey;
 };
+  assertResearchAllowed();
 
 export const executeAutoResearchCampaign=async(campaignId:string)=>{
   const runtime=getAutoResearchCampaignRuntime(campaignId);
@@ -239,6 +241,7 @@ export const executeAutoResearchCampaign=async(campaignId:string)=>{
     addAutoResearchEvent(campaignId,'campaign_failed',`AUTO RESEARCH FAILED · ${message}`);
   }
 };
+  assertResearchAllowed();
 
 export const startAutoResearch=(input:StartAutoResearchInput={})=>{
   const configurations=buildAutoResearchConfigurations(input);

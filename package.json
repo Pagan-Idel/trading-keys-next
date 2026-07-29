@@ -25,6 +25,10 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
+    "pi:control": "tsx pi/controlServer.ts",
+    "pi:demo": "tsx runner/startRunner.ts --mode=demo",
+    "pi:import-strategy": "tsx pi/importStrategy.ts",
+    "pi:export-strategy": "tsx pi/exportStrategy.ts",
     "dev": "next dev -p 4000",
     "redis-windows": "redis-server C:/Documents/trading-keys-next/redis.windows.conf",
     "redis-ubuntu": "redis-server /etc/redis/redis.conf",
@@ -35,6 +39,13 @@
     "run:demo": "npm run build:threads && tsx runner/startRunner.ts --mode=demo",
     "check:automation": "npm run build:threads && tsx runner/startRunner.ts --mode=demo --check",
     "test:strategy": "tsx --test tests/goldilocksStrategy.test.ts tests/priceStreamManager.test.ts",
+    "test:automation": "tsx --test tests/automationRuntime.test.ts tests/candleArchivePersistence.test.ts",
+    "test:automation:integration": "tsx --test tests/automationControl.integration.test.ts tests/switchToLatest.integration.test.ts",
+    "test:automation:e2e": "tsx --test tests/automation.e2e.test.ts",
+    "validate:automation": "npm run test:automation && npm run test:automation:integration && npm run test:automation:e2e && npm run test:strategy && tsc --noEmit && npm run build:threads",
+    "benchmark:automation": "tsx scripts/benchmarkAutomation.ts",
+    "build:pi-runtime": "node scripts/buildPiRuntime.mjs",
+    "benchmark:pi-runtime": "npm run build:pi-runtime && node scripts/benchmarkPiRuntime.mjs",
     "research:auto": "tsx runner/startAutoResearch.ts",
     "start:prod": "npm run run:demo"
   },

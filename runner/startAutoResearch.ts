@@ -1,5 +1,7 @@
 import { startAutoResearch } from '../utils/autoResearchRunner.ts';
+import { assertResearchAllowed } from '../utils/piRuntimeGuard.ts';
 
+assertResearchAllowed();
 const argumentsSet=new Set(process.argv.slice(2));
 const timeframeProfiles=argumentsSet.has('--lower-only')
   ?(['lowerTimeframe'] as const)

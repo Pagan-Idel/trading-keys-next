@@ -26,6 +26,8 @@ import { formatGoldilocksZoneAge, getGoldilocksZoneAgeDays, getGoldilocksZoneAge
 import { measureGoldilocksApproachPressure, type GoldilocksApproachPressure } from '../utils/approachPressure.ts';
 import { measureZoneCorridor, type ZoneCorridorMeasurement } from '../utils/zoneCorridor.ts';
 import type { TradePathSummary } from '../utils/tradeManagementResearch.ts';
+import { getHeapStatistics } from 'v8';
+import { pruneOldestSetEntries,workerScanJitterMs } from '../utils/workerRuntime.ts';
 import {
   GOLDILOCKS_DEFAULT_MANAGEMENT,
   calculateAtr,
@@ -52,6 +54,26 @@ let cachedHistory: ReturnType<typeof buildGoldilocksHistory> | null = null;
 let cachedPrimaryTime = '';
 let cachedConfirmationCandles: Awaited<ReturnType<typeof fetchCandles>> | null = null;
 const attemptedConfirmations = new Set<string>();
+const ATTEMPTED_CONFIRMATION_LIMIT=2_000;
+const MEMORY_TELEMETRY_INTERVAL_MS=15*60*1000;
+let lastMemoryTelemetryAt=0;
+
+const rememberAttemptedConfirmation=(key:string)=>{
+  attemptedConfirmations.add(key);
+  pruneOldestSetEntries(attemptedConfirmations,ATTEMPTED_CONFIRMATION_LIMIT);
+};
+
+const logMemoryTelemetry=()=>{
+  const now=Date.now();
+  if(now-lastMemoryTelemetryAt<MEMORY_TELEMETRY_INTERVAL_MS)return;
+  lastMemoryTelemetryAt=now;
+  const memory=process.memoryUsage(),heap=getHeapStatistics();
+  logMessage(`WORKER MEMORY | ${pair} | RSS ${(memory.rss/1024/1024).toFixed(1)} MiB | heap ${(memory.heapUsed/1024/1024).toFixed(1)} MiB.`,{
+    rssBytes:memory.rss,heapUsedBytes:memory.heapUsed,heapTotalBytes:memory.heapTotal,
+    externalBytes:memory.external,arrayBuffersBytes:memory.arrayBuffers,
+    heapSizeLimitBytes:heap.heap_size_limit,attemptedConfirmationCount:attemptedConfirmations.size,
+  },{pair,fileName:'goldilocksWorker',step:'worker_memory'});
+};
 
 const stop = () => {
   killed = true;
@@ -62,7 +84,8 @@ process.on('SIGTERM', stop);
 
 export const millisecondsUntilNextConfirmationClose = (now = Date.now()) => {
   const intervalMs = CONFIRMATION_SECONDS * 1_000;
-  return (Math.floor(now / intervalMs) + 1) * intervalMs - now + CANDLE_CLOSE_GRACE_MS;
+  return (Math.floor(now / intervalMs) + 1) * intervalMs - now + CANDLE_CLOSE_GRACE_MS+
+    workerScanJitterMs(pair);
 };
 
 const loadConfirmationCandles = async () => {
@@ -569,6 +592,7 @@ const safetyBlockReason = async (): Promise<string | null> => {
 };
 
 const scan = async () => {
+  logMemoryTelemetry();
   const blocked = await safetyBlockReason();
   if (blocked) {
     updateWorkerStatus(pair, 'paused', 'safety_guard', blocked, mode);
@@ -599,7 +623,7 @@ const scan = async () => {
     if (attemptedConfirmations.has(key)) continue;
     const departureQuality=validateGoldilocksDepartureQuality(confirmation.zone);
     if(!departureQuality.allowed){
-      attemptedConfirmations.add(key);
+      rememberAttemptedConfirmation(key);
       logMessage(`DEPARTURE QUALITY REJECTED · ${pair} · ${departureQuality.reason}`, {
         zoneId:confirmation.zone.id,
         confirmationTime:confirmation.confirmationCandle.time,
@@ -611,13 +635,13 @@ const scan = async () => {
     const formationWindow=getGoldilocksZoneFormationWindow(confirmation.zone,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME]);
     const formationNewsGate=getHistoricalNewsGateForRange(pair,formationWindow.start,formationWindow.end);
     if(!formationNewsGate.allowed){
-      attemptedConfirmations.add(key);
+      rememberAttemptedConfirmation(key);
       logMessage(`ZONE FORMATION NEWS REJECTED · ${pair} · ${formationNewsGate.reason}`,{zoneId:confirmation.zone.id,formationWindow,event:formationNewsGate.event},{pair,level:'warn',fileName:'goldilocksWorker',step:'zone_formation_news_rejected'});
       updateWorkerStatus(pair,'waiting','zone_formation_news_rejected',formationNewsGate.reason,mode);
       continue;
     }
     if (!confirmation.proximity.allowed) {
-      attemptedConfirmations.add(key);
+      rememberAttemptedConfirmation(key);
       logMessage(`ENTRY PROXIMITY REJECTED · ${pair} · ${confirmation.proximity.reason}`, {
         zoneId:confirmation.zone.id,
         touchTime:confirmation.touchCandle.time,
@@ -646,7 +670,7 @@ const scan = async () => {
       liveEntry,
     );
     if(!liveProximity.allowed){
-      attemptedConfirmations.add(key);
+      rememberAttemptedConfirmation(key);
       logMessage(`ENTRY PROXIMITY REJECTED · ${pair} · ${liveProximity.reason}`, {
         zoneId:confirmation.zone.id,
         touchTime:confirmation.touchCandle.time,
@@ -664,7 +688,7 @@ const scan = async () => {
       liveEntry,
     );
     if (!finalCheck.allowed) {
-      attemptedConfirmations.add(key);
+      rememberAttemptedConfirmation(key);
       updateWorkerStatus(pair, 'waiting', 'runway_rejected', finalCheck.reason, mode);
       continue;
     }
@@ -715,7 +739,7 @@ const scan = async () => {
       {pair,fileName:'goldilocksWorker',step:'zone_corridor_measured'},
     );
     if (!score.eligible) {
-      attemptedConfirmations.add(key);
+      rememberAttemptedConfirmation(key);
       logMessage(
         `TRADE SKIPPED · ${pair} scored ${score.total}/20; minimum ${score.minimumScore}/20 required. No order was placed.`,
         {
@@ -745,7 +769,7 @@ const scan = async () => {
       updateWorkerStatus(pair, 'waiting', 'final_safety_rejected', finalBlock ?? 'A trade opened before submission.', mode);
       return;
     }
-    attemptedConfirmations.add(key);
+    rememberAttemptedConfirmation(key);
     updateWorkerStatus(pair, 'scanning', 'placing_trade', `Submitting ${direction} at ${riskDecision.riskPercentage}% account-equity risk with an exact live 2R target.`, mode);
     const tradeInfo = await placeTrade({
       pair,

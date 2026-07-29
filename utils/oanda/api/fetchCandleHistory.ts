@@ -137,7 +137,8 @@ export const fetchCandleHistory = async (
     for(const candle of concurrent){const time=candleTime(candle);if(time>=requestedStart)merged.set(time,candle)}
     candles=[...merged.entries()].sort(([left],[right])=>left-right).map(([,candle],index)=>({...candle,candleIndex:index}));
   }
-  upsertArchivedCandles(archiveKey,candles);
+  // fetchCandles persists each broker response. Rewriting this complete merged
+  // history needlessly dirties identical SQLite rows and grows the WAL.
   if (options.maxCandles && candles.length > options.maxCandles) {
     return candles.slice(-options.maxCandles).map((candle, index) => ({ ...candle, candleIndex: index }));
   }

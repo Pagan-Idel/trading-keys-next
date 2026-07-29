@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fixMojibake } from './textEncoding';
 import { isRiskProfile, RISK_PROFILES, type RiskProfile } from './dynamicRisk';
+import { shouldPersistWorkerStatus,type WorkerStatusSnapshot } from './workerRuntime';
 
 export type AutomationLevel = 'debug' | 'info' | 'warn' | 'error';
 export type WorkerState = 'starting' | 'scanning' | 'waiting' | 'in_trade' | 'paused' | 'stopped' | 'error';
@@ -63,6 +64,7 @@ let database: Database.Database | null = null;
 let lastRetentionRun = 0;
 const EVENT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 
+const WORKER_STATUS_HEARTBEAT_MS = 5 * 60 * 1000;
 const runEventRetention = (db: Database.Database, force = false): void => {
   const now = Date.now();
   if (!force && now - lastRetentionRun < 60 * 60 * 1000) return;
@@ -218,9 +220,9 @@ export const updateWorkerStatus = (
   pid: number = process.pid,
 ): void => {
   const db = getDatabase();
-  const previous = db.prepare('SELECT state, step FROM worker_status WHERE pair = ?').get(pair) as
-    | { state: string; step: string }
-    | undefined;
+  const previous = db.prepare('SELECT state, step, message, mode, pid, updated_at AS updatedAt FROM worker_status WHERE pair = ?')
+    .get(pair) as WorkerStatusSnapshot|undefined;
+  if(!shouldPersistWorkerStatus(previous,{state,step,message,mode,pid},Date.now(),WORKER_STATUS_HEARTBEAT_MS))return;
   db.prepare(`
     INSERT INTO worker_status (pair, state, step, message, mode, pid, updated_at)
     VALUES (@pair, @state, @step, @message, @mode, @pid, @updatedAt)

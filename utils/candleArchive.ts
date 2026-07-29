@@ -8,8 +8,9 @@ import { normalizePairKeyUnderscore, tfToSeconds } from './shared.ts';
 export interface CandleArchiveKey {pair:string;timeframe:string;mode:'live'|'demo'}
 export interface CandleCoverageRange {startTime:number;endTime:number}
 
-const DATABASE_PATH=path.resolve(process.cwd(),'data','candle-history.sqlite');
-const LEGACY_DIRECTORY=path.resolve(process.cwd(),'data','candle-history');
+const RUNTIME_DATA_DIRECTORY=path.resolve(process.env.TRADING_KEYS_DATA_DIRECTORY??path.join(process.cwd(),'data'));
+const DATABASE_PATH=path.join(RUNTIME_DATA_DIRECTORY,'candle-history.sqlite');
+const LEGACY_DIRECTORY=path.join(RUNTIME_DATA_DIRECTORY,'candle-history');
 export const CANDLE_ARCHIVE_MAX_BYTES=Math.max(256*1024*1024,Number(process.env.CANDLE_ARCHIVE_MAX_BYTES)||5*1024*1024*1024);
 export const CANDLE_ARCHIVE_HIGH_WATER_BYTES=Math.floor(CANDLE_ARCHIVE_MAX_BYTES*0.95);
 let archiveDatabase:Database.Database|null=null;
@@ -108,14 +109,19 @@ export const upsertArchivedCandles=(key:CandleArchiveKey,candles:Candle[],source
     VALUES(@mode,@pair,@timeframe,@time,@timeText,@open,@high,@low,@close,@source,@fetchedAt)
     ON CONFLICT(mode,pair,timeframe,time) DO UPDATE SET
       time_text=excluded.time_text,open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,
-      source=excluded.source,fetched_at=excluded.fetched_at`);
+      source=excluded.source,fetched_at=excluded.fetched_at
+    WHERE historical_candles.time_text<>excluded.time_text
+       OR historical_candles.open<>excluded.open
+       OR historical_candles.high<>excluded.high
+       OR historical_candles.low<>excluded.low
+       OR historical_candles.close<>excluded.close
+       OR historical_candles.source<>excluded.source`);
   let written=0;
   const writeBatch=database().transaction((batch:Candle[])=>{
     for(const candle of batch){
       const time=toEpochSeconds(candle.time);
       if(!Number.isFinite(time)||![candle.open,candle.high,candle.low,candle.close].every(Number.isFinite))continue;
-      insert.run({...identity,time,timeText:candle.time,open:candle.open,high:candle.high,low:candle.low,close:candle.close,source,fetchedAt});
-      written+=1;
+      written+=insert.run({...identity,time,timeText:candle.time,open:candle.open,high:candle.high,low:candle.low,close:candle.close,source,fetchedAt}).changes;
     }
   });
   for(let index=0;index<candles.length;index+=5_000)writeBatch(candles.slice(index,index+5_000));

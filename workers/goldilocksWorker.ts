@@ -15,7 +15,7 @@ import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 import { isInHighImpactNewsWindow, getActiveNewsEvent, getNewsGuardError } from '../utils/newsGuard.ts';
 import { getPrecision, isForexMarketOpen, normalizePairKeyUnderscore, wait } from '../utils/shared.ts';
 import { isHolidayCloseWindow, isWeekendCloseWindow, isWeekendLiquidationWindow } from '../utils/marketCloseGuard.ts';
-import { clearActiveTrade, getActiveTrade, getRiskProfile, recordTradeManagementEvent, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
+import { clearActiveTrade, getActiveTrade, getAppliedAutomationStrategy, getRiskProfile, recordTradeManagementEvent, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { classifyTradeOutcome, saveTradeRecord, type JournalData } from '../utils/tradeHistory.ts';
 import { GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_LIVE_CANDLE_LIMITS, GOLDILOCKS_TIMEFRAME_SECONDS, getGoldilocksMinimumScore } from '../utils/goldilocksConfig.ts';
@@ -47,7 +47,8 @@ const pair = process.argv[2] ?? '';
 const modeArg = process.argv.find(argument => argument.startsWith('--mode='));
 const mode: 'live' | 'demo' = modeArg?.split('=')[1] === 'live' ? 'live' : 'demo';
 const usesSharedMarketDataHub = Boolean(process.env.OANDA_MARKET_DATA_HUB_URL);
-const minimumScore = getGoldilocksMinimumScore();
+const appliedStrategy=getAppliedAutomationStrategy();
+const minimumScore = Number(appliedStrategy.config.minimumScore??getGoldilocksMinimumScore());
 
 let killed = false;
 let cachedHistory: ReturnType<typeof buildGoldilocksHistory> | null = null;
@@ -820,7 +821,7 @@ const run = async () => {
     undefined,
     { pair, level: initialQuote ? 'info' : 'warn', fileName: 'goldilocksWorker', step: 'market_data_ready' },
   );
-  updateWorkerStatus(pair, 'starting', 'goldilocks_starting', `Goldilocks demo worker starting: ${TREND_TIMEFRAME} trend → ${ZONE_TIMEFRAME} zones → ${CONFIRMATION_TIMEFRAME} departure/touch/confirmation → ${GOLDILOCKS_DEMO_TIMEFRAMES.execution} trade management · dynamic ${getRiskProfile()} risk · minimum score ${minimumScore}.`, mode);
+  updateWorkerStatus(pair, 'starting', 'goldilocks_starting', `Goldilocks demo worker starting: ${TREND_TIMEFRAME} trend → ${ZONE_TIMEFRAME} zones → ${CONFIRMATION_TIMEFRAME} departure/touch/confirmation → ${GOLDILOCKS_DEMO_TIMEFRAMES.execution} trade management · dynamic ${getRiskProfile()} risk · minimum score ${minimumScore} · config ${appliedStrategy.sourceRunUid}.`, mode);
   await recoverOpenTrade();
   while (!killed) {
     try {

@@ -1,8 +1,12 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { fixMojibake } from './textEncoding';
 import { isRiskProfile, RISK_PROFILES, type RiskProfile } from './dynamicRisk';
+import type { BacktestRunConfig } from './backtestStore';
+import { GOLDILOCKS_STRATEGY_VERSION } from './goldilocksConfig';
+import { GOLDILOCKS_DEFAULT_MANAGEMENT } from './goldilocksTradeManagement';
 import { shouldPersistWorkerStatus,type WorkerStatusSnapshot } from './workerRuntime';
 
 export type AutomationLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -57,14 +61,22 @@ export interface ActiveTradeInput {
   riskPercentage?: number;
 }
 
-const DATA_DIRECTORY = path.resolve(process.cwd(), 'data');
+export interface AppliedAutomationStrategy {
+  id:string;
+  sourceRunUid:string;
+  appliedAt:string;
+  previousId:string|null;
+  config:BacktestRunConfig;
+}
+
+const DATA_DIRECTORY = path.resolve(process.env.TRADING_KEYS_DATA_DIRECTORY??path.join(process.cwd(), 'data'));
 const DATABASE_PATH = path.join(DATA_DIRECTORY, 'automation.sqlite');
 
 let database: Database.Database | null = null;
 let lastRetentionRun = 0;
 const EVENT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
-
 const WORKER_STATUS_HEARTBEAT_MS = 5 * 60 * 1000;
+
 const runEventRetention = (db: Database.Database, force = false): void => {
   const now = Date.now();
   if (!force && now - lastRetentionRun < 60 * 60 * 1000) return;
@@ -151,6 +163,12 @@ const getDatabase = (): Database.Database => {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS automation_strategy_versions (
+      id TEXT PRIMARY KEY,source_run_uid TEXT NOT NULL,config_json TEXT NOT NULL,
+      applied_at TEXT NOT NULL,previous_id TEXT,active INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_automation_strategy_active
+      ON automation_strategy_versions(active,applied_at DESC);
   `);
   const ensureColumn = (table: string, column: string, definition: string) => {
     const columns = database!.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
@@ -347,6 +365,54 @@ export const setRiskProfile = (profile: RiskProfile): RiskProfile => {
   return profile;
 };
 
+const defaultAutomationConfig=():BacktestRunConfig=>({
+  pairs:['EUR/USD','GBP/USD','AUD/USD','USD/CAD','USD/CHF','NZD/USD','EUR/JPY','GBP/JPY','EUR/NZD'],
+  lookbackDays:730,minimumScore:14,label:'Built-in automation strategy',
+  strategyVersion:GOLDILOCKS_STRATEGY_VERSION,timeframeProfile:'intraday',
+  riskProfile:'default',tradeManager:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+  confirmationMode:'close-through',closeTradesBeforeWeekend:true,
+});
+
+export const getAppliedAutomationStrategy=():AppliedAutomationStrategy=>{
+  const db=getDatabase();
+  let row=db.prepare(`SELECT id,source_run_uid AS sourceRunUid,config_json AS configJson,
+    applied_at AS appliedAt,previous_id AS previousId FROM automation_strategy_versions
+    WHERE active=1 ORDER BY applied_at DESC LIMIT 1`).get() as
+    {id:string;sourceRunUid:string;configJson:string;appliedAt:string;previousId:string|null}|undefined;
+  if(!row){
+    const id=randomUUID(),appliedAt=new Date().toISOString();
+    db.prepare(`INSERT INTO automation_strategy_versions(id,source_run_uid,config_json,applied_at,active)
+      VALUES(?,?,?,?,1)`).run(id,'built-in',JSON.stringify(defaultAutomationConfig()),appliedAt);
+    row={id,sourceRunUid:'built-in',configJson:JSON.stringify(defaultAutomationConfig()),appliedAt,previousId:null};
+  }
+  return {...row,config:JSON.parse(row.configJson) as BacktestRunConfig};
+};
+
+export const applyAutomationStrategy=(sourceRunUid:string,config:BacktestRunConfig)=>{
+  const db=getDatabase(),current=getAppliedAutomationStrategy(),id=randomUUID(),appliedAt=new Date().toISOString();
+  db.transaction(()=>{
+    db.prepare('UPDATE automation_strategy_versions SET active=0 WHERE active=1').run();
+    db.prepare(`INSERT INTO automation_strategy_versions(id,source_run_uid,config_json,applied_at,previous_id,active)
+      VALUES(?,?,?,?,?,1)`).run(id,sourceRunUid,JSON.stringify(config),appliedAt,current.id);
+  })();
+  recordAutomationEvent({source:'strategy-config',step:'strategy_promoted',
+    message:`Automation strategy moved to validated research run ${sourceRunUid}.`,
+    data:{previousId:current.id,minimumScore:config.minimumScore,timeframeProfile:config.timeframeProfile}});
+  return getAppliedAutomationStrategy();
+};
+
+export const rollbackAutomationStrategy=()=>{
+  const db=getDatabase(),current=getAppliedAutomationStrategy();
+  if(!current.previousId)throw new Error('No previous automation strategy is available.');
+  db.transaction(()=>{
+    db.prepare('UPDATE automation_strategy_versions SET active=0 WHERE active=1').run();
+    db.prepare('UPDATE automation_strategy_versions SET active=1 WHERE id=?').run(current.previousId);
+  })();
+  recordAutomationEvent({source:'strategy-config',step:'strategy_rollback',
+    message:`Automation strategy rolled back from ${current.sourceRunUid}.`});
+  return getAppliedAutomationStrategy();
+};
+
 export const getAutomationDashboard = (eventLimit = 120) => {
   const db = getDatabase();
   runEventRetention(db);
@@ -406,5 +472,6 @@ export const getAutomationDashboard = (eventLimit = 120) => {
   const riskProfile = getRiskProfile();
   const riskConfig = { selected: riskProfile, profiles: RISK_PROFILES };
 
-  return { events, workers, trades, activeTrades, summary, pairPerformance, riskConfig };
+  return { events, workers, trades, activeTrades, summary, pairPerformance, riskConfig,
+    appliedStrategy:getAppliedAutomationStrategy() };
 };

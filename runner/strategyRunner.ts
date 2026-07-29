@@ -1,4 +1,6 @@
 import { spawn } from 'child_process';
+import path from 'path';
+import { pathToFileURL } from 'url';
 import { forexPairs } from '../utils/constants.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { isInHighImpactNewsWindow, getActiveNewsEvent } from '../utils/newsGuard.ts';
@@ -11,6 +13,12 @@ const RESTART_WINDOW_MS = 60_000;
 // Stagger worker initialization to avoid simultaneous REST history bursts.
 const STREAM_START_SPACING_MS = 600;
 const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
+const configuredPairs=process.env.TRADING_KEYS_E2E_PAIRS
+  ?process.env.TRADING_KEYS_E2E_PAIRS.split(',').map(value=>value.trim()).filter(Boolean)
+  :forexPairs;
+const workerEntry=process.env.TRADING_KEYS_WORKER_ENTRY??'./workers/goldilocksWorker.ts';
+const TSX_IMPORT=process.env.TRADING_KEYS_TSX_IMPORT
+  ??pathToFileURL(path.join(process.cwd(),'node_modules','tsx','dist','loader.mjs')).href;
 
 export const startWorker = (pair: string, mode: 'live' | 'demo') => {
   if (processes.has(pair)) return;
@@ -27,7 +35,10 @@ export const startWorker = (pair: string, mode: 'live' | 'demo') => {
   }
 
   logMessage(`Starting Goldilocks worker for ${pair}`);
-  const subprocess = spawn(process.execPath, ['--import', 'tsx', './workers/goldilocksWorker.ts', pair, `--mode=${mode}`], {
+  const workerArguments=workerEntry.endsWith('.mjs')
+    ?[workerEntry,pair,`--mode=${mode}`]
+    :['--import',TSX_IMPORT,workerEntry,pair,`--mode=${mode}`];
+  const subprocess = spawn(process.execPath, workerArguments, {
     stdio: 'inherit',
     shell: false,
     windowsHide: true,
@@ -104,7 +115,7 @@ export const refreshWorkers = async (activePairs: string[], mode: 'live' | 'demo
 };
 
 export const startAllWorkers = async (mode: 'live' | 'demo') => {
-  for (const pair of forexPairs) {
+  for (const pair of configuredPairs) {
     const inNews = await isInHighImpactNewsWindow(pair);
     if (!inNews) {
       logMessage(`âœ… Price ready for ${pair}, starting worker...`);

@@ -16,6 +16,7 @@ let marketOpen = false;
 let forcedCloseWindow: 'weekend' | 'holiday' | null = null;
 const modeArg = process.argv.find((arg) => arg.startsWith('--mode='));
 const mode = modeArg?.split('=')[1] === 'live' ? 'live' : 'demo';
+const fixtureMode=process.env.TRADING_KEYS_AUTOMATION_E2E==='true';
 
 const monitorMarket = async () => {
   const currentlyOpen = isForexMarketOpen();
@@ -59,6 +60,12 @@ const monitorMarket = async () => {
 };
 
 const start = async () => {
+  if(fixtureMode){
+    logMessage('Deterministic automation E2E mode: broker network is disabled.');
+    await startAllWorkers('demo');
+    setInterval(()=>{},60_000);
+    return;
+  }
   await startMarketDataHub(mode);
   logMessage(`Shared OANDA market-data hub ready for ${forexPairs.length} pairs on localhost.`);
   logMessage("ðŸ•“ Monitoring market open/close + session status...");
@@ -70,10 +77,13 @@ const shutdown = async () => {
   logMessage('ðŸ›‘ Caught SIGINT. Stopping all workers and exiting...');
 
   try {
-    await stopMarketDataHub();
+    if(!fixtureMode)await stopMarketDataHub();
     await stopAllWorkers();
   } catch (err) {
     logMessage('âš ï¸ Error during cleanup:', err);
+  }
+  if(fixtureMode){
+    process.exit(0);
   }
 
   const isWindows = process.platform === 'win32';

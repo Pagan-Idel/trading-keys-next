@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import { recordAutomationEvent } from './automationStore';
 
 type RuntimeState = {
@@ -9,7 +10,7 @@ type RuntimeState = {
   startedAt: string;
 };
 
-const DATA_DIRECTORY = path.resolve(process.cwd(), 'data');
+const DATA_DIRECTORY = path.resolve(process.env.TRADING_KEYS_DATA_DIRECTORY??path.join(process.cwd(), 'data'));
 const STATE_PATH = path.join(DATA_DIRECTORY, 'automation-runtime.json');
 const STDOUT_PATH = path.join(DATA_DIRECTORY, 'automation-runtime.log');
 const STDERR_PATH = path.join(DATA_DIRECTORY, 'automation-runtime.error.log');
@@ -67,12 +68,22 @@ export const startDemoAutomation = () => {
   rotateRuntimeLog(STDERR_PATH);
   const stdout = fs.openSync(STDOUT_PATH, 'a');
   const stderr = fs.openSync(STDERR_PATH, 'a');
-  const child = spawn(process.execPath, ['--import', 'tsx', 'runner/startRunner.ts', '--mode=demo'], {
+  const testRunner=process.env.TRADING_KEYS_AUTOMATION_TEST_RUNNER;
+  const productionRunner=process.env.TRADING_KEYS_RUNNER_ENTRY;
+  const sourceRoot=productionRunner?path.dirname(path.dirname(path.resolve(productionRunner))):process.cwd();
+  const tsxImport=pathToFileURL(path.join(sourceRoot,'node_modules','tsx','dist','loader.mjs')).href;
+  const runnerArguments=testRunner?[path.resolve(testRunner)]
+    :productionRunner?(productionRunner.endsWith('.ts')
+      ?['--import',tsxImport,path.resolve(productionRunner),'--mode=demo']
+      :[path.resolve(productionRunner),'--mode=demo'])
+    :['--import',tsxImport,'runner/startRunner.ts','--mode=demo'];
+  const child = spawn(process.execPath, runnerArguments, {
     cwd: process.cwd(),
     detached: true,
     shell: false,
     windowsHide: true,
     stdio: ['ignore', stdout, stderr],
+    env:{...process.env,TRADING_KEYS_TSX_IMPORT:tsxImport},
   });
 
   child.unref();
@@ -96,7 +107,9 @@ export const stopAutomation = () => {
   if (!current.running || !current.pid) return current;
 
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/PID', String(current.pid), '/T', '/F'], { windowsHide: true });
+    if(process.env.TRADING_KEYS_AUTOMATION_E2E||process.env.TRADING_KEYS_AUTOMATION_TEST_RUNNER)
+      process.kill(current.pid,'SIGTERM');
+    else spawnSync('taskkill', ['/PID', String(current.pid), '/T', '/F'], { windowsHide: true });
   } else {
     try {
       process.kill(-current.pid, 'SIGTERM');

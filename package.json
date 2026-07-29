@@ -39,7 +39,7 @@
     "run:demo": "npm run build:threads && tsx runner/startRunner.ts --mode=demo",
     "check:automation": "npm run build:threads && tsx runner/startRunner.ts --mode=demo --check",
     "test:strategy": "tsx --test tests/goldilocksStrategy.test.ts tests/priceStreamManager.test.ts",
-    "test:automation": "tsx --test tests/automationRuntime.test.ts tests/candleArchivePersistence.test.ts",
+    "test:automation": "tsx --test tests/automationRuntime.test.ts tests/automationPromotionEvidence.test.ts tests/candleArchivePersistence.test.ts",
     "test:automation:integration": "tsx --test tests/automationControl.integration.test.ts tests/switchToLatest.integration.test.ts",
     "test:automation:e2e": "tsx --test tests/automation.e2e.test.ts",
     "validate:automation": "npm run test:automation && npm run test:automation:integration && npm run test:automation:e2e && npm run test:strategy && tsc --noEmit && npm run build:threads",

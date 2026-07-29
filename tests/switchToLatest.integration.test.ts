@@ -61,6 +61,10 @@ test('Switch to latest is the authoritative approval gate exported to Pi sync',a
       '2030-01-01T00:00:00.000Z',25,JSON.stringify({netR:25}),'2030-01-01T00:00:00.000Z');
     automationDb.close();
     const researchDb=new Database(path.join(isolated,'data','goldilocks-research.sqlite'));
+    researchDb.exec(`CREATE TABLE research_campaigns(
+      id TEXT PRIMARY KEY,status TEXT NOT NULL,label TEXT NOT NULL,config_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,updated_at TEXT NOT NULL,feedback_json TEXT
+    )`);
     researchDb.prepare(`INSERT INTO research_campaigns(
       id,status,label,config_json,created_at,updated_at,feedback_json
     ) VALUES(?,?,?,?,?,?,?)`).run('campaign','completed','fixture','{}','2030-01-01T00:00:00.000Z',

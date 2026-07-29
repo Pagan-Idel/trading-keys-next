@@ -1,4 +1,4 @@
-import { getPromotedResearchRunIds } from './autoResearchStore';
+import { getPromotedResearchRunIds } from './automationPromotionEvidence';
 import { getBacktestLeaderboard, type BacktestRunConfig } from './backtestStore';
 import {
   GOLDILOCKS_BACKTEST_GATE_DEFAULTS,

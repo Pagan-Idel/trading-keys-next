@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +18,17 @@ const withData = (run: (directory: string) => void) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'automation-boot-state-'));
   process.env.TRADING_KEYS_DATA_DIRECTORY = directory;
   try { run(directory); } finally {
+    clearRuntimeLease();
+    if (previous === undefined) delete process.env.TRADING_KEYS_DATA_DIRECTORY;
+    else process.env.TRADING_KEYS_DATA_DIRECTORY = previous;
+  }
+};
+
+const withDataAsync = async (run: (directory: string) => Promise<void>) => {
+  const previous = process.env.TRADING_KEYS_DATA_DIRECTORY;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'automation-boot-state-'));
+  process.env.TRADING_KEYS_DATA_DIRECTORY = directory;
+  try { await run(directory); } finally {
     clearRuntimeLease();
     if (previous === undefined) delete process.env.TRADING_KEYS_DATA_DIRECTORY;
     else process.env.TRADING_KEYS_DATA_DIRECTORY = previous;
@@ -73,19 +86,29 @@ test('PID reuse with a different process identity is rejected', () => withData((
   assert.equal(validateRuntimeLease(lease), false);
 }));
 
-test('valid lease requires boot, command, start time, cgroup, release, and demo mode', () => withData(() => {
+test('valid lease requires boot, command, start time, cgroup, release, and demo mode', () => withDataAsync(async () => {
   const entry = path.resolve('tests/fixtures/fakeAutomationRunner.mjs');
-  process.env.TRADING_KEYS_TEST_PROCESS_COMMAND = `${process.execPath} ${entry}`;
-  process.env.TRADING_KEYS_TEST_PROCESS_START_TIME = 'same-start';
-  process.env.TRADING_KEYS_TEST_PROCESS_CGROUP = 'same-cgroup';
-  const lease = createRuntimeLease(process.pid, entry);
-  assert.equal(lease.bootId, currentBootId());
-  assert.equal(validateRuntimeLease(lease), true);
-  assert.equal(validateRuntimeLease({ ...lease, expectedEntryPoint: path.resolve('unrelated.mjs') }), false);
-  assert.equal(validateRuntimeLease({...lease,cgroup:'unrelated-cgroup'}),false);
-  process.env.TRADING_KEYS_RELEASE_COMMIT='different-release';
-  assert.equal(validateRuntimeLease(lease),false);
-  delete process.env.TRADING_KEYS_RELEASE_COMMIT;
+  const child = spawn(process.execPath, [entry], { stdio: 'ignore', windowsHide: true });
+  await once(child, 'spawn');
+  try {
+    process.env.TRADING_KEYS_TEST_PROCESS_COMMAND = `${process.execPath} ${entry}`;
+    process.env.TRADING_KEYS_TEST_PROCESS_START_TIME = 'same-start';
+    process.env.TRADING_KEYS_TEST_PROCESS_CGROUP = 'same-cgroup';
+    const lease = createRuntimeLease(child.pid!, entry);
+    assert.equal(lease.bootId, currentBootId());
+    assert.equal(validateRuntimeLease(lease), true);
+    assert.equal(validateRuntimeLease({ ...lease, expectedEntryPoint: path.resolve('unrelated.mjs') }), false);
+    assert.equal(validateRuntimeLease({ ...lease, processStartTime: 'unrelated-start' }), false);
+    assert.equal(validateRuntimeLease({ ...lease, bootId: 'unrelated-boot' }), false);
+    assert.equal(validateRuntimeLease({ ...lease, cgroup: 'unrelated-cgroup' }), false);
+    assert.equal(validateRuntimeLease({ ...lease, mode: 'live' } as never), false);
+    process.env.TRADING_KEYS_RELEASE_COMMIT = 'different-release';
+    assert.equal(validateRuntimeLease(lease), false);
+  } finally {
+    delete process.env.TRADING_KEYS_RELEASE_COMMIT;
+    child.kill('SIGTERM');
+    if (child.exitCode === null) await once(child, 'exit');
+  }
 }));
 
 test('initial worker eligibility uses the same session filter and fails closed for news', async () => {

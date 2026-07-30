@@ -70,7 +70,7 @@ export const readRuntimeLease = (): AutomationRuntimeLease | null => {
 };
 export const validateRuntimeLease = (lease: AutomationRuntimeLease): boolean => {
   try {
-    if (lease.bootId !== currentBootId() || lease.releaseCommit !== releaseCommit()) return false;
+    if (lease.mode !== 'demo' || lease.bootId !== currentBootId() || lease.releaseCommit !== releaseCommit()) return false;
     const found = identity(lease.pid);
     return found.processStartTime === lease.processStartTime &&
       found.cgroup === lease.cgroup &&

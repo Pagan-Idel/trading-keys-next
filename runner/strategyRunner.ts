@@ -16,6 +16,11 @@ const RESTART_WINDOW_MS = 60_000;
 const STREAM_START_SPACING_MS = 600;
 const WORKER_START_GRACE_MS = 250;
 const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
+type EstablishmentWait = (
+  subprocess: ReturnType<typeof spawn>,
+  milliseconds: number,
+) => Promise<unknown>;
+const waitForEstablishment: EstablishmentWait = (_subprocess, milliseconds) => pause(milliseconds);
 const configuredPairs = process.env.TRADING_KEYS_E2E_PAIRS
   ? process.env.TRADING_KEYS_E2E_PAIRS.split(',').map(value => value.trim()).filter(Boolean)
   : forexPairs;
@@ -23,7 +28,11 @@ const workerEntry = process.env.TRADING_KEYS_WORKER_ENTRY ?? './workers/goldiloc
 const TSX_IMPORT = process.env.TRADING_KEYS_TSX_IMPORT ??
   pathToFileURL(path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
 
-export const startWorker = async (pair: string, mode: 'live' | 'demo'):Promise<boolean> => {
+export const startWorker = async (
+  pair: string,
+  mode: 'live' | 'demo',
+  establishmentWait: EstablishmentWait = waitForEstablishment,
+):Promise<boolean> => {
   if (processes.has(pair)||starting.has(pair)) return processes.has(pair);
   starting.add(pair);
   intentionallyStopped.delete(pair);
@@ -56,14 +65,20 @@ export const startWorker = async (pair: string, mode: 'live' | 'demo'):Promise<b
   let established=false;
   subprocess.on('exit', code => {
     if (processes.get(pair) === subprocess) processes.delete(pair);
-    if (established&&!intentionallyStopped.has(pair) && typeof code === 'number' && code !== 0) void startWorker(pair, mode);
+    if (shouldRestartWorker(established, intentionallyStopped.has(pair), code)) void startWorker(pair, mode);
   });
   subprocess.on('error', error => logMessage(`Worker error for ${pair}: ${error.message}`));
-  await pause(WORKER_START_GRACE_MS);
+  await establishmentWait(subprocess, WORKER_START_GRACE_MS);
   if(processes.get(pair)!==subprocess)return false;
   established=true;
   return true;
 };
+
+export const shouldRestartWorker = (
+  established: boolean,
+  intentionallyStoppedWorker: boolean,
+  exitCode: number | null,
+): boolean => established && !intentionallyStoppedWorker && typeof exitCode === 'number' && exitCode !== 0;
 
 export const stopWorker = (pair: string, reason?: string) => {
   const child = processes.get(pair);
@@ -88,7 +103,11 @@ export const getEligibleWorkerPairs = async (
   return eligible;
 };
 
-export const refreshWorkers = async (eligiblePairs: string[], mode: 'live' | 'demo') => {
+export const refreshWorkers = async (
+  eligiblePairs: string[],
+  mode: 'live' | 'demo',
+  establishmentWait: EstablishmentWait = waitForEstablishment,
+) => {
   const expected = new Set(eligiblePairs);
   const failed:string[]=[];
   for (const pair of [...processes.keys()]) {
@@ -99,7 +118,7 @@ export const refreshWorkers = async (eligiblePairs: string[], mode: 'live' | 'de
   }
   for (const pair of eligiblePairs) {
     if (!processes.has(pair)) {
-      if(!await startWorker(pair, mode))failed.push(pair);
+      if(!await startWorker(pair, mode, establishmentWait))failed.push(pair);
       await pause(STREAM_START_SPACING_MS);
     }
   }

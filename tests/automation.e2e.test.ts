@@ -29,7 +29,10 @@ test('multi-worker automation adopts approved configuration only across a stoppe
     cwd:process.cwd(),stdio:'ignore',env:{...process.env,PULSE_PORT:String(port),PULSE_HOST:'127.0.0.1',
       TRADING_KEYS_DATA_DIRECTORY:data,TRADING_KEYS_AUTOMATION_E2E:'true',
       TRADING_KEYS_E2E_PAIRS:pairs.join(','),TRADING_KEYS_WORKER_ENTRY:'./tests/fixtures/deterministicGoldilocksWorker.ts',
-      TRADING_KEYS_PI_RUNTIME:'true'},
+      TRADING_KEYS_PI_RUNTIME:'true',
+      TRADING_KEYS_TEST_PROCESS_COMMAND:path.resolve('runner/startRunner.ts'),
+      TRADING_KEYS_TEST_PROCESS_START_TIME:'fixture-runner-start',
+      TRADING_KEYS_TEST_PROCESS_CGROUP:'fixture-cgroup'},
   });
   const resultsDirectory=path.join(data,'e2e-results');
   try{

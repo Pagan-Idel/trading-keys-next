@@ -33,6 +33,9 @@ test('Switch to latest is the authoritative approval gate exported to Pi sync',a
   process.env.TRADING_KEYS_E2E_PAIRS='EUR/USD,GBP/JPY';
   process.env.TRADING_KEYS_RUNNER_ENTRY=path.join(repository,'runner/startRunner.ts');
   process.env.TRADING_KEYS_WORKER_ENTRY=path.join(repository,'tests/fixtures/deterministicGoldilocksWorker.ts');
+  process.env.TRADING_KEYS_TEST_PROCESS_COMMAND=path.join(repository,'runner/startRunner.ts');
+  process.env.TRADING_KEYS_TEST_PROCESS_START_TIME='switch-runner-start';
+  process.env.TRADING_KEYS_TEST_PROCESS_CGROUP='switch-fixture-cgroup';
   try{
     const [{default:dashboardHandler},{default:approvedHandler},automation,processManager,promotion,sync]=await Promise.all([
       import('../pages/api/automation/dashboard.ts'),
@@ -75,14 +78,14 @@ test('Switch to latest is the authoritative approval gate exported to Pi sync',a
     const before=await invoke(approvedHandler,endpointRequest);
     assert.equal(before.body.configurationId,old.id,'an unapproved winner must not be exported');
 
-    processManager.startDemoAutomation();
+    await processManager.startDemoAutomation();
     const resultDirectory=path.join(process.env.TRADING_KEYS_DATA_DIRECTORY,'e2e-results');
     await waitFor(()=>fs.existsSync(resultDirectory)&&fs.readdirSync(resultDirectory).length===2);
     const runningRows=fs.readdirSync(resultDirectory).map(name=>JSON.parse(fs.readFileSync(path.join(resultDirectory,name),'utf8')));
     assert.ok(runningRows.every(row=>row.sourceRunUid===old.sourceRunUid));
     const rejectedWhileRunning=await invoke(dashboardHandler,{method:'POST',query:{},body:{action:'move-to-latest'}});
     assert.equal(rejectedWhileRunning.statusCode,409);
-    processManager.stopAutomation();
+    await processManager.stopAutomation();
 
     const switched=await invoke(dashboardHandler,{method:'POST',query:{},body:{action:'move-to-latest'}});
     assert.equal(switched.statusCode,200);
@@ -99,13 +102,13 @@ test('Switch to latest is the authoritative approval gate exported to Pi sync',a
     assert.equal(sync.readStagedApprovedStrategy(piData)?.sourceRunUid,'GLR-SWITCH-WINNER');
 
     fs.rmSync(resultDirectory,{recursive:true,force:true});
-    processManager.startDemoAutomation();
+    await processManager.startDemoAutomation();
     await waitFor(()=>fs.existsSync(resultDirectory)&&fs.readdirSync(resultDirectory).length===2);
     const restartedRows=fs.readdirSync(resultDirectory).map(name=>JSON.parse(fs.readFileSync(path.join(resultDirectory,name),'utf8')));
     assert.ok(restartedRows.every(row=>row.sourceRunUid==='GLR-SWITCH-WINNER'));
-    processManager.stopAutomation();
+    await processManager.stopAutomation();
   }finally{
-    try{processManagerRef?.stopAutomation()}catch{}
+    try{await processManagerRef?.stopAutomation()}catch{}
     process.chdir(originalCwd);
   }
 });

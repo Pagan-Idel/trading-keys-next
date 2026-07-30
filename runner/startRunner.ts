@@ -1,114 +1,79 @@
-// src/index.ts
+import fs from 'node:fs';
 import { isForexMarketOpen } from '../utils/shared.ts';
-import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 import { forexPairs } from '../utils/constants.ts';
-import { exec } from 'child_process';
-import {
-  startAllWorkers,
-  stopAllWorkers,
-  refreshWorkers
-} from './strategyRunner.ts';
+import { getEligibleWorkerPairs, refreshWorkers, startAllWorkers, stopAllWorkers } from './strategyRunner.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { startMarketDataHub, stopMarketDataHub } from '../utils/oanda/api/marketDataHub.ts';
 import { closeAllTrades, isHolidayCloseWindow, isWeekendCloseWindow } from '../utils/marketCloseGuard.ts';
 
 let marketOpen = false;
 let forcedCloseWindow: 'weekend' | 'holiday' | null = null;
-const modeArg = process.argv.find((arg) => arg.startsWith('--mode='));
+let monitorTimer: NodeJS.Timeout | null = null;
+let shuttingDown = false;
+const modeArg = process.argv.find(argument => argument.startsWith('--mode='));
 const mode = modeArg?.split('=')[1] === 'live' ? 'live' : 'demo';
-const fixtureMode=process.env.TRADING_KEYS_AUTOMATION_E2E==='true';
+const fixtureMode = process.env.TRADING_KEYS_AUTOMATION_E2E === 'true';
 
+const writeReady = () => {
+  const target = process.env.TRADING_KEYS_RUNNER_READY_PATH;
+  if (!target) return;
+  fs.writeFileSync(target, JSON.stringify({ pid: process.pid, mode, readyAt: new Date().toISOString() }));
+};
 const monitorMarket = async () => {
   const currentlyOpen = isForexMarketOpen();
-
   const closeWindow = isWeekendCloseWindow() ? 'weekend' : isHolidayCloseWindow() ? 'holiday' : null;
   if (closeWindow && forcedCloseWindow !== closeWindow) {
-    await closeAllTrades(
-      closeWindow === 'weekend' ? 'five-minute weekend close safety window' : 'holiday safety window',
-      mode,
-    );
+    await closeAllTrades(closeWindow === 'weekend' ? 'five-minute weekend close safety window' : 'holiday safety window', mode);
     await stopAllWorkers();
     forcedCloseWindow = closeWindow;
-  } else if (!closeWindow) {
-    forcedCloseWindow = null;
-  }
-  if (closeWindow) {
-    marketOpen = false;
-    return;
-  }
-  
-  if (currentlyOpen && !marketOpen) {
-    logMessage("âœ… Market opened. Starting all strategy threads...");
-    await startAllWorkers(mode);
+  } else if (!closeWindow) forcedCloseWindow = null;
+  if (closeWindow) { marketOpen = false; return {failed:[] as string[]}; }
+  if (currentlyOpen) {
+    const eligiblePairs = await getEligibleWorkerPairs();
+    const result=await refreshWorkers(eligiblePairs, mode);
     marketOpen = true;
-  } else if (!currentlyOpen && marketOpen) {
-    logMessage("ðŸ›‘ Market closed. Stopping all strategy threads...");
-    stopAllWorkers();
+    logMessage(`Active eligible trading sessions: ${eligiblePairs.join(', ') || 'none'}.`);
+    return result;
+  } else if (marketOpen) {
+    await stopAllWorkers();
     marketOpen = false;
-  } else if (currentlyOpen && marketOpen) {
-    const activePairs = forexPairs.filter(pair => isTradeSessionOpen(pair));
-    await refreshWorkers(activePairs, mode);
-
-    const sessionMsg = activePairs.length > 0
-      ? `ðŸ” Active trading sessions: ${activePairs.join(', ')}`
-      : "âš ï¸ No active trading sessions for any pairs right now.";
-
-    logMessage(sessionMsg);
-  } else if (!currentlyOpen && !marketOpen) {
-    logMessage("â³ Market is still closed. Waiting to recheck in 1 minute...");
   }
+  return {failed:[] as string[]};
 };
-
 const start = async () => {
-  if(fixtureMode){
-    logMessage('Deterministic automation E2E mode: broker network is disabled.');
-    await startAllWorkers('demo');
-    setInterval(()=>{},60_000);
+  if (fixtureMode) {
+    const fixturePairs = process.env.TRADING_KEYS_E2E_PAIRS?.split(',').map(value => value.trim()).filter(Boolean) ?? forexPairs;
+    const result=await startAllWorkers('demo', fixturePairs);
+    if(result.failed.length)throw new Error(`Eligible fixture workers failed to start: ${result.failed.join(', ')}`);
+    writeReady();
+    monitorTimer = setInterval(() => undefined, 60_000);
     return;
   }
   await startMarketDataHub(mode);
-  logMessage(`Shared OANDA market-data hub ready for ${forexPairs.length} pairs on localhost.`);
-  logMessage("ðŸ•“ Monitoring market open/close + session status...");
-  await monitorMarket(); // initial immediate check
-  setInterval(monitorMarket, 60_000); // check every 60 seconds
+  const initial=await monitorMarket();
+  if(initial.failed.length)throw new Error(`Eligible workers failed to start: ${initial.failed.join(', ')}`);
+  writeReady();
+  monitorTimer = setInterval(() => void monitorMarket().catch(error =>
+    logMessage(`Eligibility refresh failed closed: ${(error as Error).message}`)), 60_000);
 };
-
 const shutdown = async () => {
-  logMessage('ðŸ›‘ Caught SIGINT. Stopping all workers and exiting...');
-
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (monitorTimer) clearInterval(monitorTimer);
   try {
-    if(!fixtureMode)await stopMarketDataHub();
+    if (!fixtureMode) await stopMarketDataHub();
     await stopAllWorkers();
-  } catch (err) {
-    logMessage('âš ï¸ Error during cleanup:', err);
-  }
-  if(fixtureMode){
+  } finally {
+    const ready = process.env.TRADING_KEYS_RUNNER_READY_PATH;
+    if (ready) fs.rmSync(ready, { force: true });
     process.exit(0);
   }
-
-  const isWindows = process.platform === 'win32';
-
-  const killCommand = isWindows
-    ? `powershell -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*goldilocksWorker.ts*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"`
-    : `pkill -f goldilocksWorker.ts`;
-
-  exec(killCommand, (error, stdout, stderr) => {
-    if (error) {
-      logMessage(`âš ï¸ Kill command failed: ${error.message}`);
-    } else {
-      logMessage(`Successfully stopped Goldilocks worker subprocesses.`);
-    }
-    process.exit(0);
-  });
 };
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.once('SIGINT', () => void shutdown());
+process.once('SIGTERM', () => void shutdown());
 
-if (process.argv.includes('--check')) {
-  logMessage(`Automation modules loaded successfully in ${mode.toUpperCase()} mode.`);
-} else {
-  start().catch(error => {
-    logMessage(`Failed to start shared OANDA market-data hub: ${(error as Error).message}`);
-    process.exit(1);
-  });
-}
+if (process.argv.includes('--check')) logMessage(`Automation modules loaded successfully in ${mode.toUpperCase()} mode.`);
+else start().catch(error => {
+  logMessage(`Failed to start demo automation safely: ${(error as Error).message}`);
+  process.exit(1);
+});

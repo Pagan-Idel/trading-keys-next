@@ -1,139 +1,118 @@
-import { spawn } from 'child_process';
-import path from 'path';
-import { pathToFileURL } from 'url';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { forexPairs } from '../utils/constants.ts';
 import { logMessage } from '../utils/automationLogger.ts';
-import { isInHighImpactNewsWindow, getActiveNewsEvent } from '../utils/newsGuard.ts';
+import { getActiveNewsEvent, isInHighImpactNewsWindow } from '../utils/newsGuard.ts';
 import { MARKET_DATA_HUB_URL } from '../utils/oanda/api/marketDataHub.ts';
+import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 
 const processes = new Map<string, ReturnType<typeof spawn>>();
+const starting = new Set<string>();
 const restartHistory = new Map<string, number[]>();
+const intentionallyStopped = new Set<string>();
 const RESTART_LIMIT = 10;
 const RESTART_WINDOW_MS = 60_000;
-// Stagger worker initialization to avoid simultaneous REST history bursts.
 const STREAM_START_SPACING_MS = 600;
+const WORKER_START_GRACE_MS = 250;
 const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
-const configuredPairs=process.env.TRADING_KEYS_E2E_PAIRS
-  ?process.env.TRADING_KEYS_E2E_PAIRS.split(',').map(value=>value.trim()).filter(Boolean)
-  :forexPairs;
-const workerEntry=process.env.TRADING_KEYS_WORKER_ENTRY??'./workers/goldilocksWorker.ts';
-const TSX_IMPORT=process.env.TRADING_KEYS_TSX_IMPORT
-  ??pathToFileURL(path.join(process.cwd(),'node_modules','tsx','dist','loader.mjs')).href;
+const configuredPairs = process.env.TRADING_KEYS_E2E_PAIRS
+  ? process.env.TRADING_KEYS_E2E_PAIRS.split(',').map(value => value.trim()).filter(Boolean)
+  : forexPairs;
+const workerEntry = process.env.TRADING_KEYS_WORKER_ENTRY ?? './workers/goldilocksWorker.ts';
+const TSX_IMPORT = process.env.TRADING_KEYS_TSX_IMPORT ??
+  pathToFileURL(path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
 
-export const startWorker = (pair: string, mode: 'live' | 'demo') => {
-  if (processes.has(pair)) return;
-
+export const startWorker = async (pair: string, mode: 'live' | 'demo'):Promise<boolean> => {
+  if (processes.has(pair)||starting.has(pair)) return processes.has(pair);
+  starting.add(pair);
+  intentionallyStopped.delete(pair);
   const now = Date.now();
-  const history = restartHistory.get(pair) || [];
-  const recentRestarts = history.filter(ts => now - ts < RESTART_WINDOW_MS);
+  const recentRestarts = (restartHistory.get(pair) ?? []).filter(timestamp => now - timestamp < RESTART_WINDOW_MS);
   recentRestarts.push(now);
   restartHistory.set(pair, recentRestarts);
-
   if (recentRestarts.length > RESTART_LIMIT) {
-    logMessage(`ðŸ›‘ Worker for ${pair} exceeded ${RESTART_LIMIT} restarts in 1 minute. Will not restart.`);
-    return;
+    logMessage(`Worker for ${pair} exceeded ${RESTART_LIMIT} restarts in one minute and remains stopped.`);
+    starting.delete(pair);
+    return false;
   }
-
-  logMessage(`Starting Goldilocks worker for ${pair}`);
-  const workerArguments=workerEntry.endsWith('.mjs')
-    ?[workerEntry,pair,`--mode=${mode}`]
-    :['--import',TSX_IMPORT,workerEntry,pair,`--mode=${mode}`];
+  const workerArguments = workerEntry.endsWith('.mjs')
+    ? [workerEntry, pair, `--mode=${mode}`]
+    : ['--import', TSX_IMPORT, workerEntry, pair, `--mode=${mode}`];
   const subprocess = spawn(process.execPath, workerArguments, {
-    stdio: 'inherit',
-    shell: false,
-    windowsHide: true,
+    stdio: 'inherit', shell: false, windowsHide: true,
     env: { ...process.env, OANDA_MARKET_DATA_HUB_URL: MARKET_DATA_HUB_URL },
   });
-
+  const spawned=await new Promise<boolean>(resolve=>{
+    subprocess.once('spawn',()=>resolve(true));
+    subprocess.once('error',()=>resolve(false));
+  });
+  starting.delete(pair);
+  if(!spawned){
+    logMessage(`Worker for ${pair} failed to spawn and is not running.`);
+    return false;
+  }
   processes.set(pair, subprocess);
-
-  subprocess.on('exit', (code) => {
-    logMessage(`ðŸ’€ Worker for ${pair} exited with code ${code}`);
-    processes.delete(pair);
-
-    if (typeof code === 'number' && code !== 0) {
-      logMessage(`ðŸ” Restarting crashed worker for ${pair}`);
-      startWorker(pair, mode);
-    } else {
-      logMessage(`ðŸ›‘ Worker for ${pair} exited cleanly or was terminated intentionally.`);
-    }
+  let established=false;
+  subprocess.on('exit', code => {
+    if (processes.get(pair) === subprocess) processes.delete(pair);
+    if (established&&!intentionallyStopped.has(pair) && typeof code === 'number' && code !== 0) void startWorker(pair, mode);
   });
-
-  subprocess.on('error', (err) => {
-    logMessage(`âŒ Worker error for ${pair}: ${err.message}`);
-  });
+  subprocess.on('error', error => logMessage(`Worker error for ${pair}: ${error.message}`));
+  await pause(WORKER_START_GRACE_MS);
+  if(processes.get(pair)!==subprocess)return false;
+  established=true;
+  return true;
 };
 
 export const stopWorker = (pair: string, reason?: string) => {
-  const proc = processes.get(pair);
-  if (proc) {
-    const pid = proc.pid;
-    logMessage(`âœ‹ Killing worker for ${pair} (PID ${pid})${reason ? ` â€” Reason: ${reason}` : ''}`);
-
-    if (process.platform === 'win32') {
-      // Windows uses taskkill
-      if (pid !== undefined) spawn('taskkill', ['/PID', String(pid), '/F', '/T'], { windowsHide: true });
-    } else {
-      // macOS/Linux/Unix
-      if (pid !== undefined) process.kill(pid, 'SIGKILL');
-    }
-
-    processes.delete(pair);
-  }
+  const child = processes.get(pair);
+  if (!child) return;
+  intentionallyStopped.add(pair);
+  logMessage(`Stopping worker for ${pair}${reason ? `: ${reason}` : ''}`);
+  if (process.platform === 'win32') {
+    if (child.pid !== undefined) spawn('taskkill', ['/PID', String(child.pid), '/F', '/T'], { windowsHide: true });
+  } else if (child.pid !== undefined) process.kill(child.pid, 'SIGTERM');
+  processes.delete(pair);
 };
 
-
-export const refreshWorkers = async (activePairs: string[], mode: 'live' | 'demo') => {
-  const currentlyRunning = new Set(processes.keys());
-  const activeSet = new Set(activePairs);
-
-  for (const pair of currentlyRunning) {
-    const inNews = await isInHighImpactNewsWindow(pair);
-    if (!activeSet.has(pair) || inNews) {
-      if (inNews) {
-        const event = getActiveNewsEvent(pair);
-        const reason = `High Impact News: ${event?.title} (${event?.currency}) at ${event?.time}`;
-        logMessage(`ðŸ“° Stopping ${pair} â€” ${reason}`);
-        stopWorker(pair, reason);
-      } else {
-        stopWorker(pair, 'Not in active trading session (market closed or session filter)');
-      }
-    }
+export const getEligibleWorkerPairs = async (
+  pairs: string[] = configuredPairs,
+  now = new Date(),
+  newsBlocked: (pair: string) => Promise<boolean> = isInHighImpactNewsWindow,
+): Promise<string[]> => {
+  const eligible: string[] = [];
+  for (const pair of pairs) {
+    if (isTradeSessionOpen(pair, now) && !await newsBlocked(pair)) eligible.push(pair);
   }
+  return eligible;
+};
 
-  for (const pair of activePairs) {
-    const alreadyRunning = currentlyRunning.has(pair);
-    const inNews = await isInHighImpactNewsWindow(pair);
-    if (!alreadyRunning && !inNews) {
-      startWorker(pair, mode);
-      await pause(STREAM_START_SPACING_MS);
-    } else if (inNews) {
+export const refreshWorkers = async (eligiblePairs: string[], mode: 'live' | 'demo') => {
+  const expected = new Set(eligiblePairs);
+  const failed:string[]=[];
+  for (const pair of [...processes.keys()]) {
+    if (!expected.has(pair)) {
       const event = getActiveNewsEvent(pair);
-      logMessage(`ðŸ“° Not starting ${pair} â€” News: ${event?.title} (${event?.currency}) at ${event?.time}`);
+      stopWorker(pair, event ? `High Impact News: ${event.title}` : 'Outside active trading session');
     }
   }
-};
-
-export const startAllWorkers = async (mode: 'live' | 'demo') => {
-  for (const pair of configuredPairs) {
-    const inNews = await isInHighImpactNewsWindow(pair);
-    if (!inNews) {
-      logMessage(`âœ… Price ready for ${pair}, starting worker...`);
-      startWorker(pair, mode);
+  for (const pair of eligiblePairs) {
+    if (!processes.has(pair)) {
+      if(!await startWorker(pair, mode))failed.push(pair);
       await pause(STREAM_START_SPACING_MS);
-    } else {
-      const event = getActiveNewsEvent(pair);
-      logMessage(`ðŸ“° Skipping ${pair} at startup â€” News: ${event?.title} (${event?.currency}) at ${event?.time}`);
     }
   }
-  logMessage(`ðŸš€ All eligible workers launched.`);
+  return {running:[...processes.keys()],failed};
 };
 
+export const startAllWorkers = async (mode: 'live' | 'demo', eligiblePairs?: string[]) => {
+  const pairs = eligiblePairs ?? await getEligibleWorkerPairs();
+  const result=await refreshWorkers(pairs, mode);
+  logMessage(`Eligible workers launched: ${pairs.join(', ') || 'none'}.`);
+  return result;
+};
 export const stopAllWorkers = async () => {
-  logMessage(`ðŸ›‘ Stopping all workers...`);
-  for (const [pair, proc] of processes.entries()) {
-    logMessage(`âœ‹ Killing worker for ${pair} â€” Reason: Global shutdown`);
-    proc.kill('SIGKILL');
-  }
-  processes.clear();
+  for (const pair of [...processes.keys()]) stopWorker(pair, 'Global shutdown');
 };
+export const runningWorkerPairs = (): string[] => [...processes.keys()];

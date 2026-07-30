@@ -3,8 +3,11 @@ import { URL } from "url";
 import { getAutomationDashboard } from "../utils/automationStore.ts";
 import {
   getAutomationRuntime,
+  recoverDesiredAutomation,
+  shutdownAutomationChildren,
   startDemoAutomation,
   stopAutomation,
+  validateAutomationRecoveryPreflight,
 } from "../utils/automationProcessManager.ts";
 import { getAppliedAutomationStrategy,recordAutomationEvent } from "../utils/automationStore.ts";
 import { activateStagedApprovedStrategy } from "../utils/approvedStrategyActivation.ts";
@@ -67,7 +70,7 @@ document.getElementById('config').textContent=d.dashboard.appliedStrategy.source
 document.getElementById('events').textContent=d.dashboard.events.map(e=>e.createdAt+' '+(e.pair||'')+' '+e.message).join('\\n')}
 async function act(action){await fetch('/api/'+action,{method:'POST',headers:headers()});await load()}load();setInterval(load,5000)</script></body></html>`;
 
-http.createServer((request, response) => {
+const server=http.createServer(async(request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   if (url.pathname === "/" && request.method === "GET") {
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -89,20 +92,35 @@ http.createServer((request, response) => {
       return;
     }
     if (url.pathname === "/api/start" && request.method === "POST") {
+      const currentRuntime=getAutomationRuntime();
+      if(!currentRuntime.running)validateAutomationRecoveryPreflight();
       activateStagedApprovedStrategy();
-      send(response, 200, startDemoAutomation());
+      send(response, 200, await startDemoAutomation());
       return;
     }
     if (url.pathname === "/api/stop" && request.method === "POST") {
-      send(response, 200, stopAutomation());
+      send(response, 200, await stopAutomation());
       return;
     }
     send(response, 404, { error: "Not found" });
   } catch (error) {
     send(response, 500, { error: error instanceof Error ? error.message : String(error) });
   }
-}).listen(port, host, () => console.log(`Automation Pulse listening on http://${host}:${port}`));
+});
+server.listen(port, host, () => {
+  console.log(`Automation Pulse listening on http://${host}:${port}`);
+  void recoverDesiredAutomation().catch(error=>recordAutomationEvent({
+      source:"process-manager",step:"boot_recovery_failed",level:"error",
+      message:`Automation remained stopped after fail-closed boot recovery: ${error instanceof Error?error.message:String(error)}`,
+    })).finally(()=>void syncApprovedConfiguration());
+});
 
-void syncApprovedConfiguration();
 const strategySyncTimer=setInterval(()=>void syncApprovedConfiguration(),5*60*1000);
 strategySyncTimer.unref();
+const shutdown=async()=>{
+  clearInterval(strategySyncTimer);
+  await shutdownAutomationChildren();
+  server.close(()=>process.exit(0));
+};
+process.once("SIGTERM",()=>void shutdown());
+process.once("SIGINT",()=>void shutdown());

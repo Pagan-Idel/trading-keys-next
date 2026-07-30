@@ -180,8 +180,32 @@ const getDatabase = (): Database.Database => {
   ensureColumn('active_trades', 'score', 'INTEGER');
   ensureColumn('active_trades', 'risk_profile', 'TEXT');
   ensureColumn('active_trades', 'risk_percentage', 'REAL');
-  runEventRetention(database, true);
   return database;
+};
+
+export const validateAutomationDatabaseForRecovery=():{
+  activeStrategies:number;activeTrades:number;incompatibleActiveTrades:number;strategy:AppliedAutomationStrategy|null
+}=>{
+  let db:Database.Database;
+  try{db=new Database(DATABASE_PATH,{readonly:true,fileMustExist:true})}
+  catch{throw new Error('Automation database is unavailable for read-only recovery preflight.')}
+  try{
+    const activeStrategies=(db.prepare('SELECT COUNT(*) AS count FROM automation_strategy_versions WHERE active=1').get() as {count:number}).count;
+    const activeTrades=(db.prepare('SELECT COUNT(*) AS count FROM active_trades').get() as {count:number}).count;
+    const incompatibleActiveTrades=(db.prepare(`SELECT COUNT(*) AS count FROM active_trades
+      WHERE mode!='demo' OR trade_id IS NULL OR pair IS NULL OR opened_at IS NULL`).get() as {count:number}).count;
+    const row=db.prepare(`SELECT id,source_run_uid AS sourceRunUid,config_json AS configJson,
+      applied_at AS appliedAt,previous_id AS previousId FROM automation_strategy_versions
+      WHERE active=1 ORDER BY applied_at DESC LIMIT 1`).get() as
+      {id:string;sourceRunUid:string;configJson:string;appliedAt:string;previousId:string|null}|undefined;
+    let strategy:AppliedAutomationStrategy|null=null;
+    if(row){
+      try{strategy={...row,config:JSON.parse(row.configJson) as BacktestRunConfig}}catch{
+        throw new Error('The active automation strategy configuration is malformed.');
+      }
+    }
+    return {activeStrategies,activeTrades,incompatibleActiveTrades,strategy};
+  }finally{db.close()}
 };
 
 const safeJson = (value: unknown): string | null => {

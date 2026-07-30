@@ -11,6 +11,7 @@ REMOTE="${TRADING_KEYS_DEPLOY_REMOTE:-https://github.com/Pagan-Idel/trading-keys
 SERVICE="${TRADING_KEYS_DEPLOY_SERVICE:-automation-pulse-control.service}"
 VALIDATION_COMMAND="${TRADING_KEYS_DEPLOY_VALIDATION_COMMAND:-npm ci && npm run validate:automation && npm run build:pi-runtime && cd artifacts/pi-runtime && npm install --omit=dev}"
 SYSTEMCTL="${TRADING_KEYS_DEPLOY_SYSTEMCTL:-systemctl}"
+UNIT_TARGET="${TRADING_KEYS_DEPLOY_UNIT_TARGET:-/etc/systemd/system/$SERVICE}"
 PROMOTE=false
 [[ "${1:-}" == "--promote" ]] && PROMOTE=true
 
@@ -59,12 +60,34 @@ fi
 
 PREVIOUS="$(readlink -f "$ACTIVE" 2>/dev/null || true)"
 printf '%s\n' "$PREVIOUS" > "$BACKUPS/$STAMP.previous-release"
+UNIT_BACKUP="$BACKUPS/$STAMP.$SERVICE"
+if [[ -f "$UNIT_TARGET" ]]; then
+  cp -p "$UNIT_TARGET" "$UNIT_BACKUP"
+else
+  : > "$UNIT_BACKUP.absent"
+fi
 ln -s "$RELEASE_APP" "$ACTIVE.next"
 mv -Tf "$ACTIVE.next" "$ACTIVE"
+install -D -m 0644 "$RELEASE_APP/automation-pulse-control.service" "$UNIT_TARGET.next"
+mv -Tf "$UNIT_TARGET.next" "$UNIT_TARGET"
+"$SYSTEMCTL" daemon-reload
+"$SYSTEMCTL" enable "$SERVICE"
 "$SYSTEMCTL" restart "$SERVICE"
 if ! "$RELEASE/pi/verify-deployment.sh" "$COMMIT"; then
   echo "Verification failed; rolling back to $PREVIOUS"
-  [[ -n "$PREVIOUS" && -d "$PREVIOUS" ]] || { echo "No rollback release exists."; exit 1; }
+  if [[ -f "$UNIT_BACKUP" ]]; then
+    cp -p "$UNIT_BACKUP" "$UNIT_TARGET.rollback"
+    mv -Tf "$UNIT_TARGET.rollback" "$UNIT_TARGET"
+  elif [[ -f "$UNIT_BACKUP.absent" ]]; then
+    rm -f -- "$UNIT_TARGET"
+  fi
+  "$SYSTEMCTL" daemon-reload
+  if [[ -z "$PREVIOUS" || ! -d "$PREVIOUS" ]]; then
+    rm -f -- "$ACTIVE"
+    "$SYSTEMCTL" stop "$SERVICE"
+    echo "No prior release existed; the failed candidate was deactivated."
+    exit 1
+  fi
   ln -s "$PREVIOUS" "$ACTIVE.rollback"
   mv -Tf "$ACTIVE.rollback" "$ACTIVE"
   "$SYSTEMCTL" restart "$SERVICE"

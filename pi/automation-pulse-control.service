@@ -2,6 +2,8 @@
 Description=Trading Keys Automation Pulse control
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -13,7 +15,9 @@ Environment=TRADING_KEYS_RUNNER_ENTRY=/srv/trading-keys/app/startRunner.mjs
 Environment=TRADING_KEYS_WORKER_ENTRY=/srv/trading-keys/app/goldilocksWorker.mjs
 ExecStart=/usr/bin/node --enable-source-maps /srv/trading-keys/app/controlServer.mjs
 Restart=on-failure
-RestartSec=5
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
 NoNewPrivileges=true
 PrivateTmp=true
 

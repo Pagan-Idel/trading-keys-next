@@ -62,6 +62,11 @@ test('Switch to latest is the authoritative approval gate exported to Pi sync',a
       run_uid,source_run_id,label,config_json,completed_at,net_r,metrics_json,recorded_at
     ) VALUES(?,?,?,?,?,?,?,?)`).run('GLR-SWITCH-WINNER','winner-run-id',config.label,JSON.stringify(config),
       '2030-01-01T00:00:00.000Z',25,JSON.stringify({netR:25}),'2030-01-01T00:00:00.000Z');
+    automationDb.prepare(`INSERT INTO backtest_leaderboard(
+      run_uid,source_run_id,label,config_json,completed_at,net_r,metrics_json,recorded_at
+    ) VALUES(?,?,?,?,?,?,?,?)`).run('GLR-INCOMPATIBLE-TOP','incompatible-run-id','incompatible top winner',
+      JSON.stringify({...config,timeframeProfile:'higherTimeframe'}),'2030-01-02T00:00:00.000Z',50,
+      JSON.stringify({netR:50}),'2030-01-02T00:00:00.000Z');
     automationDb.close();
     const researchDb=new Database(path.join(isolated,'data','goldilocks-research.sqlite'));
     researchDb.exec(`CREATE TABLE research_campaigns(
@@ -71,8 +76,12 @@ test('Switch to latest is the authoritative approval gate exported to Pi sync',a
     researchDb.prepare(`INSERT INTO research_campaigns(
       id,status,label,config_json,created_at,updated_at,feedback_json
     ) VALUES(?,?,?,?,?,?,?)`).run('campaign','completed','fixture','{}','2030-01-01T00:00:00.000Z',
-      '2030-01-01T00:00:00.000Z',JSON.stringify({decisions:[{promoted:true,backtestRunId:'winner-run-id'}]}));
+      '2030-01-01T00:00:00.000Z',JSON.stringify({decisions:[
+        {promoted:true,backtestRunId:'winner-run-id'},
+        {promoted:true,backtestRunId:'incompatible-run-id'},
+      ]}));
     researchDb.close();
+    assert.equal(promotion.getLatestAutomationRecommendation().latest?.runUid,'GLR-SWITCH-WINNER');
 
     const endpointRequest={method:'GET',headers:{authorization:'Bearer scoped-read-token'}};
     const before=await invoke(approvedHandler,endpointRequest);

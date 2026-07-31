@@ -793,3 +793,12 @@ timeframe archive for every active-zone/confirmation-candle combination.
 - Add walk-forward train/validation/test partitions.
 - Add controlled exports for AI research with dataset/version hashes.
 - Authenticate dashboard mutation APIs before remote Raspberry Pi access.
+
+## Approved automation strategy lifecycle
+
+Research ranking is advisory. Only the explicit **Switch to latest** action changes the
+authoritative approved strategy, and only while automation is stopped with no open
+trade. A Pi may download and stage that immutable artifact while workers run, but those
+workers retain their startup snapshot. Activation occurs only on a later explicit
+stopped-to-start lifecycle boundary; boot recovery never activates staging. See
+`docs/APPROVED_STRATEGY_SYNC.md` for transport, validation, and Tailscale configuration.

@@ -27,7 +27,11 @@ export const validateApprovedStrategyManifest=(value:unknown)=>{
     !manifest.contentHash||!manifest.artifact)throw new Error('Approved strategy manifest is malformed.');
   const artifact=validateAutomationStrategyArtifact(manifest.artifact);
   if(manifest.configurationId!==artifact.versionId||manifest.contentHash!==artifact.contentHash||
+    manifest.createdAt!==artifact.createdAt||
     manifest.activatedAt!==artifact.approvedAt)throw new Error('Approved strategy manifest metadata does not match its artifact.');
+  const createdAt=Date.parse(manifest.createdAt),activatedAt=Date.parse(manifest.activatedAt);
+  if(!Number.isFinite(createdAt)||!Number.isFinite(activatedAt)||activatedAt<createdAt)
+    throw new Error('Approved strategy manifest timestamps are invalid.');
   const compatibility=getAutomationCompatibility(artifact.config);
   if(!compatibility.compatible)throw new Error(compatibility.blockers.join(' '));
   return manifest as ApprovedStrategyManifest;
@@ -35,17 +39,23 @@ export const validateApprovedStrategyManifest=(value:unknown)=>{
 
 export const fetchAndStageApprovedStrategy=async(input:{
   endpoint:string;token:string;currentId:string;currentApprovedAt:string;dataDirectory?:string;
-  fetcher?:typeof fetch;
+  fetcher?:typeof fetch;timeoutMs?:number;signal?:AbortSignal;
 }):Promise<StrategySyncResult>=>{
+  if(!input.token)throw new Error('Approved strategy synchronization requires a read-only bearer token.');
   const endpoint=new URL(input.endpoint);
-  if(endpoint.protocol!=='https:'&&endpoint.hostname!=='127.0.0.1'&&endpoint.hostname!=='localhost')
-    throw new Error('Approved strategy synchronization requires HTTPS.');
-  const response=await (input.fetcher??fetch)(endpoint,{headers:{Authorization:`Bearer ${input.token}`},
-    signal:AbortSignal.timeout(15_000)});
+  if(endpoint.protocol!=='https:')throw new Error('Approved strategy synchronization requires HTTPS.');
+  const timeout=AbortSignal.timeout(input.timeoutMs??15_000);
+  const signal=input.signal?AbortSignal.any([timeout,input.signal]):timeout;
+  const response=await (input.fetcher??fetch)(endpoint,{headers:{Authorization:`Bearer ${input.token}`},signal});
   if(!response.ok)throw new Error(`Approved strategy synchronization failed with HTTP ${response.status}.`);
   const manifest=validateApprovedStrategyManifest(await response.json());
   if(manifest.configurationId===input.currentId)return {status:'current',configurationId:input.currentId};
-  if(Date.parse(manifest.activatedAt)<=Date.parse(input.currentApprovedAt))
+  const staged=readStagedApprovedStrategy(input.dataDirectory);
+  if(staged?.versionId===manifest.configurationId)
+    return {status:'current',configurationId:manifest.configurationId};
+  const newestKnownApproval=Math.max(Date.parse(input.currentApprovedAt),
+    staged?Date.parse(staged.approvedAt):Number.NEGATIVE_INFINITY);
+  if(Date.parse(manifest.activatedAt)<=newestKnownApproval)
     throw new Error('Approved strategy synchronization refused a downgrade.');
   const destination=stagedStrategyPath(input.dataDirectory);
   writeAtomic(destination,JSON.stringify(manifest.artifact,null,2));

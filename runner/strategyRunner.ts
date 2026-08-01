@@ -8,6 +8,8 @@ import { MARKET_DATA_HUB_URL } from '../utils/oanda/api/marketDataHub.ts';
 import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 
 const processes = new Map<string, ReturnType<typeof spawn>>();
+const collectorProcesses=new Map<string,ReturnType<typeof spawn>>();
+let collectorsStopping=false;
 const starting = new Set<string>();
 const restartHistory = new Map<string, number[]>();
 const intentionallyStopped = new Set<string>();
@@ -25,6 +27,7 @@ const configuredPairs = process.env.TRADING_KEYS_E2E_PAIRS
   ? process.env.TRADING_KEYS_E2E_PAIRS.split(',').map(value => value.trim()).filter(Boolean)
   : forexPairs;
 const workerEntry = process.env.TRADING_KEYS_WORKER_ENTRY ?? './workers/goldilocksWorker.ts';
+const collectorEntry=process.env.TRADING_KEYS_COLLECTOR_ENTRY??'./workers/candleCollectorWorker.ts';
 const TSX_IMPORT = process.env.TRADING_KEYS_TSX_IMPORT ??
   pathToFileURL(path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
 
@@ -135,3 +138,22 @@ export const stopAllWorkers = async () => {
   for (const pair of [...processes.keys()]) stopWorker(pair, 'Global shutdown');
 };
 export const runningWorkerPairs = (): string[] => [...processes.keys()];
+export const startCandleCollectors=async(mode:'live'|'demo',pairs:string[]=configuredPairs)=>{
+  collectorsStopping=false;
+  for(const pair of pairs){
+    if(collectorProcesses.has(pair))continue;
+    const args=collectorEntry.endsWith('.mjs')?[collectorEntry,pair,`--mode=${mode}`]:['--import',TSX_IMPORT,collectorEntry,pair,`--mode=${mode}`];
+    const child=spawn(process.execPath,args,{stdio:'inherit',shell:false,windowsHide:true,env:{...process.env}});
+    await new Promise<void>((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject)});
+    collectorProcesses.set(pair,child);child.once('exit',()=>{collectorProcesses.delete(pair);if(!collectorsStopping)void startCandleCollectors(mode,[pair])});
+  }
+};
+export const stopCandleCollectors=async()=>{
+  collectorsStopping=true;
+  for(const [pair,child] of collectorProcesses){
+    if(process.platform==='win32'&&child.pid!==undefined)spawn('taskkill',['/PID',String(child.pid),'/F','/T'],{windowsHide:true});
+    else if(child.pid!==undefined)process.kill(child.pid,'SIGTERM');
+    collectorProcesses.delete(pair);
+  }
+};
+export const runningCollectorPairs=()=>[...collectorProcesses.keys()];

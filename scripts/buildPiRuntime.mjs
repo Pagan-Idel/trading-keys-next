@@ -10,6 +10,7 @@ const entries={
   controlServer:'pi/controlServer.ts',
   startRunner:'runner/startRunner.ts',
   goldilocksWorker:'workers/goldilocksWorker.ts',
+  candleCollectorWorker:'workers/candleCollectorWorker.ts',
   importStrategy:'pi/importStrategy.ts',
   exportStrategy:'pi/exportStrategy.ts',
 };

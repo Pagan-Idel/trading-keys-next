@@ -19,6 +19,7 @@ export interface CandleHistoryOptions {
   archiveOnly?:boolean;
   endTime?:number;
   acquireFullRange?:boolean;
+  signal?:AbortSignal;
 }
 
 const CACHE_DIRECTORY = path.resolve(process.cwd(), 'data', 'candle-history');
@@ -97,7 +98,7 @@ export const fetchCandleHistory = async (
   if(options.acquireFullRange){
     await fetchCandles(
       pair,timeframe,Math.min(4_000,options.maxCandles??4_000),
-      new Date(requestedStart).toISOString(),new Date(now).toISOString(),options.mode,
+      new Date(requestedStart).toISOString(),new Date(now).toISOString(),options.mode,options.signal,
     );
     let archived=readArchivedCandles(archiveKey,Math.floor(requestedStart/1000),Math.floor(now/1000))
       .map((candle,index)=>({...candle,candleIndex:index}));
@@ -107,13 +108,13 @@ export const fetchCandleHistory = async (
   }
 
   if (!byTime.size) {
-    const recent = await fetchCandles(pair, timeframe, HISTORY_PAGE_SIZE, undefined, undefined, options.mode);
+    const recent = await fetchCandles(pair, timeframe, HISTORY_PAGE_SIZE, undefined, undefined, options.mode,options.signal);
     for (const candle of recent) byTime.set(candleTime(candle), candle);
   }
 
   const latestCached = maximum(byTime.keys(), requestedStart);
   if (latestCached < now - intervalMs * 2) {
-    const recent = await fetchCandles(pair, timeframe, HISTORY_PAGE_SIZE, new Date(latestCached + intervalMs).toISOString(), undefined, options.mode);
+    const recent = await fetchCandles(pair, timeframe, HISTORY_PAGE_SIZE, new Date(latestCached + intervalMs).toISOString(), undefined, options.mode,options.signal);
     for (const candle of recent) byTime.set(candleTime(candle), candle);
   }
 
@@ -121,7 +122,7 @@ export const fetchCandleHistory = async (
   for (let page = 0; page < backfillPages; page += 1) {
     const earliest = minimum(byTime.keys(), now);
     if (earliest <= requestedStart + intervalMs) break;
-    const older = await fetchCandles(pair, timeframe, HISTORY_PAGE_SIZE, undefined, new Date(earliest - 1).toISOString(), options.mode);
+    const older = await fetchCandles(pair, timeframe, HISTORY_PAGE_SIZE, undefined, new Date(earliest - 1).toISOString(), options.mode,options.signal);
     if (!older.length) break;
     for (const candle of older) byTime.set(candleTime(candle), candle);
   }

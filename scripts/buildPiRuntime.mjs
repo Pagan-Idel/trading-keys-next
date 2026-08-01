@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { builtinModules } from 'node:module';
 import { build } from 'esbuild';
+import { validatePiRuntimeContents } from './piRuntimeValidation.mjs';
 
 const root=process.cwd(),output=path.join(root,'artifacts','pi-runtime');
 fs.rmSync(output,{recursive:true,force:true});
@@ -39,8 +40,10 @@ fs.writeFileSync(path.join(output,'package.json'),JSON.stringify({
 },null,2));
 fs.copyFileSync('pi/automation-pulse-control.service',path.join(output,'automation-pulse-control.service'));
 fs.copyFileSync('pi/automation-pulse.env.example',path.join(output,'automation-pulse.env.example'));
+const validation=validatePiRuntimeContents(output);
 fs.writeFileSync(path.join(output,'BUILD-MANIFEST.json'),JSON.stringify({
   createdAt:new Date().toISOString(),entries,dependencies,
+  requiredRuntimeFiles:validation.required,
   excluded:['Next.js UI','research workers','backtest workers','tests','TypeScript compiler','tsx'],
 },null,2));
 console.log(JSON.stringify({output,dependencies,files:fs.readdirSync(output)},null,2));

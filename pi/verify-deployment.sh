@@ -9,6 +9,10 @@ if [[ "${TRADING_KEYS_DEPLOY_TEST_MODE:-false}" != true && "$APP" != /srv/tradin
 fi
 
 [[ "$(cat "$APP/DEPLOYED_COMMIT")" == "$EXPECTED_COMMIT" ]]
+[[ -f "$APP/candleCollectorWorker.mjs" ]] || {
+  echo "Deployment verification failed: compiled candle collector entry is missing."
+  exit 1
+}
 "$SYSTEMCTL" is-active --quiet "${TRADING_KEYS_DEPLOY_SERVICE:-automation-pulse-control.service}"
 "$SYSTEMCTL" is-enabled --quiet "${TRADING_KEYS_DEPLOY_SERVICE:-automation-pulse-control.service}"
 STATUS="$(curl --fail --silent --show-error "${TRADING_KEYS_VERIFY_URL:-http://127.0.0.1:4080/api/status}")"

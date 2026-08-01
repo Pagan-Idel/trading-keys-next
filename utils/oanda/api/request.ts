@@ -37,6 +37,7 @@ const defaultSleep=(milliseconds:number,signal:AbortSignal)=>new Promise<void>((
 });
 const emit=(diagnostic:OandaReadDiagnostic,custom?:Dependencies['diagnostic'])=>{
   custom?.(diagnostic);
+  if(!custom&&diagnostic.abort)return;
   if(!custom&&!(diagnostic.attempt===1&&diagnostic.status!==undefined&&diagnostic.status>=200&&diagnostic.status<300))logMessage(`OANDA read ${diagnostic.operation} attempt ${diagnostic.attempt} ${diagnostic.status??(diagnostic.timeout?'timed out':diagnostic.abort?'aborted':'failed')}.`,diagnostic,
     {level:diagnostic.status&&diagnostic.status<400?'info':'warn',fileName:'oandaReadRequest',pair:diagnostic.pair,step:'oanda_read_request'});
 };

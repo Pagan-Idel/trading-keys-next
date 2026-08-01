@@ -3,6 +3,7 @@ import { GOLDILOCKS_DEMO_TIMEFRAMES,GOLDILOCKS_LIVE_CANDLE_LIMITS } from '../uti
 import { pruneArchivedCandles } from '../utils/candleArchive.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { workerScanJitterMs } from '../utils/workerRuntime.ts';
+import { isExpectedCollectorShutdown } from '../utils/candleCollectorRuntime.ts';
 
 const pair=process.argv[2]??'',mode: 'live'|'demo'=process.argv.some(value=>value==='--mode=live')?'live':'demo';
 const controller=new AbortController();let stopped=false,lastRetentionAt=0;
@@ -27,4 +28,7 @@ const run=async()=>{
     if(!stopped)await wait(nextCloseDelay());
   }
 };
-run().catch(error=>{console.error(error);process.exitCode=1});
+run().catch(error=>{
+  if(isExpectedCollectorShutdown(error,stopped,controller.signal))return;
+  console.error(error);process.exitCode=1;
+});

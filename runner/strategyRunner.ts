@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveCandleCollectorEntry } from '../utils/candleCollectorRuntime.ts';
 import { forexPairs } from '../utils/constants.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { getActiveNewsEvent, isInHighImpactNewsWindow } from '../utils/newsGuard.ts';
@@ -44,7 +45,7 @@ const configuredPairs = process.env.TRADING_KEYS_E2E_PAIRS
   ? process.env.TRADING_KEYS_E2E_PAIRS.split(',').map(value => value.trim()).filter(Boolean)
   : forexPairs;
 const workerEntry = process.env.TRADING_KEYS_WORKER_ENTRY ?? './workers/goldilocksWorker.ts';
-const collectorEntry=process.env.TRADING_KEYS_COLLECTOR_ENTRY??'./workers/candleCollectorWorker.ts';
+const collectorEntry=resolveCandleCollectorEntry({runnerModuleUrl:import.meta.url});
 const TSX_IMPORT = process.env.TRADING_KEYS_TSX_IMPORT ??
   pathToFileURL(path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
 

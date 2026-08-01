@@ -35,7 +35,7 @@ const startServer=(port:number,data:string)=>spawn(process.execPath,['--import',
   cwd:process.cwd(),stdio:'ignore',env:{...process.env,PULSE_PORT:String(port),PULSE_HOST:'127.0.0.1',
     TRADING_KEYS_DATA_DIRECTORY:data,TRADING_KEYS_AUTOMATION_E2E:'true',TRADING_KEYS_E2E_PAIRS:'EUR/USD',
     TRADING_KEYS_WORKER_ENTRY:'./tests/fixtures/deterministicLifecycleWorker.ts',
-    TRADING_KEYS_COLLECTOR_ENTRY:'./tests/fixtures/deterministicCandleCollector.ts',TRADING_KEYS_PI_RUNTIME:'true',
+    TRADING_KEYS_COLLECTOR_ENTRY:path.resolve('tests/fixtures/deterministicCandleCollector.ts'),TRADING_KEYS_PI_RUNTIME:'true',
     TRADING_KEYS_TEST_PROCESS_COMMAND:path.resolve('runner/startRunner.ts'),TRADING_KEYS_TEST_PROCESS_START_TIME:'combined-start',
     TRADING_KEYS_TEST_PROCESS_CGROUP:'combined-cgroup'},
 });

@@ -5,6 +5,7 @@ import type { Candle } from "../../swingLabeler";
 import { normalizePairKeyUnderscore, tfToSeconds } from "../../shared";
 import { getLoginMode } from "../../loginState";
 import { isArchivedRangeCovered, readArchivedCandles, recordArchivedCoverage, upsertArchivedCandles } from '../../candleArchive.ts';
+import { isExpectedAbort } from '../../candleCollectorRuntime.ts';
 
 const MAX_RANGE_CANDLES_PER_REQUEST=4_000;
 
@@ -108,7 +109,7 @@ export const fetchCandles = async (
 
     return candles;
   } catch (error) {
-    logMessage("🚫 fetchCandles failed:", (error as Error).message, {
+    if(!isExpectedAbort(error))logMessage("🚫 fetchCandles failed:", (error as Error).message, {
       level: "error",
       fileName: "fetchCandles"
     });

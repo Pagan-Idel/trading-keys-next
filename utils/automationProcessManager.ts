@@ -105,8 +105,7 @@ const waitForReadiness = async (pid: number): Promise<void> => {
 };
 const terminatePid = (pid: number): void => {
   if (process.platform === 'win32') {
-    if (process.env.TRADING_KEYS_AUTOMATION_E2E || process.env.TRADING_KEYS_AUTOMATION_TEST_RUNNER) process.kill(pid, 'SIGTERM');
-    else spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
+    spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
   } else {
     try { process.kill(-pid, 'SIGTERM'); } catch { process.kill(pid, 'SIGTERM'); }
   }

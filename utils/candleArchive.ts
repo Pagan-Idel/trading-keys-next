@@ -58,6 +58,11 @@ const database=()=>{
       source_path TEXT PRIMARY KEY,size_bytes INTEGER NOT NULL,modified_ms INTEGER NOT NULL,
       candle_count INTEGER NOT NULL,imported_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS candle_sync_gaps (
+      mode TEXT NOT NULL,pair TEXT NOT NULL,timeframe TEXT NOT NULL,start_time INTEGER NOT NULL,end_time INTEGER NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 1,last_error TEXT,updated_at TEXT NOT NULL,
+      PRIMARY KEY(mode,pair,timeframe,start_time)
+    ) WITHOUT ROWID;
   `);
   // The WITHOUT ROWID primary key already covers mode/pair/timeframe/time lookups.
   // Remove the older duplicate index to keep large M1 archives smaller and writes faster.
@@ -165,6 +170,34 @@ export const markLegacyCandleCacheImported=(filePath:string,candleCount:number)=
 
 export const getCandleArchiveSummary=()=>database().prepare(`SELECT mode,pair,timeframe,COUNT(*) AS candleCount,
   MIN(time) AS startTime,MAX(time) AS endTime FROM historical_candles GROUP BY mode,pair,timeframe ORDER BY pair,timeframe`).all();
+export const recordCandleSyncGap=(key:CandleArchiveKey,startTime:number,endTime:number,error='missing_completed_interval')=>database().prepare(`
+  INSERT INTO candle_sync_gaps(mode,pair,timeframe,start_time,end_time,attempts,last_error,updated_at)
+  VALUES(@mode,@pair,@timeframe,@startTime,@endTime,1,@error,@updatedAt)
+  ON CONFLICT(mode,pair,timeframe,start_time) DO UPDATE SET end_time=excluded.end_time,attempts=candle_sync_gaps.attempts+1,
+    last_error=excluded.last_error,updated_at=excluded.updated_at`).run({...normalized(key),startTime,endTime,error,updatedAt:new Date().toISOString()});
+export const clearCandleSyncGapsThrough=(key:CandleArchiveKey,endTime:number)=>database().prepare(`DELETE FROM candle_sync_gaps
+  WHERE mode=@mode AND pair=@pair AND timeframe=@timeframe AND end_time<=@endTime`).run({...normalized(key),endTime}).changes;
+export const getCandleSyncGaps=(key:CandleArchiveKey)=>database().prepare(`SELECT start_time AS startTime,end_time AS endTime,attempts,last_error AS lastError,
+  updated_at AS updatedAt FROM candle_sync_gaps WHERE mode=@mode AND pair=@pair AND timeframe=@timeframe ORDER BY start_time`).all(normalized(key));
+
+// Floors cover each bounded live working set across weekends plus warm-up,
+// gap-recovery, and operational margin. H4/D remain research-conservative.
+export const CANDLE_RETENTION_DEFAULT_DAYS:Record<string,number>={M1:30,M5:45,M15:100,H1:330,H4:740,D:740};
+export const minimumSafeRetentionDays=(timeframe:string)=>CANDLE_RETENTION_DEFAULT_DAYS[timeframe.toUpperCase()]??740;
+export type CandleRetentionResult={mode:string;pair:string;timeframe:string;cutoff:number;rowsRemoved:number;durationMs:number;beforeBytes:number;afterBytes:number};
+export const pruneArchivedCandles=(key:CandleArchiveKey,options:{now?:number;retentionDays?:number;preserveFrom?:number;batchSize?:number}={}):CandleRetentionResult=>{
+  const started=Date.now(),beforeBytes=getCandleArchiveStorageUsage().sqliteBytes,identity=normalized(key);
+  const configured=Number(process.env[`CANDLE_RETENTION_DAYS_${identity.timeframe}`]);
+  const retentionDays=Math.max(minimumSafeRetentionDays(identity.timeframe),options.retentionDays??(Number.isFinite(configured)?configured:0));
+  const ageCutoff=Math.floor((options.now??Date.now())/1000-retentionDays*86400);
+  const cutoff=options.preserveFrom===undefined?ageCutoff:Math.min(ageCutoff,Math.floor(options.preserveFrom));
+  const batchSize=Math.max(1,Math.min(10_000,Math.floor(options.batchSize??2_000)));
+  const result=database().prepare(`DELETE FROM historical_candles WHERE (mode,pair,timeframe,time) IN (
+    SELECT mode,pair,timeframe,time FROM historical_candles WHERE mode=@mode AND pair=@pair AND timeframe=@timeframe AND time<@cutoff ORDER BY time LIMIT @batchSize
+  )`).run({...identity,cutoff,batchSize});
+  return {mode:identity.mode,pair:identity.pair,timeframe:identity.timeframe,cutoff,rowsRemoved:result.changes,
+    durationMs:Date.now()-started,beforeBytes,afterBytes:getCandleArchiveStorageUsage().sqliteBytes};
+};
 
 export const importLegacyCandleHistoryDirectory=(directory=path.resolve(process.cwd(),'data','candle-history'))=>{
   if(!fs.existsSync(directory))return {files:0,candles:0};

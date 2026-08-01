@@ -11,7 +11,8 @@ import {
 } from "../utils/automationProcessManager.ts";
 import { getAppliedAutomationStrategy,recordAutomationEvent } from "../utils/automationStore.ts";
 import { activateStagedApprovedStrategy } from "../utils/approvedStrategyActivation.ts";
-import { fetchAndStageApprovedStrategy,readStagedApprovedStrategy } from "../utils/approvedStrategySync.ts";
+import { readStagedApprovedStrategy } from "../utils/approvedStrategySync.ts";
+import { createApprovedStrategyPoller,type ApprovedStrategyPollEvent } from "../utils/approvedStrategyPoller.ts";
 
 const host = process.env.PULSE_HOST ?? "127.0.0.1";
 const port = Math.max(1024, Number(process.env.PULSE_PORT ?? 4080));
@@ -19,24 +20,33 @@ const token = String(process.env.PULSE_CONTROL_TOKEN ?? "");
 if (host !== "127.0.0.1" && !token) {
   throw new Error("PULSE_CONTROL_TOKEN is required when Automation Pulse listens beyond localhost.");
 }
-const configEndpoint=String(process.env.AUTOMATION_CONFIG_ENDPOINT??"");
-const configToken=String(process.env.AUTOMATION_CONFIG_READ_TOKEN??"");
-const syncApprovedConfiguration=async()=>{
-  if(!configEndpoint||!configToken)return {status:"disabled" as const};
-  const current=getAppliedAutomationStrategy();
-  try{
-    const result=await fetchAndStageApprovedStrategy({endpoint:configEndpoint,token:configToken,
-      currentId:current.id,currentApprovedAt:current.appliedAt});
-    if(result.status==="staged")recordAutomationEvent({source:"strategy-sync",step:"strategy_sync_staged",
-      message:`Approved strategy ${result.configurationId} downloaded, validated, and staged.`});
-    return result;
-  }catch(error){
-    recordAutomationEvent({source:"strategy-sync",step:"strategy_sync_unavailable",level:"warn",
-      message:`Approved strategy synchronization unavailable; continuing with ${current.sourceRunUid}.`,
-      data:{error:error instanceof Error?error.message:String(error)}});
-    return {status:"unavailable" as const};
-  }
+const syncEnabled=process.env.APPROVED_STRATEGY_SYNC_ENABLED==="true";
+const syncUrl=String(process.env.APPROVED_STRATEGY_SYNC_URL??"");
+const syncToken=String(process.env.APPROVED_STRATEGY_SYNC_TOKEN??"");
+const positiveNumber=(value:string|undefined,fallback:number,minimum:number)=>{
+  const parsed=Number(value??fallback);
+  return Number.isFinite(parsed)&&parsed>=minimum?parsed:fallback;
 };
+const syncIntervalMs=positiveNumber(process.env.APPROVED_STRATEGY_SYNC_INTERVAL_MS,300_000,30_000);
+const syncTimeoutMs=positiveNumber(process.env.APPROVED_STRATEGY_SYNC_TIMEOUT_MS,15_000,1_000);
+if(syncEnabled&&(!syncUrl||!syncToken))throw new Error(
+  "APPROVED_STRATEGY_SYNC_URL and APPROVED_STRATEGY_SYNC_TOKEN are required when approved strategy sync is enabled.");
+const syncMessages:Record<ApprovedStrategyPollEvent,string>={
+  check_started:"Approved strategy check started.",
+  no_update:"No approved strategy update is available.",
+  update_detected:"A new approved strategy was detected.",
+  downloaded:"The new approved strategy artifact was downloaded.",
+  validated:"The downloaded approved strategy artifact passed validation.",
+  staged:"The new approved strategy was staged atomically.",
+  rejected:"Approved strategy synchronization failed; healthy automation continues with its startup snapshot.",
+  activation_pending:"New approved version staged; activation is pending a safe stopped/start lifecycle boundary.",
+};
+const strategyPoller=syncEnabled?createApprovedStrategyPoller({
+  endpoint:syncUrl,token:syncToken,intervalMs:syncIntervalMs,timeoutMs:syncTimeoutMs,
+  getCurrent:()=>{const current=getAppliedAutomationStrategy();return {id:current.id,approvedAt:current.appliedAt}},
+  onEvent:(event,data)=>recordAutomationEvent({source:"strategy-sync",step:`strategy_sync_${event}`,
+    level:event==="rejected"?"warn":"info",message:syncMessages[event],data}),
+}):null;
 
 const authorized = (request: http.IncomingMessage) =>
   !token || request.headers.authorization === `Bearer ${token}`;
@@ -88,7 +98,8 @@ const server=http.createServer(async(request, response) => {
       return;
     }
     if(url.pathname==="/api/config-sync"&&request.method==="POST"){
-      void syncApprovedConfiguration().then(result=>send(response,200,result));
+      if(!strategyPoller){send(response,409,{error:"Approved strategy synchronization is disabled."});return}
+      void strategyPoller.check().then(result=>send(response,200,result));
       return;
     }
     if (url.pathname === "/api/start" && request.method === "POST") {
@@ -112,13 +123,11 @@ server.listen(port, host, () => {
   void recoverDesiredAutomation().catch(error=>recordAutomationEvent({
       source:"process-manager",step:"boot_recovery_failed",level:"error",
       message:`Automation remained stopped after fail-closed boot recovery: ${error instanceof Error?error.message:String(error)}`,
-    })).finally(()=>void syncApprovedConfiguration());
+    })).finally(()=>strategyPoller?.start());
 });
 
-const strategySyncTimer=setInterval(()=>void syncApprovedConfiguration(),5*60*1000);
-strategySyncTimer.unref();
 const shutdown=async()=>{
-  clearInterval(strategySyncTimer);
+  await strategyPoller?.close();
   await shutdownAutomationChildren();
   server.close(()=>process.exit(0));
 };

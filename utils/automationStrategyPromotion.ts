@@ -14,12 +14,12 @@ export const getLatestAutomationRecommendation=()=>{
     Number.isFinite(Number(record.config.datasetEndTime))&&
     Boolean(record.config.datasetKey),
   );
-  const latest=sealed[0]??null;
+  const latest=sealed.find(record=>getAutomationCompatibility(record.config).compatible)??null;
   return {
     latest,
     compatibility:latest?getAutomationCompatibility(latest.config):{
       compatible:false,
-      blockers:['No sealed promoted leaderboard result is available yet.'],
+      blockers:['No compatible sealed promoted leaderboard result is available yet.'],
     },
   };
 };

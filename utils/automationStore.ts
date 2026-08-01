@@ -8,6 +8,7 @@ import type { BacktestRunConfig } from './backtestStore';
 import { GOLDILOCKS_STRATEGY_VERSION } from './goldilocksConfig';
 import { GOLDILOCKS_DEFAULT_MANAGEMENT } from './goldilocksTradeManagement';
 import { shouldPersistWorkerStatus,type WorkerStatusSnapshot } from './workerRuntime';
+import type { ZoneLifecycleRecord } from './zoneLifecycle.ts';
 
 export type AutomationLevel = 'debug' | 'info' | 'warn' | 'error';
 export type WorkerState = 'starting' | 'scanning' | 'waiting' | 'in_trade' | 'paused' | 'stopped' | 'error';
@@ -82,6 +83,8 @@ const runEventRetention = (db: Database.Database, force = false): void => {
   if (!force && now - lastRetentionRun < 60 * 60 * 1000) return;
   const cutoff = new Date(now - EVENT_RETENTION_MS).toISOString();
   db.prepare('DELETE FROM automation_events WHERE created_at < ?').run(cutoff);
+  db.prepare(`DELETE FROM zone_lifecycle WHERE state IN ('EXECUTED','INVALIDATED','EXPIRED') AND updated_at < ?`)
+    .run(now-740*24*60*60*1000);
   db.pragma('wal_checkpoint(PASSIVE)');
   db.pragma('incremental_vacuum');
   lastRetentionRun = now;
@@ -163,12 +166,27 @@ const getDatabase = (): Database.Database => {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS zone_lifecycle (
+      zone_id TEXT NOT NULL,pair TEXT NOT NULL,state TEXT NOT NULL,reason TEXT,touch_key TEXT,updated_at INTEGER NOT NULL,
+      PRIMARY KEY(pair,zone_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_zone_lifecycle_pair_state ON zone_lifecycle(pair,state,updated_at);
     CREATE TABLE IF NOT EXISTS automation_strategy_versions (
       id TEXT PRIMARY KEY,source_run_uid TEXT NOT NULL,config_json TEXT NOT NULL,
       applied_at TEXT NOT NULL,previous_id TEXT,active INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_automation_strategy_active
       ON automation_strategy_versions(active,applied_at DESC);
+  `);
+  const zonePrimaryKey=(database.prepare('PRAGMA table_info(zone_lifecycle)').all() as Array<{name:string;pk:number}>)
+    .filter(column=>column.pk>0).sort((a,b)=>a.pk-b.pk).map(column=>column.name).join(',');
+  if(zonePrimaryKey!=='pair,zone_id')database.exec(`
+    DROP INDEX IF EXISTS idx_zone_lifecycle_pair_state;
+    ALTER TABLE zone_lifecycle RENAME TO zone_lifecycle_legacy;
+    CREATE TABLE zone_lifecycle(zone_id TEXT NOT NULL,pair TEXT NOT NULL,state TEXT NOT NULL,reason TEXT,touch_key TEXT,updated_at INTEGER NOT NULL,PRIMARY KEY(pair,zone_id));
+    INSERT OR IGNORE INTO zone_lifecycle SELECT zone_id,pair,state,reason,touch_key,updated_at FROM zone_lifecycle_legacy;
+    DROP TABLE zone_lifecycle_legacy;
+    CREATE INDEX idx_zone_lifecycle_pair_state ON zone_lifecycle(pair,state,updated_at);
   `);
   const ensureColumn = (table: string, column: string, definition: string) => {
     const columns = database!.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
@@ -360,6 +378,15 @@ export const setActiveTrade = (trade: ActiveTradeInput): void => {
 export const clearActiveTrade = (pair: string): void => {
   getDatabase().prepare('DELETE FROM active_trades WHERE pair = ?').run(pair);
 };
+
+export const persistZoneLifecycle=(record:ZoneLifecycleRecord):void=>{
+  getDatabase().prepare(`INSERT INTO zone_lifecycle(zone_id,pair,state,reason,touch_key,updated_at)
+    VALUES(@zoneId,@pair,@state,@reason,@touchKey,@updatedAt)
+    ON CONFLICT(pair,zone_id) DO UPDATE SET state=excluded.state,reason=excluded.reason,
+      touch_key=excluded.touch_key,updated_at=excluded.updated_at`).run({...record,reason:record.reason??null,touchKey:record.touchKey??null});
+};
+export const getZoneLifecycle=(pair:string,zoneId:string):ZoneLifecycleRecord|undefined=>getDatabase().prepare(`SELECT zone_id AS zoneId,pair,state,reason,
+  touch_key AS touchKey,updated_at AS updatedAt FROM zone_lifecycle WHERE pair=? AND zone_id=?`).get(pair,zoneId) as ZoneLifecycleRecord|undefined;
 
 export const getActiveTrade = (pair: string): ActiveTradeInput | undefined =>
   getDatabase().prepare(`

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { isForexMarketOpen } from '../utils/shared.ts';
 import { forexPairs } from '../utils/constants.ts';
-import { getEligibleWorkerPairs, refreshWorkers, startAllWorkers, stopAllWorkers } from './strategyRunner.ts';
+import { getEligibleWorkerPairs, refreshWorkers, startAllWorkers, startCandleCollectors, stopAllWorkers, stopCandleCollectors } from './strategyRunner.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { startMarketDataHub, stopMarketDataHub } from '../utils/oanda/api/marketDataHub.ts';
 import { closeAllTrades, isHolidayCloseWindow, isWeekendCloseWindow } from '../utils/marketCloseGuard.ts';
@@ -25,17 +25,21 @@ const monitorMarket = async () => {
   if (closeWindow && forcedCloseWindow !== closeWindow) {
     await closeAllTrades(closeWindow === 'weekend' ? 'five-minute weekend close safety window' : 'holiday safety window', mode);
     await stopAllWorkers();
+    await stopCandleCollectors();
     forcedCloseWindow = closeWindow;
   } else if (!closeWindow) forcedCloseWindow = null;
   if (closeWindow) { marketOpen = false; return {failed:[] as string[]}; }
   if (currentlyOpen) {
     const eligiblePairs = await getEligibleWorkerPairs();
+    const enabledPairs=process.env.TRADING_KEYS_E2E_PAIRS?.split(',').map(value=>value.trim()).filter(Boolean)??forexPairs;
+    await startCandleCollectors(mode,enabledPairs);
     const result=await refreshWorkers(eligiblePairs, mode);
     marketOpen = true;
     logMessage(`Active eligible trading sessions: ${eligiblePairs.join(', ') || 'none'}.`);
     return result;
   } else if (marketOpen) {
     await stopAllWorkers();
+    await stopCandleCollectors();
     marketOpen = false;
   }
   return {failed:[] as string[]};
@@ -43,6 +47,7 @@ const monitorMarket = async () => {
 const start = async () => {
   if (fixtureMode) {
     const fixturePairs = process.env.TRADING_KEYS_E2E_PAIRS?.split(',').map(value => value.trim()).filter(Boolean) ?? forexPairs;
+    if(process.env.TRADING_KEYS_COLLECTOR_ENTRY)await startCandleCollectors('demo',fixturePairs);
     const result=await startAllWorkers('demo', fixturePairs);
     if(result.failed.length)throw new Error(`Eligible fixture workers failed to start: ${result.failed.join(', ')}`);
     writeReady();
@@ -63,6 +68,7 @@ const shutdown = async () => {
   try {
     if (!fixtureMode) await stopMarketDataHub();
     await stopAllWorkers();
+    await stopCandleCollectors();
   } finally {
     const ready = process.env.TRADING_KEYS_RUNNER_READY_PATH;
     if (ready) fs.rmSync(ready, { force: true });

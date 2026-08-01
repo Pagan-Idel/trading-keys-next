@@ -1,4 +1,4 @@
-import credentials from "../../oandaCredentials";
+import { oandaReadRequest } from './request.ts';
 import { logMessage } from "../../logger";
 import { OANDA_GRANULARITIES, INTERVAL_TO_GRANULARITY } from "../../constants";
 import type { Candle } from "../../swingLabeler";
@@ -31,7 +31,9 @@ export const fetchCandles = async (
   count: number = 5000,
   from?: string,
   to?: string,
-  mode: 'live' | 'demo' = getLoginMode()
+  mode: 'live' | 'demo' = getLoginMode(),
+  signal?:AbortSignal,
+  persist=true,
 ): Promise<Candle[]> => {
   try {
     const archiveKey={pair:symbol,timeframe:interval,mode};
@@ -41,30 +43,6 @@ export const fetchCandles = async (
     if(from&&to&&Number.isFinite(requestedStart)&&Number.isFinite(requestedEnd)&&isArchivedRangeCovered(archiveKey,requestedStart,requestedEnd)){
       return readArchivedCandles(archiveKey,requestedStart,requestedEnd);
     }
-    const accountType = mode;
-    const hostname =
-      accountType === "live"
-        ? "https://api-fxtrade.oanda.com"
-        : "https://api-fxpractice.oanda.com";
-
-    const accountId =
-      accountType === "live"
-        ? credentials.OANDA_LIVE_ACCOUNT_ID
-        : credentials.OANDA_DEMO_ACCOUNT_ID;
-
-    const token =
-      accountType === "live"
-        ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
-        : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
-
-    if (!accountId || !hostname || !token) {
-      logMessage("❌ Missing OANDA credentials or hostname.", undefined, {
-        level: "error",
-        fileName: "fetchCandles",
-      });
-      throw new Error("❌ Missing OANDA credentials or hostname.");
-    }
-
     const instrument = normalizePairKeyUnderscore(symbol);
     const granularity = INTERVAL_TO_GRANULARITY[interval] || interval.toUpperCase();
 
@@ -81,19 +59,18 @@ export const fetchCandles = async (
       if(ranges.length>1){
         const byTime=new Map<string,Candle>();
         for(const range of ranges){
-          const page=await fetchCandles(symbol,interval,Math.min(count,MAX_RANGE_CANDLES_PER_REQUEST),range.from,range.to,mode);
+          const page=await fetchCandles(symbol,interval,Math.min(count,MAX_RANGE_CANDLES_PER_REQUEST),range.from,range.to,mode,signal,persist);
           for(const candle of page)byTime.set(candle.time,candle);
         }
         const merged=[...byTime.values()]
           .sort((left,right)=>Date.parse(left.time)-Date.parse(right.time))
           .map((candle,candleIndex)=>({...candle,candleIndex}));
-        upsertArchivedCandles(archiveKey,merged);
-        recordArchivedCoverage(archiveKey,requestedStart,requestedEnd,intervalSeconds);
+        if(persist){upsertArchivedCandles(archiveKey,merged);recordArchivedCoverage(archiveKey,requestedStart,requestedEnd,intervalSeconds)}
         return merged;
       }
     }
 
-    const url = new URL(`${hostname}/v3/instruments/${instrument}/candles`);
+    const url = new URL(`https://oanda.invalid/v3/instruments/${instrument}/candles`);
     url.searchParams.set("granularity", granularity);
     if (!(from && to)) {
       url.searchParams.set("count", count.toString());
@@ -107,22 +84,8 @@ export const fetchCandles = async (
     if (to) url.searchParams.set("to", to);
     // Removed noisy info-level logs for cleaner output
 
-    const response = await fetch(url.toString(), {
-      signal: AbortSignal.timeout(30_000),
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logMessage("❌ Failed to fetch candles", errorText, {
-        level: "error",
-        fileName: "fetchCandles"
-      });
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
+    const response = await oandaReadRequest({operation:'instrument_candles',endpointTemplate:'/v3/instruments/{instrument}/candles',mode,pair:symbol,
+      timeoutMs:30_000,signal,buildPath:()=>`${url.pathname}${url.search}`});
 
     const data = await response.json();
 
@@ -137,8 +100,8 @@ export const fetchCandles = async (
         close: parseFloat(c.mid.c),
       }));
 
-    upsertArchivedCandles(archiveKey,candles);
-    if(from&&to&&Number.isFinite(requestedStart)&&Number.isFinite(requestedEnd)){
+    if(persist)upsertArchivedCandles(archiveKey,candles);
+    if(persist&&from&&to&&Number.isFinite(requestedStart)&&Number.isFinite(requestedEnd)){
       const completedThrough=Math.min(requestedEnd,Math.floor(Date.now()/1000)-intervalSeconds);
       if(completedThrough>=requestedStart)recordArchivedCoverage(archiveKey,requestedStart,completedThrough,intervalSeconds);
     }
@@ -160,13 +123,12 @@ export const fetchCompletedCandlesSince = async (
   lastCompletedTime: string,
   mode: 'live' | 'demo' = getLoginMode(),
   count = 20,
+  signal?:AbortSignal,
+  persist=true,
 ): Promise<Candle[]> => {
-  const accountType = mode;
-  const hostname = accountType === 'live' ? 'https://api-fxtrade.oanda.com' : 'https://api-fxpractice.oanda.com';
-  const token = accountType === 'live' ? credentials.OANDA_LIVE_ACCOUNT_TOKEN : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
   const instrument = normalizePairKeyUnderscore(symbol);
   const granularity = INTERVAL_TO_GRANULARITY[interval] || interval.toUpperCase();
-  const url = new URL(`${hostname}/v3/instruments/${instrument}/candles`);
+  const url = new URL(`https://oanda.invalid/v3/instruments/${instrument}/candles`);
   url.searchParams.set('granularity', granularity);
   url.searchParams.set('price', 'M');
   url.searchParams.set('smooth', 'false');
@@ -175,11 +137,8 @@ export const fetchCompletedCandlesSince = async (
   url.searchParams.set('count', String(Math.min(5_000, Math.max(1, count))));
   url.searchParams.set('dailyAlignment', '17');
   url.searchParams.set('alignmentTimezone', 'America/New_York');
-  const response = await fetch(url, {
-    signal: AbortSignal.timeout(10_000),
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-  });
-  if (!response.ok) throw new Error(`OANDA incremental candle request failed: HTTP ${response.status}: ${await response.text()}`);
+  const response=await oandaReadRequest({operation:'incremental_completed_candles',endpointTemplate:'/v3/instruments/{instrument}/candles',
+    mode,pair:symbol,signal,buildPath:()=>`${url.pathname}${url.search}`});
   const data = await response.json();
   const candles=(data.candles ?? [])
     .filter((c: any) => c.complete && c.mid)
@@ -189,6 +148,6 @@ export const fetchCompletedCandlesSince = async (
       open: Number(c.mid.o), high: Number(c.mid.h), low: Number(c.mid.l), close: Number(c.mid.c),
     }))
     .sort((a: Candle, b: Candle) => Date.parse(a.time) - Date.parse(b.time));
-  upsertArchivedCandles({pair:symbol,timeframe:interval,mode},candles);
+  if(persist)upsertArchivedCandles({pair:symbol,timeframe:interval,mode},candles);
   return candles;
 };

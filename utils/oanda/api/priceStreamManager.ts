@@ -31,6 +31,7 @@ const STREAM_QUOTE_MAX_AGE_MS = 2_000;
 const STREAM_MESSAGE_TIMEOUT_MS = 15_000;
 const priceCache = new Map<string, OandaQuote>();
 const streams = new Map<string, StreamState>();
+const idleStops=new Map<string,NodeJS.Timeout>();
 const cacheKey = (symbol: string, mode: Mode) => `${mode}:${normalizePairKeyUnderscore(symbol)}`;
 
 const getAccountDetails = (mode: Mode = getLoginMode()) => ({
@@ -145,6 +146,17 @@ export const startCombinedPriceStream = (symbols: string[], mode: Mode = getLogi
 };
 
 export const startPriceStream = (symbol: string, mode: Mode = getLoginMode()) => startCombinedPriceStream([symbol], mode);
+export const getStreamIdleCooldownMs=(value:unknown=process.env.OANDA_STREAM_IDLE_COOLDOWN_MS)=>{
+  const parsed=Number(value);
+  return Number.isFinite(parsed)&&parsed>=0?parsed:5_000;
+};
+export const cancelPriceStreamIdleStop=(symbol:string,mode:Mode=getLoginMode())=>{
+  const key=cacheKey(symbol,mode),timer=idleStops.get(key);if(timer)clearTimeout(timer);idleStops.delete(key);
+};
+export const schedulePriceStreamIdleStop=(symbol:string,mode:Mode=getLoginMode(),cooldownMs=getStreamIdleCooldownMs())=>{
+  cancelPriceStreamIdleStop(symbol,mode);const key=cacheKey(symbol,mode);
+  const timer=setTimeout(()=>{idleStops.delete(key);void stopPriceStream(symbol,mode)},Math.max(0,cooldownMs));idleStops.set(key,timer);
+};
 
 export const initializePriceStreams = async (symbols: string[], mode: Mode = getLoginMode()) => {
   startCombinedPriceStream(symbols, mode);
@@ -154,6 +166,7 @@ export const isStreamInitialized = (symbol: string, mode: Mode = getLoginMode())
   [...streams.values()].some(state => state.mode === mode && state.symbols.includes(normalizePairKeyUnderscore(symbol)));
 
 export const stopPriceStream = async (symbol: string, mode: Mode = getLoginMode()) => {
+  cancelPriceStreamIdleStop(symbol,mode);
   const entry = [...streams.entries()].find(([, candidate]) => candidate.mode === mode && candidate.symbols.includes(normalizePairKeyUnderscore(symbol)));
   const key = entry?.[0];
   const state = entry?.[1];
@@ -222,6 +235,14 @@ export const fetchPriceOnce = async (symbol: string, mode: Mode = getLoginMode()
     logMessage(`Price unavailable for ${norm}: ${(error as Error).message}`, undefined, { level: "warn", fileName: "priceStream" });
     return null;
   }
+};
+
+export const setMarketDataInterest=async(symbol:string,active:boolean,owner=`${process.pid}`)=>{
+  const hubUrl=typeof process!=='undefined'?process.env.OANDA_MARKET_DATA_HUB_URL:undefined;
+  if(!hubUrl)return;
+  await fetch(`${hubUrl}/interest?instrument=${encodeURIComponent(normalizePairKeyUnderscore(symbol))}&owner=${encodeURIComponent(owner)}`,{
+    method:active?'POST':'DELETE',signal:AbortSignal.timeout(1_500),headers:{Accept:'application/json'},
+  }).catch(()=>undefined);
 };
 
 /** Compatibility wrapper. Prefer getLatestQuote so stale data is represented as null. */

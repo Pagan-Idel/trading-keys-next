@@ -8,6 +8,8 @@ import { MARKET_DATA_HUB_URL } from '../utils/oanda/api/marketDataHub.ts';
 import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 
 const processes = new Map<string, ReturnType<typeof spawn>>();
+const collectorProcesses=new Map<string,ReturnType<typeof spawn>>();
+let collectorsStopping=false;
 const starting = new Set<string>();
 const restartHistory = new Map<string, number[]>();
 const intentionallyStopped = new Set<string>();
@@ -21,10 +23,28 @@ type EstablishmentWait = (
   milliseconds: number,
 ) => Promise<unknown>;
 const waitForEstablishment: EstablishmentWait = (_subprocess, milliseconds) => pause(milliseconds);
+const waitForExit=async(child:ReturnType<typeof spawn>,timeoutMs=10_000)=>{
+  if(child.exitCode!==null)return true;
+  return await new Promise<boolean>(resolve=>{
+    const timer=setTimeout(()=>{cleanup();resolve(false)},timeoutMs);
+    const done=()=>{cleanup();resolve(true)};
+    const cleanup=()=>{clearTimeout(timer);child.off('exit',done);child.off('error',done)};
+    child.once('exit',done);child.once('error',done);
+  });
+};
+const terminateChild=async(child:ReturnType<typeof spawn>)=>{
+  if(child.pid===undefined||child.exitCode!==null)return;
+  if(process.platform==='win32')spawn('taskkill',['/PID',String(child.pid),'/F','/T'],{windowsHide:true});
+  else process.kill(child.pid,'SIGTERM');
+  if(await waitForExit(child))return;
+  if(process.platform!=='win32'&&child.exitCode===null)process.kill(child.pid,'SIGKILL');
+  if(!await waitForExit(child,2_000))throw new Error(`Child process ${child.pid} did not exit after termination.`);
+};
 const configuredPairs = process.env.TRADING_KEYS_E2E_PAIRS
   ? process.env.TRADING_KEYS_E2E_PAIRS.split(',').map(value => value.trim()).filter(Boolean)
   : forexPairs;
 const workerEntry = process.env.TRADING_KEYS_WORKER_ENTRY ?? './workers/goldilocksWorker.ts';
+const collectorEntry=process.env.TRADING_KEYS_COLLECTOR_ENTRY??'./workers/candleCollectorWorker.ts';
 const TSX_IMPORT = process.env.TRADING_KEYS_TSX_IMPORT ??
   pathToFileURL(path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'loader.mjs')).href;
 
@@ -80,15 +100,13 @@ export const shouldRestartWorker = (
   exitCode: number | null,
 ): boolean => established && !intentionallyStoppedWorker && typeof exitCode === 'number' && exitCode !== 0;
 
-export const stopWorker = (pair: string, reason?: string) => {
+export const stopWorker = async (pair: string, reason?: string) => {
   const child = processes.get(pair);
   if (!child) return;
   intentionallyStopped.add(pair);
   logMessage(`Stopping worker for ${pair}${reason ? `: ${reason}` : ''}`);
-  if (process.platform === 'win32') {
-    if (child.pid !== undefined) spawn('taskkill', ['/PID', String(child.pid), '/F', '/T'], { windowsHide: true });
-  } else if (child.pid !== undefined) process.kill(child.pid, 'SIGTERM');
   processes.delete(pair);
+  await terminateChild(child);
 };
 
 export const getEligibleWorkerPairs = async (
@@ -113,7 +131,7 @@ export const refreshWorkers = async (
   for (const pair of [...processes.keys()]) {
     if (!expected.has(pair)) {
       const event = getActiveNewsEvent(pair);
-      stopWorker(pair, event ? `High Impact News: ${event.title}` : 'Outside active trading session');
+      await stopWorker(pair, event ? `High Impact News: ${event.title}` : 'Outside active trading session');
     }
   }
   for (const pair of eligiblePairs) {
@@ -132,6 +150,24 @@ export const startAllWorkers = async (mode: 'live' | 'demo', eligiblePairs?: str
   return result;
 };
 export const stopAllWorkers = async () => {
-  for (const pair of [...processes.keys()]) stopWorker(pair, 'Global shutdown');
+  await Promise.all([...processes.keys()].map(pair=>stopWorker(pair,'Global shutdown')));
 };
 export const runningWorkerPairs = (): string[] => [...processes.keys()];
+export const startCandleCollectors=async(mode:'live'|'demo',pairs:string[]=configuredPairs)=>{
+  collectorsStopping=false;
+  for(const pair of pairs){
+    if(collectorProcesses.has(pair))continue;
+    const args=collectorEntry.endsWith('.mjs')?[collectorEntry,pair,`--mode=${mode}`]:['--import',TSX_IMPORT,collectorEntry,pair,`--mode=${mode}`];
+    const child=spawn(process.execPath,args,{stdio:'inherit',shell:false,windowsHide:true,env:{...process.env}});
+    await new Promise<void>((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject)});
+    collectorProcesses.set(pair,child);child.once('exit',()=>{collectorProcesses.delete(pair);if(!collectorsStopping)void startCandleCollectors(mode,[pair])});
+  }
+};
+export const stopCandleCollectors=async()=>{
+  collectorsStopping=true;
+  await Promise.all([...collectorProcesses].map(async([pair,child])=>{
+    collectorProcesses.delete(pair);
+    await terminateChild(child);
+  }));
+};
+export const runningCollectorPairs=()=>[...collectorProcesses.keys()];

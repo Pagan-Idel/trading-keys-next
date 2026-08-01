@@ -10,6 +10,7 @@ import {
 } from '../utils/automationStrategyArtifact.ts';
 import type { AppliedAutomationStrategy } from '../utils/automationStore.ts';
 import { fetchAndStageApprovedStrategy,validateApprovedStrategyManifest } from '../utils/approvedStrategySync.ts';
+import { createApprovedStrategyPoller } from '../utils/approvedStrategyPoller.ts';
 import { GOLDILOCKS_BACKTEST_GATE_DEFAULTS,GOLDILOCKS_BACKTEST_TWEAK_DEFAULTS,
   GOLDILOCKS_SCORE_WEIGHTS,GOLDILOCKS_STRATEGY_VERSION } from '../utils/goldilocksConfig.ts';
 import { GOLDILOCKS_DEFAULT_MANAGEMENT } from '../utils/goldilocksTradeManagement.ts';
@@ -90,6 +91,10 @@ test('approved configuration sync stages only a newer authenticated artifact',as
   const current=await fetchAndStageApprovedStrategy({endpoint:'https://config.example/approved',token:'read-only',
     currentId:'version-2',currentApprovedAt:'2026-07-29T12:00:00.000Z',dataDirectory:data,fetcher:fetcher as typeof fetch});
   assert.equal(current.status,'current');
+  const older=compatibleStrategy('version-between','2026-07-28T18:00:00.000Z');
+  await assert.rejects(fetchAndStageApprovedStrategy({endpoint:'https://config.example/approved',token:'read-only',
+    currentId:'version-1',currentApprovedAt:'2026-07-28T12:00:00.000Z',dataDirectory:data,
+    fetcher:(async()=>new Response(JSON.stringify(older),{status:200})) as typeof fetch}),/downgrade/);
 });
 
 test('approved configuration sync rejects malformed, incompatible, downgrade, auth, and network failures',async()=>{
@@ -105,4 +110,74 @@ test('approved configuration sync rejects malformed, incompatible, downgrade, au
   await assert.rejects(fetchAndStageApprovedStrategy({endpoint:'https://config.example/approved',token:'token',
     currentId:'old',currentApprovedAt:'2026-07-28T12:00:00.000Z',
     fetcher:(async()=>{throw new Error('offline')}) as typeof fetch}),/offline/);
+});
+
+test('approved strategy poller never overlaps, backs off, and cancels its timer',async()=>{
+  const callbacks:Array<()=>void>=[],delays:number[]=[];
+  let release!:()=>void,calls=0;
+  const pending=new Promise<void>(resolve=>{release=resolve});
+  const events:string[]=[];
+  const poller=createApprovedStrategyPoller({
+    endpoint:'https://config.example/approved',token:'secret-that-must-not-be-logged',
+    intervalMs:300_000,getCurrent:()=>({id:'version-1',approvedAt:'2026-07-28T12:00:00.000Z'}),
+    fetcher:(async()=>{calls++;await pending;throw new Error('offline secret-that-must-not-be-logged')}) as typeof fetch,
+    onEvent:(event,data)=>events.push(`${event}:${JSON.stringify(data??{})}`),
+    setTimer:(callback,delay)=>{callbacks.push(callback);delays.push(delay);return {unref(){}} as NodeJS.Timeout},
+    clearTimer:()=>undefined,
+  });
+  poller.start();
+  assert.equal(delays[0],0);
+  callbacks.shift()!();
+  await Promise.resolve();
+  assert.equal(poller.running,true);
+  assert.deepEqual(await poller.check(),{status:'unavailable'});
+  assert.equal(calls,1);
+  release();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(delays.at(-1),600_000);
+  assert.ok(events.some(event=>event.startsWith('rejected:')));
+  assert.ok(events.every(event=>!event.includes('secret-that-must-not-be-logged')));
+  poller.stop();
+});
+
+test('approved strategy poller resets backoff after success and aborts an active request on shutdown',async()=>{
+  const callbacks:Array<()=>void>=[],delays:number[]=[];
+  let attempt=0;
+  const poller=createApprovedStrategyPoller({
+    endpoint:'https://config.example/approved',token:'read-only',intervalMs:30_000,
+    getCurrent:()=>({id:'version-1',approvedAt:'2026-07-28T12:00:00.000Z'}),
+    fetcher:(async()=>attempt++===0
+      ?Promise.reject(new Error('offline'))
+      :new Response(JSON.stringify(compatibleStrategy('version-1','2026-07-28T12:00:00.000Z')),{status:200})) as typeof fetch,
+    onEvent:()=>undefined,
+    setTimer:(callback,delay)=>{callbacks.push(callback);delays.push(delay);return {unref(){}} as NodeJS.Timeout},
+    clearTimer:()=>undefined,
+  });
+  poller.start();
+  callbacks.shift()!();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(delays.at(-1),60_000);
+  callbacks.pop()!();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(delays.at(-1),30_000);
+  poller.stop();
+
+  let aborted=false;
+  const active=createApprovedStrategyPoller({
+    endpoint:'https://config.example/approved',token:'read-only',intervalMs:Number.NaN,
+    getCurrent:()=>({id:'version-1',approvedAt:'2026-07-28T12:00:00.000Z'}),
+    fetcher:((_input,_init)=>new Promise((_resolve,reject)=>{
+      _init?.signal?.addEventListener('abort',()=>{aborted=true;reject(new Error('aborted'))});
+    })) as typeof fetch,
+    onEvent:()=>undefined,
+    setTimer:(callback)=>{callbacks.push(callback);return {unref(){}} as NodeJS.Timeout},
+    clearTimer:()=>undefined,
+  });
+  active.start();
+  callbacks.pop()!();
+  await Promise.resolve();
+  active.stop();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(aborted,true);
+  assert.equal(active.running,false);
 });

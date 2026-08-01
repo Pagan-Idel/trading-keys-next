@@ -1,5 +1,5 @@
 import { logMessage } from "../../logger";
-import credentials from "../../oandaCredentials";
+import { oandaReadRequest } from './request.ts';
 import type { Candle } from "../../swingLabeler";
 import { normalizePairKeyUnderscore } from "../../shared";
 import { getLoginMode } from "../../loginState";
@@ -7,57 +7,22 @@ import { getLoginMode } from "../../loginState";
 export const fetchLatestCandles = async (
   symbol: string,
   interval: string,
-  mode: 'live' | 'demo' = getLoginMode()
+  mode: 'live' | 'demo' = getLoginMode(),
+  signal?:AbortSignal,
 ): Promise<Candle[]> => {
   try {
-    const hostname =
-      mode === "live"
-        ? "https://api-fxtrade.oanda.com"
-        : "https://api-fxpractice.oanda.com";
-
-    const accountId =
-      mode === "live"
-        ? credentials.OANDA_LIVE_ACCOUNT_ID
-        : credentials.OANDA_DEMO_ACCOUNT_ID;
-
-    const token =
-      mode === "live"
-        ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
-        : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
-
-    if (!accountId || !hostname || !token) {
-      logMessage("❌ Missing OANDA credentials or hostname.", undefined, {
-        level: "error",
-        fileName: "fetchLatestCandles",
-      });
-      throw new Error("❌ Missing OANDA credentials or hostname.");
-    }
-
     const instrument = normalizePairKeyUnderscore(symbol);
     const granularity = interval.toUpperCase();
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
 
-    const url = new URL(`${hostname}/v3/accounts/${accountId}/candles/latest`);
+    const url = new URL(`https://oanda.invalid/v3/accounts/account/candles/latest`);
     const spec = `${instrument}:${granularity}:BM`;
     url.searchParams.set("candleSpecifications", spec);
     url.searchParams.set("alignmentTimezone", timezone);
     url.searchParams.set("dailyAlignment", "17");
 
-    const response = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logMessage("❌ Failed to fetch latest candles", errorText, {
-        level: "error",
-        fileName: "fetchLatestCandles"
-      });
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
+    const response=await oandaReadRequest({operation:'latest_account_candles',endpointTemplate:'/v3/accounts/{account}/candles/latest',mode,pair:symbol,signal,
+      buildPath:({accountId})=>`/v3/accounts/${encodeURIComponent(accountId)}/candles/latest${url.search}`});
 
     const data = await response.json();
 

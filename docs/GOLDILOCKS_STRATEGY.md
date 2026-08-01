@@ -756,6 +756,43 @@ Historical scans pre-index each zone's first completed outside candle once and t
 advance causally through confirmation candles. They must not rescan the complete zone
 timeframe archive for every active-zone/confirmation-candle combination.
 
+## Live candle and broker lifecycle
+
+The runner assigns one lightweight continuous collector process to each enabled pair,
+independent from session/news-eligible Goldilocks trading workers. Each collector owns
+the required H1, M15, and M5 pair/timeframe archives. Startup uses local bounds and bootstraps only an
+empty archive. Later cycles request completed candles strictly after the last persisted
+timestamp; a failed request leaves that timestamp unchanged, and an unexpected weekday
+gap blocks strategy decisions until the missing sequence is returned and committed.
+Zone state, open trades, and pricing-stream state never stop this archive synchronization.
+
+Normal scans read their bounded working sets from SQLite and do not invoke independent
+full-history loaders. The archive primary key deduplicates pair/timeframe timestamps.
+Retention runs at most daily per collector in bounded batches. The evidence-based live
+floors are 45 days for M5, 100 days for M15, and 330 days for H1. These retain each
+timeframe's complete bounded live working set across weekend gaps plus warm-up and
+recovery margin; execution-only M1 uses 30 days. Configuration may increase but cannot
+reduce these safety floors. Research-only H4/D archives retain 740-day defaults.
+
+Persisted live zone lifecycle terminology is `DISCOVERED`, `DEPARTURE_PENDING`,
+`ACTIVE_FAR`, `APPROACHING`, `ARMED`, `TOUCHED`, `EXECUTED`, `INVALIDATED`, and
+`EXPIRED`. Terminal records prevent a consumed historical zone from becoming a fresh
+entry after restart. Historical zone construction, touch equality, confirmation, score,
+and runway semantics are unchanged.
+
+Pair-local pricing streams are not started at worker boot. A fresh actionable
+confirmation activates a renewable interest lease, and exact execution remains
+fail-closed until a fresh quote exists. An idle cooldown prevents disconnect thrashing.
+The service-owned market-data hub converts all current leases into one combined OANDA
+subscription and closes that network stream when no leases remain. `openTrades` is checked at boot,
+for actionable confirmations, during trade reconciliation, and immediately before
+order submission; far/no-zone scans do not request it.
+
+The stream-release policy can represent broker-protected set-and-forget management,
+but live/demo automation still accepts only `secure-half-atr-runner-v3`. Set-and-forget
+remains backtest-only until a separately reviewed strategy-contract change enables it;
+this lifecycle infrastructure does not make that manager selectable in production.
+
 ## Code map
 
 | Area                                            | Primary files                                                                                                   |

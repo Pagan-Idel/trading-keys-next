@@ -41,6 +41,6 @@ fs.copyFileSync('pi/automation-pulse-control.service',path.join(output,'automati
 fs.copyFileSync('pi/automation-pulse.env.example',path.join(output,'automation-pulse.env.example'));
 fs.writeFileSync(path.join(output,'BUILD-MANIFEST.json'),JSON.stringify({
   createdAt:new Date().toISOString(),entries,dependencies,
-  excluded:['Next.js UI','research workers','backtest workers','tests','Puppeteer','TypeScript compiler','tsx'],
+  excluded:['Next.js UI','research workers','backtest workers','tests','TypeScript compiler','tsx'],
 },null,2));
 console.log(JSON.stringify({output,dependencies,files:fs.readdirSync(output)},null,2));

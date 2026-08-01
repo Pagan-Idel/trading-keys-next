@@ -1,5 +1,5 @@
 import { logMessage } from "../../logger";
-import credentials from "../../oandaCredentials";
+import { oandaReadRequest } from './request.ts';
 import { getLoginMode } from "../../loginState";
 import { normalizePairKeyUnderscore } from "../../shared";
 
@@ -45,44 +45,12 @@ export interface TradeById {
 
 export const openNow = async (
   pair?: string,
-  mode: 'live' | 'demo' = getLoginMode()
+  mode: 'live' | 'demo' = getLoginMode(),
+  signal?:AbortSignal,
 ): Promise<OpenTrade | undefined> => {
-  const hostname =
-    mode === "live"
-      ? "https://api-fxtrade.oanda.com"
-      : "https://api-fxpractice.oanda.com";
-
-  const accountId =
-    mode === "live"
-      ? credentials.OANDA_LIVE_ACCOUNT_ID
-      : credentials.OANDA_DEMO_ACCOUNT_ID;
-
-  const token =
-    mode === "live"
-      ? credentials.OANDA_LIVE_ACCOUNT_TOKEN
-      : credentials.OANDA_DEMO_ACCOUNT_TOKEN;
-
-  // logMessage(`🔎 openNow using accountId: ${accountId}, token: ${token?.slice(0,8)}..., hostname: ${hostname}, mode: ${mode}`, undefined, { fileName: "openNow", pair });
-
-  if (!accountId || !token || !hostname) {
-    logMessage("❌ Token or AccountId is not set.", undefined, { fileName: "openNow", pair });
-    return undefined;
-  }
-
-  const apiUrl = `${hostname}/v3/accounts/${accountId}/openTrades`;
-
   try {
-    const response = await fetch(apiUrl, {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      logMessage(`❌ Error fetching open trades: ${response.status} - ${response.statusText}`, undefined, { fileName: "openNow", pair });
-      return undefined;
-    }
+    const response = await oandaReadRequest({operation:'open_trades',endpointTemplate:'/v3/accounts/{account}/openTrades',mode,pair,signal,
+      buildPath:({accountId})=>`/v3/accounts/${encodeURIComponent(accountId)}/openTrades`});
 
     const rawText = await response.text();
     let responseData: OpenTrade;
@@ -109,7 +77,6 @@ export const openNow = async (
 
     return responseData;
   } catch (error) {
-    logMessage("❌ Error fetching open trades", error, { fileName: "openNow", pair });
     return undefined;
   }
 };

@@ -252,6 +252,7 @@ export interface GoldilocksZone {
     departureCloseLocation: number;
   };
 }
+export const stableZoneLegKey=(direction:string,startTime:number,endTime:number)=>`${direction}-${startTime}-${endTime}`;
 
 export interface GoldilocksDepartureQuality {
   departureCandleTime: number;
@@ -1516,7 +1517,7 @@ export const detectGoldilocksZoneHistory = (
 
   for (const leg of [...legs].sort((a, b) => a.endIndex - b.endIndex)) {
     const detection = detectGoldilocksZones(candles, leg);
-    const legKey = `${leg.direction}-${leg.startIndex}-${leg.endIndex}`;
+    const legKey=stableZoneLegKey(leg.direction,candles[leg.startIndex]?.time??Number.NaN,candles[leg.endIndex]?.time??Number.NaN);
     const base = detection.zones.find((zone) => zone.kind === "base");
     if (base) baseByLeg.set(legKey, base);
     for (const detected of detection.zones) {

@@ -23,6 +23,23 @@ type EstablishmentWait = (
   milliseconds: number,
 ) => Promise<unknown>;
 const waitForEstablishment: EstablishmentWait = (_subprocess, milliseconds) => pause(milliseconds);
+const waitForExit=async(child:ReturnType<typeof spawn>,timeoutMs=10_000)=>{
+  if(child.exitCode!==null)return true;
+  return await new Promise<boolean>(resolve=>{
+    const timer=setTimeout(()=>{cleanup();resolve(false)},timeoutMs);
+    const done=()=>{cleanup();resolve(true)};
+    const cleanup=()=>{clearTimeout(timer);child.off('exit',done);child.off('error',done)};
+    child.once('exit',done);child.once('error',done);
+  });
+};
+const terminateChild=async(child:ReturnType<typeof spawn>)=>{
+  if(child.pid===undefined||child.exitCode!==null)return;
+  if(process.platform==='win32')spawn('taskkill',['/PID',String(child.pid),'/F','/T'],{windowsHide:true});
+  else process.kill(child.pid,'SIGTERM');
+  if(await waitForExit(child))return;
+  if(process.platform!=='win32'&&child.exitCode===null)process.kill(child.pid,'SIGKILL');
+  if(!await waitForExit(child,2_000))throw new Error(`Child process ${child.pid} did not exit after termination.`);
+};
 const configuredPairs = process.env.TRADING_KEYS_E2E_PAIRS
   ? process.env.TRADING_KEYS_E2E_PAIRS.split(',').map(value => value.trim()).filter(Boolean)
   : forexPairs;
@@ -83,15 +100,13 @@ export const shouldRestartWorker = (
   exitCode: number | null,
 ): boolean => established && !intentionallyStoppedWorker && typeof exitCode === 'number' && exitCode !== 0;
 
-export const stopWorker = (pair: string, reason?: string) => {
+export const stopWorker = async (pair: string, reason?: string) => {
   const child = processes.get(pair);
   if (!child) return;
   intentionallyStopped.add(pair);
   logMessage(`Stopping worker for ${pair}${reason ? `: ${reason}` : ''}`);
-  if (process.platform === 'win32') {
-    if (child.pid !== undefined) spawn('taskkill', ['/PID', String(child.pid), '/F', '/T'], { windowsHide: true });
-  } else if (child.pid !== undefined) process.kill(child.pid, 'SIGTERM');
   processes.delete(pair);
+  await terminateChild(child);
 };
 
 export const getEligibleWorkerPairs = async (
@@ -116,7 +131,7 @@ export const refreshWorkers = async (
   for (const pair of [...processes.keys()]) {
     if (!expected.has(pair)) {
       const event = getActiveNewsEvent(pair);
-      stopWorker(pair, event ? `High Impact News: ${event.title}` : 'Outside active trading session');
+      await stopWorker(pair, event ? `High Impact News: ${event.title}` : 'Outside active trading session');
     }
   }
   for (const pair of eligiblePairs) {
@@ -135,7 +150,7 @@ export const startAllWorkers = async (mode: 'live' | 'demo', eligiblePairs?: str
   return result;
 };
 export const stopAllWorkers = async () => {
-  for (const pair of [...processes.keys()]) stopWorker(pair, 'Global shutdown');
+  await Promise.all([...processes.keys()].map(pair=>stopWorker(pair,'Global shutdown')));
 };
 export const runningWorkerPairs = (): string[] => [...processes.keys()];
 export const startCandleCollectors=async(mode:'live'|'demo',pairs:string[]=configuredPairs)=>{
@@ -150,10 +165,9 @@ export const startCandleCollectors=async(mode:'live'|'demo',pairs:string[]=confi
 };
 export const stopCandleCollectors=async()=>{
   collectorsStopping=true;
-  for(const [pair,child] of collectorProcesses){
-    if(process.platform==='win32'&&child.pid!==undefined)spawn('taskkill',['/PID',String(child.pid),'/F','/T'],{windowsHide:true});
-    else if(child.pid!==undefined)process.kill(child.pid,'SIGTERM');
+  await Promise.all([...collectorProcesses].map(async([pair,child])=>{
     collectorProcesses.delete(pair);
-  }
+    await terminateChild(child);
+  }));
 };
 export const runningCollectorPairs=()=>[...collectorProcesses.keys()];

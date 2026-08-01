@@ -47,6 +47,7 @@ const monitorMarket = async () => {
 const start = async () => {
   if (fixtureMode) {
     const fixturePairs = process.env.TRADING_KEYS_E2E_PAIRS?.split(',').map(value => value.trim()).filter(Boolean) ?? forexPairs;
+    if(process.env.TRADING_KEYS_COLLECTOR_ENTRY)await startCandleCollectors('demo',fixturePairs);
     const result=await startAllWorkers('demo', fixturePairs);
     if(result.failed.length)throw new Error(`Eligible fixture workers failed to start: ${result.failed.join(', ')}`);
     writeReady();

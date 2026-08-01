@@ -127,7 +127,7 @@ server.listen(port, host, () => {
 });
 
 const shutdown=async()=>{
-  strategyPoller?.stop();
+  await strategyPoller?.close();
   await shutdownAutomationChildren();
   server.close(()=>process.exit(0));
 };

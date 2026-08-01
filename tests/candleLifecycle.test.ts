@@ -6,6 +6,7 @@ import { canExecuteTouch,shouldRetainPricingStream,transitionZoneLifecycle,type 
 import { minimumSafeRetentionDays } from '../utils/candleArchive.ts';
 import { stableZoneLegKey } from '../utils/goldilocksStrategy.ts';
 import { getHubInterestSnapshot,updateHubInterest } from '../utils/oanda/api/marketDataHub.ts';
+import { getStreamIdleCooldownMs } from '../utils/oanda/api/priceStreamManager.ts';
 
 const candle=(seconds:number):Candle=>({time:new Date(seconds*1000).toISOString(),candleIndex:0,open:1,high:2,low:0,close:1});
 let fixtureId=0;
@@ -45,6 +46,7 @@ test('fresh stream and known broker state are mandatory for one touch',()=>{cons
 test('stream policy releases protected set-and-forget and retains active management',()=>{assert.equal(shouldRetainPricingStream({actionableZones:0,armed:false,activeManagement:false,setAndForgetProtected:true,shutdown:false}),false);assert.equal(shouldRetainPricingStream({actionableZones:0,armed:false,activeManagement:true,setAndForgetProtected:false,shutdown:false}),true)});
 test('zone state and trade mode never stop candle synchronization policy',async()=>{for(const _condition of ['invalid','open','set-forget','managed']){const f=fixture([1000],[1300]);assert.equal((await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize()).appended,1)}});
 test('retention floors preserve each bounded live working set plus safety margin',()=>{assert.deepEqual(['M1','M5','M15','H1'].map(minimumSafeRetentionDays),[30,45,100,330])});
+test('invalid stream idle cooldown values fall back safely',()=>{assert.equal(getStreamIdleCooldownMs(undefined),5_000);assert.equal(getStreamIdleCooldownMs('invalid'),5_000);assert.equal(getStreamIdleCooldownMs(-1),5_000);assert.equal(getStreamIdleCooldownMs('2500'),2_500)});
 test('New York weekend closure is calendar classified across DST',()=>{for(const value of ['2026-01-10T12:00:00Z','2026-07-11T12:00:00Z'])assert.equal(isScheduledForexClosure(Date.parse(value)/1000),true)});
 test('weekday and holiday-like gaps fail conservatively',()=>{const start=Date.parse('2026-12-24T15:00:00Z')/1000;assert.ok(findUnexpectedGap(start,[start+900],300));});
 test('zone leg identity uses stable candle times rather than reconstruction indexes',()=>{assert.equal(stableZoneLegKey('bullish',100,200),stableZoneLegKey('bullish',100,200));assert.notEqual(stableZoneLegKey('bullish',100,200),stableZoneLegKey('bullish',101,200))});

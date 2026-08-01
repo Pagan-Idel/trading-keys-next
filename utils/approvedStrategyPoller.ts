@@ -28,13 +28,14 @@ export const createApprovedStrategyPoller=(options:ApprovedStrategyPollerOptions
   let stopped=true;
   let running=false;
   let failures=0;
+  let activeCheck:Promise<StrategySyncResult|{status:'unavailable'}>|null=null;
 
   const schedule=(delay:number)=>{
     if(stopped)return;
     timer=setTimer(()=>void check(),delay);
     timer.unref?.();
   };
-  const check=async():Promise<StrategySyncResult|{status:'unavailable'}>=>{
+  const performCheck=async():Promise<StrategySyncResult|{status:'unavailable'}>=>{
     if(stopped||running)return {status:'unavailable'};
     running=true;
     activeRequest=new AbortController();
@@ -71,9 +72,18 @@ export const createApprovedStrategyPoller=(options:ApprovedStrategyPollerOptions
       schedule(backoff);
     }
   };
+  const check=():Promise<StrategySyncResult|{status:'unavailable'}>=>{
+    if(stopped||running)return Promise.resolve({status:'unavailable'});
+    const pending=performCheck();
+    activeCheck=pending;
+    void pending.finally(()=>{if(activeCheck===pending)activeCheck=null});
+    return pending;
+  };
+  const stop=()=>{stopped=true;if(timer)clearTimer(timer);timer=null;activeRequest?.abort()};
   return {
     start(){if(!stopped)return;stopped=false;schedule(0)},
-    stop(){stopped=true;if(timer)clearTimer(timer);timer=null;activeRequest?.abort()},
+    stop,
+    async close(){stop();if(activeCheck)await activeCheck},
     check,
     get running(){return running},
   };

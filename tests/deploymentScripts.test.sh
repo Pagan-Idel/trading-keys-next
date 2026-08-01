@@ -52,12 +52,18 @@ export MOCK_SYSTEMCTL_LOG="$SANDBOX/systemctl.log"
 DEPLOY_LOG="$SANDBOX/deploy.log"
 SYNC_ENV="$SANDBOX/automation.env"
 SYNC_TOKEN='deployment-secret-must-not-be-printed'
+OANDA_TOKEN='oanda-secret-must-not-be-printed'
+OANDA_ACCOUNT='oanda-account-must-not-be-printed'
 cat > "$SYNC_ENV" <<EOF
 APPROVED_STRATEGY_SYNC_ENABLED=true
 APPROVED_STRATEGY_SYNC_URL=https://authoritative.example/approved
 APPROVED_STRATEGY_SYNC_TOKEN=$SYNC_TOKEN
 APPROVED_STRATEGY_SYNC_INTERVAL_MS=300000
 APPROVED_STRATEGY_SYNC_TIMEOUT_MS=15000
+OANDA_DEMO_ACCOUNT_TOKEN=$OANDA_TOKEN
+OANDA_DEMO_ACCOUNT_ID=$OANDA_ACCOUNT
+OANDA_READ_TIMEOUT_MS=10000
+OANDA_STREAM_IDLE_COOLDOWN_MS=5000
 EOF
 SYNC_ENV_HASH="$(sha256sum "$SYNC_ENV" | awk '{print $1}')"
 run_deploy(){ bash "$REPO_UNDER_TEST/pi/deploy.sh" "$@" 2>&1 | tee -a "$DEPLOY_LOG"; }
@@ -96,6 +102,10 @@ test "$(sha256sum "$TRADING_KEYS_DEPLOY_UNIT_TARGET" | awk '{print $1}')" = "$FI
 test "$(sha256sum "$SYNC_ENV" | awk '{print $1}')" = "$SYNC_ENV_HASH"
 if grep -Fq "$SYNC_TOKEN" "$DEPLOY_LOG"; then
   echo "Approved-strategy sync token appeared in deployment output." >&2
+  exit 1
+fi
+if grep -Fq "$OANDA_TOKEN" "$DEPLOY_LOG" || grep -Fq "$OANDA_ACCOUNT" "$DEPLOY_LOG"; then
+  echo "OANDA credentials appeared in deployment output." >&2
   exit 1
 fi
 

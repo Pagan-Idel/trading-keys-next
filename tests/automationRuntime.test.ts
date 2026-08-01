@@ -176,8 +176,7 @@ test('approved strategy poller resets backoff after success and aborts an active
   active.start();
   callbacks.pop()!();
   await Promise.resolve();
-  active.stop();
-  await new Promise(resolve=>setImmediate(resolve));
+  await active.close();
   assert.equal(aborted,true);
   assert.equal(active.running,false);
 });

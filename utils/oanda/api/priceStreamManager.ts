@@ -146,10 +146,14 @@ export const startCombinedPriceStream = (symbols: string[], mode: Mode = getLogi
 };
 
 export const startPriceStream = (symbol: string, mode: Mode = getLoginMode()) => startCombinedPriceStream([symbol], mode);
+export const getStreamIdleCooldownMs=(value:unknown=process.env.OANDA_STREAM_IDLE_COOLDOWN_MS)=>{
+  const parsed=Number(value);
+  return Number.isFinite(parsed)&&parsed>=0?parsed:5_000;
+};
 export const cancelPriceStreamIdleStop=(symbol:string,mode:Mode=getLoginMode())=>{
   const key=cacheKey(symbol,mode),timer=idleStops.get(key);if(timer)clearTimeout(timer);idleStops.delete(key);
 };
-export const schedulePriceStreamIdleStop=(symbol:string,mode:Mode=getLoginMode(),cooldownMs=Number(process.env.OANDA_STREAM_IDLE_COOLDOWN_MS)||5_000)=>{
+export const schedulePriceStreamIdleStop=(symbol:string,mode:Mode=getLoginMode(),cooldownMs=getStreamIdleCooldownMs())=>{
   cancelPriceStreamIdleStop(symbol,mode);const key=cacheKey(symbol,mode);
   const timer=setTimeout(()=>{idleStops.delete(key);void stopPriceStream(symbol,mode)},Math.max(0,cooldownMs));idleStops.set(key,timer);
 };

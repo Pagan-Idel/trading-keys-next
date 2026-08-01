@@ -1,5 +1,5 @@
-import { fetchCandles, fetchCompletedCandlesSince } from '../utils/oanda/api/fetchCandles.ts';
-import { fetchPriceOnce, startPriceStream, stopPriceStream, waitForFreshPrice } from '../utils/oanda/api/priceStreamManager.ts';
+import { fetchCandles } from '../utils/oanda/api/fetchCandles.ts';
+import { cancelPriceStreamIdleStop, fetchPriceOnce, isStreamInitialized, schedulePriceStreamIdleStop, setMarketDataInterest, startPriceStream, stopPriceStream, waitForFreshPrice } from '../utils/oanda/api/priceStreamManager.ts';
 import { openNow, type Trade } from '../utils/oanda/api/openNow.ts';
 import { getTradeDetailsById } from '../utils/oanda/api/getTradeDetails.ts';
 import { modifyTrade, replaceTradeProtection } from '../utils/oanda/api/modifyTrade.ts';
@@ -15,11 +15,10 @@ import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 import { isInHighImpactNewsWindow, getActiveNewsEvent, getNewsGuardError } from '../utils/newsGuard.ts';
 import { getPrecision, isForexMarketOpen, normalizePairKeyUnderscore, wait } from '../utils/shared.ts';
 import { isHolidayCloseWindow, isWeekendCloseWindow, isWeekendLiquidationWindow } from '../utils/marketCloseGuard.ts';
-import { clearActiveTrade, getActiveTrade, getAppliedAutomationStrategy, getRiskProfile, recordTradeManagementEvent, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
+import { clearActiveTrade, getActiveTrade, getAppliedAutomationStrategy, getRiskProfile, getZoneLifecycle, persistZoneLifecycle, recordTradeManagementEvent, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { classifyTradeOutcome, saveTradeRecord, type JournalData } from '../utils/tradeHistory.ts';
 import { GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_LIVE_CANDLE_LIMITS, GOLDILOCKS_TIMEFRAME_SECONDS, getGoldilocksMinimumScore } from '../utils/goldilocksConfig.ts';
-import { fetchCandleHistory } from '../utils/oanda/api/fetchCandleHistory.ts';
 import { scoreGoldilocksSetup, type GoldilocksScoreResult } from '../utils/goldilocksScoring.ts';
 import { calculateScoreRisk, type RiskProfile } from '../utils/dynamicRisk.ts';
 import { formatGoldilocksZoneAge, getGoldilocksZoneAgeDays, getGoldilocksZoneAgeSeconds } from '../utils/zoneAge.ts';
@@ -28,6 +27,8 @@ import { measureZoneCorridor, type ZoneCorridorMeasurement } from '../utils/zone
 import type { TradePathSummary } from '../utils/tradeManagementResearch.ts';
 import { getHeapStatistics } from 'v8';
 import { pruneOldestSetEntries,workerScanJitterMs } from '../utils/workerRuntime.ts';
+import { getArchivedCandleBounds, readArchivedCandles } from '../utils/candleArchive.ts';
+import { transitionZoneLifecycle,type ZoneLifecycleRecord } from '../utils/zoneLifecycle.ts';
 import {
   GOLDILOCKS_DEFAULT_MANAGEMENT,
   calculateAtr,
@@ -47,10 +48,12 @@ const pair = process.argv[2] ?? '';
 const modeArg = process.argv.find(argument => argument.startsWith('--mode='));
 const mode: 'live' | 'demo' = modeArg?.split('=')[1] === 'live' ? 'live' : 'demo';
 const usesSharedMarketDataHub = Boolean(process.env.OANDA_MARKET_DATA_HUB_URL);
+const marketDataOwner=`worker-${process.pid}-${pair}`;
 const appliedStrategy=getAppliedAutomationStrategy();
 const minimumScore = Number(appliedStrategy.config.minimumScore??getGoldilocksMinimumScore());
 
 let killed = false;
+const shutdownController=new AbortController();
 let cachedHistory: ReturnType<typeof buildGoldilocksHistory> | null = null;
 let cachedPrimaryTime = '';
 let cachedConfirmationCandles: Awaited<ReturnType<typeof fetchCandles>> | null = null;
@@ -58,6 +61,12 @@ const attemptedConfirmations = new Set<string>();
 const ATTEMPTED_CONFIRMATION_LIMIT=2_000;
 const MEMORY_TELEMETRY_INTERVAL_MS=15*60*1000;
 let lastMemoryTelemetryAt=0;
+const readWorkingCandles=(timeframe:string,count=GOLDILOCKS_LIVE_CANDLE_LIMITS[timeframe])=>{
+  const bounds=getArchivedCandleBounds({pair,timeframe,mode});
+  if(bounds.endTime===null)return [];
+  const seconds=GOLDILOCKS_TIMEFRAME_SECONDS[timeframe];
+  return readArchivedCandles({pair,timeframe,mode},Math.max(0,bounds.endTime-seconds*Math.max(1,count-1)),bounds.endTime+seconds);
+};
 
 const rememberAttemptedConfirmation=(key:string)=>{
   attemptedConfirmations.add(key);
@@ -78,7 +87,9 @@ const logMemoryTelemetry=()=>{
 
 const stop = () => {
   killed = true;
+  shutdownController.abort(new DOMException('Worker shutting down','AbortError'));
   if (!usesSharedMarketDataHub) void stopPriceStream(pair, mode);
+  else void setMarketDataInterest(pair,false,marketDataOwner);
 };
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
@@ -90,25 +101,7 @@ export const millisecondsUntilNextConfirmationClose = (now = Date.now()) => {
 };
 
 const loadConfirmationCandles = async () => {
-  if (!cachedConfirmationCandles?.length) {
-    cachedConfirmationCandles = await fetchCandles(pair, CONFIRMATION_TIMEFRAME, CONFIRMATION_CANDLE_COUNT, undefined, undefined, mode);
-    return cachedConfirmationCandles;
-  }
-  const last = cachedConfirmationCandles.at(-1)!;
-  const intervalMs = CONFIRMATION_SECONDS * 1_000;
-  const attempts = Date.now() >= Date.parse(last.time) + intervalMs * 2 ? 12 : 1;
-  let additions: typeof cachedConfirmationCandles = [];
-  for (let attempt = 0; attempt < attempts && !additions.length; attempt += 1) {
-    additions = await fetchCompletedCandlesSince(pair, CONFIRMATION_TIMEFRAME, last.time, mode, 20);
-    if (!additions.length && attempt + 1 < attempts) await wait(250);
-  }
-  if (additions.length) {
-    const merged = new Map(cachedConfirmationCandles.map(candle => [candle.time, candle]));
-    for (const candle of additions) merged.set(candle.time, candle);
-    cachedConfirmationCandles = [...merged.values()]
-      .sort((a, b) => Date.parse(a.time) - Date.parse(b.time))
-      .slice(-CONFIRMATION_CANDLE_COUNT);
-  }
+  cachedConfirmationCandles=readWorkingCandles(CONFIRMATION_TIMEFRAME,CONFIRMATION_CANDLE_COUNT);
   return cachedConfirmationCandles;
 };
 
@@ -193,6 +186,7 @@ const recordClosedTrade = async (trade: Trade, journal: JournalData, breakEvenAc
 
 const monitorTrade = async (trade: Trade, journal: JournalData) => {
   if (!trade.id) return;
+  if(usesSharedMarketDataHub)await setMarketDataInterest(pair,true,marketDataOwner);
   const direction: 'BUY' | 'SELL' = Number(trade.currentUnits ?? 0) > 0 ? 'BUY' : 'SELL';
   const entry = Number(trade.price ?? 0);
   const stopLoss = Number(trade.stopLossOrder?.price ?? 0);
@@ -279,6 +273,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
   let endingR=0;
   const firstReachedAt:Record<string,number>={};
   while (!killed) {
+    if(usesSharedMarketDataHub)await setMarketDataInterest(pair,true,marketDataOwner);
     if(isWeekendLiquidationWindow()&&Date.now()-lastWeekendCloseAttempt>=60_000){
       lastWeekendCloseAttempt=Date.now();
       tradeManagerLog('trade_manager_weekend_liquidation', `WEEKEND LIQUIDATION · closing ${pair} before the Friday market close to avoid carrying the position over the weekend.`, {tradeId:trade.id,cutoffTimeZone:'America/New_York',cutoffHour:16}, 'warn');
@@ -301,7 +296,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
       }
       tradeManagerLog('trade_manager_weekend_close_retry', `WEEKEND EXIT DELAYED · broker did not accept the ${pair} close request; retrying while the market remains open.`, {tradeId:trade.id,mode}, 'error');
     }
-    const open = await openNow(pair, mode);
+    const open = await openNow(pair, mode,shutdownController.signal);
     if (!open) {
       if (!brokerUnavailable) {
         brokerUnavailable = true;
@@ -451,6 +446,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
               undefined,
               undefined,
               mode,
+              shutdownController.signal,
             ));
           } catch (error) {
             tradeManagerLog('trade_manager_atr_retry', `ATR refresh delayed; ${pair} keeps its current protected stop.`, {
@@ -528,10 +524,11 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
   } else {
     tradeManagerLog('trade_manager_paused', 'MANAGER HANDOFF · service is stopping; the broker-side stop and target remain active and will be recovered on restart.', { tradeId: trade.id }, 'warn');
   }
+  if(usesSharedMarketDataHub)await setMarketDataInterest(pair,false,marketDataOwner);
 };
 
 const recoverOpenTrade = async () => {
-  const open = await openNow(pair, mode);
+  const open = await openNow(pair, mode,shutdownController.signal);
   const trade = open?.trades.find(item => hasPairTrade([item]));
   if (!trade) {
     clearActiveTrade(pair);
@@ -554,20 +551,19 @@ const recoverOpenTrade = async () => {
 };
 
 const loadZoneHistory = async () => {
-  const latest = await fetchCandles(pair, ZONE_TIMEFRAME, 2, undefined, undefined, mode);
-  const primaryTime = latest.at(-1)?.time ?? '';
+  const primaryTime=getArchivedCandleBounds({pair,timeframe:ZONE_TIMEFRAME,mode}).endTime?.toString()??'';
   if (cachedHistory && primaryTime === cachedPrimaryTime) return cachedHistory;
-  const candles = await fetchCandleHistory(pair, ZONE_TIMEFRAME, { lookbackDays: 730, mode, backfillPages: 1, maxCandles: GOLDILOCKS_LIVE_CANDLE_LIMITS[ZONE_TIMEFRAME] });
+  const candles=readWorkingCandles(ZONE_TIMEFRAME);
   const history = buildGoldilocksHistoryChunked(candles, 1_000, 200, { trackTouches:false });
   cachedHistory = { candles: toStrategyCandles(candles), legs: [], history };
-  cachedPrimaryTime = candles.at(-1)?.time ?? primaryTime;
+  cachedPrimaryTime = primaryTime;
   return cachedHistory;
 };
 
 const loadScoringContext = async (zone: Parameters<typeof annotateConfluenceAt>[0], time: number, entry:number, direction:'BUY'|'SELL',stopLoss:number,takeProfit:number) => {
   const snapshots = await Promise.all(GOLDILOCKS_DEMO_TIMEFRAMES.confluence.map(async timeframe => {
     if (timeframe === ZONE_TIMEFRAME && cachedHistory) return { timeframe, history: cachedHistory.history, candles: [],strategyCandles:cachedHistory.candles };
-    const candles = await fetchCandleHistory(pair, timeframe, { lookbackDays: 730, mode, backfillPages: 1, maxCandles: GOLDILOCKS_LIVE_CANDLE_LIMITS[timeframe] });
+    const candles=readWorkingCandles(timeframe);
     return { timeframe, history: buildGoldilocksHistoryChunked(candles, 1_000, 200), candles,strategyCandles:toStrategyCandles(candles) };
   }));
   const trendCandles = snapshots.find(snapshot => snapshot.timeframe === TREND_TIMEFRAME)?.candles ?? [];
@@ -599,28 +595,42 @@ const scan = async () => {
     updateWorkerStatus(pair, 'paused', 'safety_guard', blocked, mode);
     return;
   }
-  const open = await openNow(pair, mode);
-  if (!open) {
-    updateWorkerStatus(pair, 'waiting', 'broker_unavailable', 'Could not verify whether a trade is already open.', mode);
-    return;
-  }
-  if (hasPairTrade(open.trades)) {
-    await recoverOpenTrade();
-    return;
-  }
-
   updateWorkerStatus(pair, 'scanning', 'loading_zones', `Scanning ${ZONE_TIMEFRAME} Goldilocks zones and ${CONFIRMATION_TIMEFRAME} confirmation candles.`, mode);
   const snapshot = await loadZoneHistory();
+  for(const zone of snapshot.history.zones){
+    let lifecycle=getZoneLifecycle(pair,zone.id)??{zoneId:zone.id,pair,state:'DISCOVERED',updatedAt:Date.now()} as ZoneLifecycleRecord;
+    lifecycle=zone.state==='expired'
+      ?transitionZoneLifecycle(lifecycle,{type:'expire',reason:'Zone age exceeded the executable lifecycle limit.'})
+      :zone.state==='invalidated'
+        ?transitionZoneLifecycle(lifecycle,{type:'invalidate',reason:'Completed price invalidated the zone.'})
+        :transitionZoneLifecycle(lifecycle,{type:'departure_confirmed'});
+    persistZoneLifecycle(lifecycle);
+  }
   const confirmationRaw = await loadConfirmationCandles();
   const confirmationCandles = toStrategyCandles(confirmationRaw);
   const confirmations = findFreshGoldilocksConfirmations(snapshot.history, confirmationCandles, CONFIRMATION_SECONDS,Date.now(),snapshot.candles,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME]);
   if (!confirmations.length) {
+    if(!usesSharedMarketDataHub)schedulePriceStreamIdleStop(pair,mode);
+    else await setMarketDataInterest(pair,false,marketDataOwner);
     updateWorkerStatus(pair, 'waiting', 'waiting_for_confirmation', `No fresh ${CONFIRMATION_TIMEFRAME} close-through confirmation is ready.`, mode);
     return;
   }
+  const open = await openNow(pair, mode,shutdownController.signal);
+  if(!open){updateWorkerStatus(pair,'waiting','broker_unavailable','Could not verify whether a trade is already open.',mode);return}
+  if(hasPairTrade(open.trades)){await recoverOpenTrade();return}
 
   for (const confirmation of confirmations) {
+    if(usesSharedMarketDataHub)await setMarketDataInterest(pair,true,marketDataOwner);
+    if(!usesSharedMarketDataHub){
+      cancelPriceStreamIdleStop(pair,mode);
+      if(!isStreamInitialized(pair,mode))startPriceStream(pair,mode);
+      if(!await waitForFreshPrice(pair,mode,5_000)){updateWorkerStatus(pair,'waiting','stream_unavailable','Fresh pricing stream is unavailable near entry.',mode);return}
+    }
     const key = `${confirmation.zone.id}:${confirmation.confirmationCandle.time}`;
+    let lifecycle=getZoneLifecycle(pair,confirmation.zone.id)??{zoneId:confirmation.zone.id,pair,state:'ACTIVE_FAR',updatedAt:Date.now()} as ZoneLifecycleRecord;
+    if(['EXECUTED','INVALIDATED','EXPIRED'].includes(lifecycle.state)||lifecycle.touchKey===key)continue;
+    lifecycle=transitionZoneLifecycle(lifecycle,{type:'approach'});lifecycle=transitionZoneLifecycle(lifecycle,{type:'arm'});
+    lifecycle=transitionZoneLifecycle(lifecycle,{type:'touch',touchKey:key});persistZoneLifecycle(lifecycle);
     if (attemptedConfirmations.has(key)) continue;
     const departureQuality=validateGoldilocksDepartureQuality(confirmation.zone);
     if(!departureQuality.allowed){
@@ -765,7 +775,7 @@ const scan = async () => {
 
     // Recheck all volatile guards directly before broker submission.
     const finalBlock = await safetyBlockReason();
-    const finalOpen = await openNow(pair, mode);
+    const finalOpen = await openNow(pair, mode,shutdownController.signal);
     if (finalBlock || !finalOpen || hasPairTrade(finalOpen.trades)) {
       updateWorkerStatus(pair, 'waiting', 'final_safety_rejected', finalBlock ?? 'A trade opened before submission.', mode);
       return;
@@ -794,6 +804,7 @@ const scan = async () => {
       updateWorkerStatus(pair, 'waiting', 'order_rejected', 'The final execution guard or broker rejected the order.', mode);
       return;
     }
+    persistZoneLifecycle(transitionZoneLifecycle(lifecycle,{type:'execute'}));
     const journal = journalFor(direction, tradeInfo.spread, scoringContext.zone, confirmation.confirmationCandle.time, score, riskDecision, approachPressure,scoringContext.zoneCorridors);
     await monitorTrade({
       id: tradeInfo.tradeId,
@@ -810,24 +821,12 @@ const scan = async () => {
 
 const run = async () => {
   if (!pair) throw new Error('No pair was provided to the Goldilocks worker.');
-  if (!usesSharedMarketDataHub) startPriceStream(pair, mode);
-  const initialQuote = usesSharedMarketDataHub
-    ? await fetchPriceOnce(pair, mode)
-    : await waitForFreshPrice(pair, mode, 5_000);
-  logMessage(
-    initialQuote
-      ? `MARKET DATA READY | ${pair} | OANDA stream snapshot received at ${initialQuote.oandaTime}.`
-      : `MARKET DATA FALLBACK | ${pair} | Stream snapshot was not ready; REST pricing remains available.`,
-    undefined,
-    { pair, level: initialQuote ? 'info' : 'warn', fileName: 'goldilocksWorker', step: 'market_data_ready' },
-  );
   updateWorkerStatus(pair, 'starting', 'goldilocks_starting', `Goldilocks demo worker starting: ${TREND_TIMEFRAME} trend → ${ZONE_TIMEFRAME} zones → ${CONFIRMATION_TIMEFRAME} departure/touch/confirmation → ${GOLDILOCKS_DEMO_TIMEFRAMES.execution} trade management · dynamic ${getRiskProfile()} risk · minimum score ${minimumScore} · config ${appliedStrategy.sourceRunUid}.`, mode);
   await recoverOpenTrade();
   while (!killed) {
     try {
       await scan();
     } catch (error) {
-      logMessage(`Goldilocks scan error for ${pair}: ${(error as Error).message}`, undefined, { level: 'error', pair, fileName: 'goldilocksWorker', step: 'strategy_error' });
       updateWorkerStatus(pair, 'error', 'strategy_error', (error as Error).message, mode);
     }
     if (!killed) await wait(millisecondsUntilNextConfirmationClose());

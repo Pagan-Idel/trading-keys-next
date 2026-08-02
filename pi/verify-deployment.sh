@@ -21,15 +21,27 @@ ENV_FILE="${TRADING_KEYS_DEPLOY_ENV_FILE:-/etc/trading-keys/automation.env}"
 if [[ -z "$CONTROL_TOKEN" && -r "$ENV_FILE" ]]; then
   CONTROL_TOKEN="$(sed -n 's/^PULSE_CONTROL_TOKEN=//p' "$ENV_FILE" | tail -n 1)"
 fi
-if [[ -n "$CONTROL_TOKEN" ]]; then
-  STATUS="$(curl --fail --silent --show-error --config - "$VERIFY_URL" <<<"header = \"Authorization: Bearer $CONTROL_TOKEN\"")"
-else
-  STATUS="$(curl --fail --silent --show-error "$VERIFY_URL")"
-fi
+fetch_status(){
+  if [[ -n "$CONTROL_TOKEN" ]]; then
+    curl --fail --silent --config - "$VERIFY_URL" <<<"header = \"Authorization: Bearer $CONTROL_TOKEN\""
+  else
+    curl --fail --silent "$VERIFY_URL"
+  fi
+}
+STATUS=""
+for _attempt in {1..30}; do
+  if STATUS="$(fetch_status 2>/dev/null)" && [[ -n "$STATUS" ]]; then break; fi
+  sleep 1
+done
+[[ -n "$STATUS" ]] || { echo "Deployment verification timed out waiting for $VERIFY_URL"; exit 1; }
 DESIRED_STATE="$(node -e 'const value=JSON.parse(process.argv[1]);const state=value?.runtime?.desiredState;if(state!=="running"&&state!=="stopped")process.exit(1);process.stdout.write(state)' "$STATUS")"
 if [[ "$DESIRED_STATE" == running ]]; then
-  pgrep -af 'runner/startRunner' >/dev/null
-  pgrep -af 'goldilocksWorker' >/dev/null
+  READY=false
+  for _attempt in {1..30}; do
+    if pgrep -af 'runner/startRunner' >/dev/null && pgrep -af 'goldilocksWorker' >/dev/null; then READY=true; break; fi
+    sleep 1
+  done
+  [[ "$READY" == true ]] || { echo "Deployment verification timed out waiting for demo workers."; exit 1; }
 fi
 if pgrep -af 'startAutoResearch|autoResearchWorker|backtestWorker' >/dev/null; then
   echo "Forbidden research/backtest process detected."

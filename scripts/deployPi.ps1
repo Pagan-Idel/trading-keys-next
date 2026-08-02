@@ -32,12 +32,12 @@ if ($localCommit -ne $remoteCommit) {
 
 $mode = if ($Candidate) { 'validated candidate (no restart)' } else { 'validated promotion' }
 Write-Host "Deploying $($localCommit.Substring(0, 12)) to $HostName as $mode..."
-$remoteCommand = if ($Candidate) {
-  'sudo /srv/trading-keys/source/pi/deploy.sh'
-} else {
-  'sudo /srv/trading-keys/source/pi/deploy.sh --promote'
+$remoteArguments = @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', $HostName, 'sudo bash -s --')
+if (-not $Candidate) { $remoteArguments += '--promote' }
+Get-Content -Raw -LiteralPath (Join-Path $repository 'pi\deploy.sh') | & ssh @remoteArguments
+if ($LASTEXITCODE -ne 0) {
+  throw "Pi deployment failed with exit code $LASTEXITCODE."
 }
-Invoke-Checked ssh @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', $HostName, $remoteCommand)
 
 if ($Candidate) {
   Write-Host 'Candidate validated. Re-run without --candidate to promote it.'

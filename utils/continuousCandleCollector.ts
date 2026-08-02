@@ -1,19 +1,22 @@
 import type { Candle } from './swingLabeler.ts';
-import { clearCandleSyncGapsThrough, getArchivedCandleBounds, readArchivedCandles, recordCandleSyncGap, upsertArchivedCandles } from './candleArchive.ts';
+import { clearCandleSyncGapsThrough, getArchivedCandleBounds, getCandleNoPrintIntervals, readArchivedCandles, recordCandleNoPrintInterval, recordCandleSyncGap, upsertArchivedCandles, type CandleNoPrintInterval } from './candleArchive.ts';
 import { fetchCandleHistory } from './oanda/api/fetchCandleHistory.ts';
 import { fetchCandles, fetchCompletedCandlesSince } from './oanda/api/fetchCandles.ts';
 import { tfToSeconds } from './shared.ts';
 
 export type CandleCollectorKey={pair:string;timeframe:string;mode:'live'|'demo'};
-export type CandleSyncResult={key:CandleCollectorKey;requested:boolean;appended:number;gapDetected:boolean;gapRepaired:boolean;latestTime?:string};
+export type CandleSyncResult={key:CandleCollectorKey;requested:boolean;appended:number;gapDetected:boolean;gapRepaired:boolean;noPrintRecorded?:{startTime:number;endTime:number};latestTime?:string};
+export type CandleRepairResult={candles:Candle[];coverageConfirmed:boolean};
 export type CandleCollectorDependencies={
   bounds:(key:CandleCollectorKey)=>{startTime:number|null;endTime:number|null;candleCount:number};
   bootstrap:(key:CandleCollectorKey,lookbackDays:number,maxCandles:number,signal?:AbortSignal)=>Promise<Candle[]>;
   incremental:(key:CandleCollectorKey,lastTime:string,count:number,signal?:AbortSignal)=>Promise<Candle[]>;
-  repair:(key:CandleCollectorKey,from:string,to:string,signal?:AbortSignal)=>Promise<Candle[]>;
+  repair:(key:CandleCollectorKey,from:string,to:string,signal?:AbortSignal)=>Promise<CandleRepairResult>;
   append:(key:CandleCollectorKey,candles:Candle[])=>number;
   recordGap:(key:CandleCollectorKey,start:number,end:number)=>unknown;clearGaps:(key:CandleCollectorKey,end:number)=>unknown;
   read:(key:CandleCollectorKey,start:number,end:number)=>Candle[];
+  noPrints:(key:CandleCollectorKey)=>CandleNoPrintInterval[];
+  recordNoPrint:(key:CandleCollectorKey,start:number,end:number)=>unknown;
   now:()=>number;
 };
 const inFlight=new Map<string,Promise<CandleSyncResult>>();
@@ -22,10 +25,11 @@ const defaultDependencies:CandleCollectorDependencies={
   bounds:getArchivedCandleBounds,
   bootstrap:(key,lookbackDays,maxCandles,signal)=>fetchCandleHistory(key.pair,key.timeframe,{lookbackDays,mode:key.mode,maxCandles,backfillPages:1,signal}),
   incremental:(key,lastTime,count,signal)=>fetchCompletedCandlesSince(key.pair,key.timeframe,lastTime,key.mode,count,signal,false),
-  repair:(key,from,to,signal)=>fetchCandles(key.pair,key.timeframe,5_000,from,to,key.mode,signal,false),
+  repair:async(key,from,to,signal)=>({candles:await fetchCandles(key.pair,key.timeframe,5_000,from,to,key.mode,signal,false),coverageConfirmed:true}),
   append:upsertArchivedCandles,
   recordGap:recordCandleSyncGap,clearGaps:clearCandleSyncGapsThrough,
   read:readArchivedCandles,now:Date.now,
+  noPrints:getCandleNoPrintIntervals,recordNoPrint:recordCandleNoPrintInterval,
 };
 
 export class ContinuousCandleCollector{
@@ -50,11 +54,19 @@ export class ContinuousCandleCollector{
     const complete=returned.filter(candle=>Date.parse(candle.time)+interval*1000<=this.dependencies.now());
     const times=complete.map(candle=>Math.floor(Date.parse(candle.time)/1000)).filter(Number.isFinite).sort((a,b)=>a-b);
     let combined=complete;
-    let gap=findUnexpectedGap(before.endTime,times,interval);
+    let noPrints=this.dependencies.noPrints(this.key);
+    let gap=findUnexpectedGap(before.endTime,times,interval,noPrints);
+    let noPrintRecorded:{startTime:number;endTime:number}|undefined;
     if(gap){
       const repair=await this.dependencies.repair(this.key,new Date(before.endTime*1000).toISOString(),new Date(gap.end*1000).toISOString(),signal);
-      const merged=new Map([...repair,...complete].map(item=>[item.time,item]));combined=[...merged.values()].sort((a,b)=>Date.parse(a.time)-Date.parse(b.time));
-      gap=findUnexpectedGap(before.endTime,combined.map(item=>Math.floor(Date.parse(item.time)/1000)),interval);
+      const merged=new Map([...repair.candles,...complete].map(item=>[item.time,item]));combined=[...merged.values()].sort((a,b)=>Date.parse(a.time)-Date.parse(b.time));
+      const combinedTimes=combined.map(item=>Math.floor(Date.parse(item.time)/1000));
+      const repairedGap=findUnexpectedGap(before.endTime,combinedTimes,interval,noPrints);
+      if(repair.coverageConfirmed&&repairedGap?.start===gap.start&&repairedGap.end===gap.end&&combinedTimes.includes(gap.end)){
+        this.dependencies.recordNoPrint(this.key,gap.start,gap.end);noPrintRecorded={startTime:gap.start,endTime:gap.end};
+        noPrints=[...noPrints,{...noPrintRecorded,source:'OANDA_NO_PRINT',confirmedAt:new Date().toISOString()}];
+      }
+      gap=findUnexpectedGap(before.endTime,combinedTimes,interval,noPrints);
     }
     const gapDetected=Boolean(gap);
     if(gap)this.dependencies.recordGap(this.key,gap.start,gap.end);
@@ -62,7 +74,7 @@ export class ContinuousCandleCollector{
     const after=this.dependencies.bounds(this.key);
     const appended=Math.max(0,after.candleCount-before.candleCount);
     const gapRepaired=!gapDetected&&after.endTime!==null&&after.endTime>=expectedNext;
-    return {key:this.key,requested:true,appended,gapDetected,gapRepaired,latestTime:after.endTime===null?lastTime:new Date(after.endTime*1000).toISOString()};
+    return {key:this.key,requested:true,appended,gapDetected,gapRepaired,noPrintRecorded,latestTime:after.endTime===null?lastTime:new Date(after.endTime*1000).toISOString()};
   }
 }
 
@@ -70,10 +82,11 @@ const nyParts=(epochSeconds:number)=>Object.fromEntries(new Intl.DateTimeFormat(
   .formatToParts(new Date(epochSeconds*1000)).filter(part=>part.type==='weekday'||part.type==='hour').map(part=>[part.type,part.value]));
 export const isScheduledForexClosure=(epochSeconds:number)=>{const parts=nyParts(epochSeconds),hour=Number(parts.hour);
   return parts.weekday==='Sat'||(parts.weekday==='Fri'&&hour>=17)||(parts.weekday==='Sun'&&hour<17)};
-export const findUnexpectedGap=(last:number,times:number[],interval:number)=>{
+export const findUnexpectedGap=(last:number,times:number[],interval:number,noPrints:Array<Pick<CandleNoPrintInterval,'startTime'|'endTime'>>=[])=>{
   let previous=last;
   for(const time of [...times].sort((a,b)=>a-b)){
-    for(let expected=previous+interval;expected<time;expected+=interval)if(!isScheduledForexClosure(expected))return {start:expected,end:time};
+    for(let expected=previous+interval;expected<time;expected+=interval)if(!isScheduledForexClosure(expected)&&
+      !noPrints.some(item=>expected>=item.startTime&&expected<item.endTime))return {start:expected,end:time};
     previous=time;
   }
   return null;

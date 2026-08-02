@@ -109,6 +109,17 @@ data for optimization or model training.
 
 ## Raspberry Pi deployment
 
+From a clean, fully pushed `main` branch, deploy and verify the Pi with one command:
+
+```powershell
+npm run deploy:pi
+```
+
+To build and validate a candidate without switching the active release or restarting
+demo automation, run `npm run deploy:pi:candidate`. The promotion command performs an
+atomic release switch, authenticated health verification, and automatic rollback if
+the new runtime does not recover safely.
+
 Use a 64-bit Raspberry Pi OS, Node.js 20+, and production builds. Run the web server
 and automation as separate `systemd` services with automatic restart and separate
 logs. Start with `run:demo`, bind the dashboard to the trusted LAN only, protect

@@ -20,6 +20,8 @@ const run=async()=>{
     try{
       const results=await Promise.all(collectors.map(collector=>collector.synchronize(controller.signal)));
       const gaps=results.filter(result=>result.gapDetected);
+      for(const result of results)if(result.noPrintRecorded)logMessage(`CANDLE NO-PRINT | ${pair} | ${result.key.timeframe} | broker-confirmed interval retained without synthetic OHLC.`,result.noPrintRecorded,
+        {pair,level:'warn',fileName:'candleCollector',step:'candle_no_print_recorded'});
       if(gaps.length)logMessage(`CANDLE GAP | ${pair} | ${gaps.map(item=>item.key.timeframe).join(', ')} unresolved.`,{timeframes:gaps.map(item=>item.key.timeframe)},
         {pair,level:'error',fileName:'candleCollector',step:'candle_gap_unresolved'});
       if(Date.now()-lastRetentionAt>=24*60*60*1000){lastRetentionAt=Date.now();const runs=timeframes.map(timeframe=>pruneArchivedCandles({pair,timeframe,mode}));

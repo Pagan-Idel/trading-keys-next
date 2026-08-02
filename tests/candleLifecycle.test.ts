@@ -13,17 +13,19 @@ let fixtureId=0;
 const fixture=(initial:number[]=[],returned:number[]=[])=>{
   const key:CandleCollectorKey={pair:`EUR/USD-${++fixtureId}`,timeframe:'M5',mode:'demo'};
   const stored=new Map(initial.map(time=>[time,candle(time)]));let bootstrapCalls=0,incrementalCalls=0;
+  const noPrints:Array<{startTime:number;endTime:number;source:string;confirmedAt:string}>=[];
   let release:(()=>void)|undefined;
   const dependencies:CandleCollectorDependencies={
     bounds:()=>{const times=[...stored.keys()].sort((a,b)=>a-b);return {startTime:times[0]??null,endTime:times.at(-1)??null,candleCount:times.length}},
     bootstrap:async()=>{bootstrapCalls++;for(const time of returned)stored.set(time,candle(time));return [...stored.values()]},
     incremental:async()=>{incrementalCalls++;if(release)await new Promise<void>(resolve=>{const previous=release;release=()=>{previous?.();resolve()}});return returned.map(candle)},
-    repair:async()=>[],
+    repair:async()=>({candles:[],coverageConfirmed:false}),
     append:(_key,candles)=>{let writes=0;for(const item of candles){const time=Math.floor(Date.parse(item.time)/1000);if(!stored.has(time))writes++;stored.set(time,item)}return writes},
     recordGap:()=>undefined,clearGaps:()=>undefined,
     read:()=>[...stored.values()],now:()=>2_000_000*1000,
+    noPrints:()=>noPrints,recordNoPrint:(_key,startTime,endTime)=>{noPrints.push({startTime,endTime,source:'OANDA_NO_PRINT',confirmedAt:new Date().toISOString()})},
   };
-  return {key,stored,dependencies,get bootstrapCalls(){return bootstrapCalls},get incrementalCalls(){return incrementalCalls},block(){release=()=>{}},unblock(){release?.();release=undefined}};
+  return {key,stored,noPrints,dependencies,get bootstrapCalls(){return bootstrapCalls},get incrementalCalls(){return incrementalCalls},block(){release=()=>{}},unblock(){release?.();release=undefined}};
 };
 
 test('startup backfills only an empty archive',async()=>{const f=fixture([], [1000]);await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).bootstrap();assert.equal(f.bootstrapCalls,1)});
@@ -31,7 +33,10 @@ test('startup with local candles avoids full-history bootstrap',async()=>{const 
 test('normal close appends one completed candle',async()=>{const f=fixture([1000],[1300]);const result=await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize();assert.equal(result.appended,1)});
 test('missed intervals append all returned missing candles',async()=>{const f=fixture([1000],[1300,1600,1900]);const result=await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize();assert.equal(result.appended,3)});
 test('an unresolved leading gap is reported without advancing storage',async()=>{const f=fixture([1000],[1600]);const result=await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize();assert.equal(result.gapDetected,true);assert.equal(f.dependencies.bounds(f.key).endTime,1000)});
-test('targeted repair atomically promotes repaired and newer candles',async()=>{const f=fixture([1000],[1600]);f.dependencies.repair=async()=>[candle(1300)];const result=await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize();assert.equal(result.gapDetected,false);assert.deepEqual([...f.stored.keys()].sort(),[1000,1300,1600])});
+test('targeted repair atomically promotes repaired and newer candles',async()=>{const f=fixture([1000],[1600]);f.dependencies.repair=async()=>({candles:[candle(1300)],coverageConfirmed:true});const result=await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize();assert.equal(result.gapDetected,false);assert.deepEqual([...f.stored.keys()].sort(),[1000,1300,1600])});
+test('broker-confirmed no-print interval is persisted and newer real candles append',async()=>{const f=fixture([1000],[1900]);f.dependencies.repair=async()=>({candles:[],coverageConfirmed:true});const result=await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize();assert.deepEqual(result.noPrintRecorded,{startTime:1300,endTime:1900});assert.equal(result.gapDetected,false);assert.deepEqual([...f.stored.keys()].sort(),[1000,1900]);assert.deepEqual(f.noPrints.map(({startTime,endTime})=>({startTime,endTime})),[{startTime:1300,endTime:1900}])});
+test('persisted no-print interval prevents repeated targeted repair requests',async()=>{const f=fixture([1000],[1900]);f.noPrints.push({startTime:1300,endTime:1900,source:'OANDA_NO_PRINT',confirmedAt:new Date().toISOString()});let repairs=0;f.dependencies.repair=async()=>{repairs++;return {candles:[],coverageConfirmed:true}};const result=await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize();assert.equal(result.gapDetected,false);assert.equal(result.appended,1);assert.equal(repairs,0)});
+test('unconfirmed omitted repair response remains fail-closed',async()=>{const f=fixture([1000],[1900]);const result=await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize();assert.equal(result.gapDetected,true);assert.equal(result.noPrintRecorded,undefined);assert.equal(f.dependencies.bounds(f.key).endTime,1000)});
 test('duplicate responses do not duplicate stored candles',async()=>{const f=fixture([1000,1300],[1300]);const result=await new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies).synchronize();assert.equal(result.appended,0);assert.equal(f.stored.size,2)});
 test('failed request leaves the last timestamp unchanged and next success repairs it',async()=>{const f=fixture([1000],[1300]);let fail=true;const incremental=f.dependencies.incremental;f.dependencies.incremental=async(...args)=>{if(fail){fail=false;throw new Error('offline')}return incremental(...args)};const collector=new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies);await assert.rejects(collector.synchronize());assert.equal(f.dependencies.bounds(f.key).endTime,1000);assert.equal((await collector.synchronize()).appended,1)});
 test('one operation per pair/timeframe is in flight',async()=>{const f=fixture([1000],[1300]);let resolve!:()=>void;f.dependencies.incremental=async()=>{await new Promise<void>(r=>{resolve=r});return [candle(1300)]};const collector=new ContinuousCandleCollector(f.key,{lookbackDays:730,maxCandles:5000},f.dependencies);const first=collector.synchronize(),second=collector.synchronize();assert.equal(first,second);assert.equal(activeCandleSynchronizationCount(),1);resolve();await first});

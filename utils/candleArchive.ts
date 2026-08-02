@@ -63,6 +63,11 @@ const database=()=>{
       attempts INTEGER NOT NULL DEFAULT 1,last_error TEXT,updated_at TEXT NOT NULL,
       PRIMARY KEY(mode,pair,timeframe,start_time)
     ) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS candle_no_print_intervals (
+      mode TEXT NOT NULL,pair TEXT NOT NULL,timeframe TEXT NOT NULL,start_time INTEGER NOT NULL,end_time INTEGER NOT NULL,
+      source TEXT NOT NULL,confirmed_at TEXT NOT NULL,
+      PRIMARY KEY(mode,pair,timeframe,start_time)
+    ) WITHOUT ROWID;
   `);
   // The WITHOUT ROWID primary key already covers mode/pair/timeframe/time lookups.
   // Remove the older duplicate index to keep large M1 archives smaller and writes faster.
@@ -179,6 +184,15 @@ export const clearCandleSyncGapsThrough=(key:CandleArchiveKey,endTime:number)=>d
   WHERE mode=@mode AND pair=@pair AND timeframe=@timeframe AND end_time<=@endTime`).run({...normalized(key),endTime}).changes;
 export const getCandleSyncGaps=(key:CandleArchiveKey)=>database().prepare(`SELECT start_time AS startTime,end_time AS endTime,attempts,last_error AS lastError,
   updated_at AS updatedAt FROM candle_sync_gaps WHERE mode=@mode AND pair=@pair AND timeframe=@timeframe ORDER BY start_time`).all(normalized(key));
+export type CandleNoPrintInterval={startTime:number;endTime:number;source:string;confirmedAt:string};
+export const getCandleNoPrintIntervals=(key:CandleArchiveKey)=>database().prepare(`SELECT start_time AS startTime,end_time AS endTime,source,
+  confirmed_at AS confirmedAt FROM candle_no_print_intervals WHERE mode=@mode AND pair=@pair AND timeframe=@timeframe ORDER BY start_time`)
+  .all(normalized(key)) as CandleNoPrintInterval[];
+export const recordCandleNoPrintInterval=(key:CandleArchiveKey,startTime:number,endTime:number,source='OANDA_NO_PRINT')=>database().prepare(`
+  INSERT INTO candle_no_print_intervals(mode,pair,timeframe,start_time,end_time,source,confirmed_at)
+  VALUES(@mode,@pair,@timeframe,@startTime,@endTime,@source,@confirmedAt)
+  ON CONFLICT(mode,pair,timeframe,start_time) DO UPDATE SET end_time=excluded.end_time,source=excluded.source,confirmed_at=excluded.confirmed_at`)
+  .run({...normalized(key),startTime,endTime,source,confirmedAt:new Date().toISOString()});
 
 // Floors cover each bounded live working set across weekends plus warm-up,
 // gap-recovery, and operational margin. H4/D remain research-conservative.

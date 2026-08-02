@@ -47,6 +47,8 @@
     "test:deployment:docker": "docker run --rm -v \"%cd%:/repo:ro\" alpine:3.20 sh -lc \"apk add --no-cache bash shellcheck git shadow util-linux nodejs >/dev/null && bash -n /repo/pi/deploy.sh /repo/pi/verify-deployment.sh /repo/tests/deploymentScripts.test.sh && shellcheck /repo/pi/deploy.sh /repo/pi/verify-deployment.sh /repo/tests/deploymentScripts.test.sh && useradd -m tradingkeys && bash /repo/tests/deploymentScripts.test.sh /repo\"",
     "build:pi-runtime": "node scripts/buildPiRuntime.mjs",
     "benchmark:pi-runtime": "npm run build:pi-runtime && node scripts/benchmarkPiRuntime.mjs",
+    "deploy:pi": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deployPi.ps1",
+    "deploy:pi:candidate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deployPi.ps1 -Candidate",
     "research:auto": "tsx runner/startAutoResearch.ts",
     "start:prod": "npm run run:demo"
   },

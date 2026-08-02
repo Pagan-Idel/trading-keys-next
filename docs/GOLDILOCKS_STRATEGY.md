@@ -763,7 +763,12 @@ independent from session/news-eligible Goldilocks trading workers. Each collecto
 the required H1, M15, and M5 pair/timeframe archives. Startup uses local bounds and bootstraps only an
 empty archive. Later cycles request completed candles strictly after the last persisted
 timestamp; a failed request leaves that timestamp unchanged, and an unexpected weekday
-gap blocks strategy decisions until the missing sequence is returned and committed.
+gap blocks strategy decisions until the missing sequence is returned and committed. If a
+successful targeted OANDA repair covers the missing range, returns a later completed
+candle, and still omits the intervening timestamps, the collector persists that bounded
+range as an `OANDA_NO_PRINT` interval. It then commits the real candles without inventing
+OHLC values and excludes that exact interval from later repair requests. Failed,
+unconfirmed, or unbounded gaps remain fail-closed.
 Zone state, open trades, and pricing-stream state never stop this archive synchronization.
 
 Normal scans read their bounded working sets from SQLite and do not invoke independent

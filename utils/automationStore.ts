@@ -75,7 +75,11 @@ const DATABASE_PATH = path.join(DATA_DIRECTORY, 'automation.sqlite');
 
 let database: Database.Database | null = null;
 let lastRetentionRun = 0;
-const EVENT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+const configuredEventRetentionDays = Number(process.env.AUTOMATION_EVENT_RETENTION_DAYS ?? 3);
+export const AUTOMATION_EVENT_RETENTION_DAYS = Number.isFinite(configuredEventRetentionDays)
+  ? Math.min(30, Math.max(1, Math.floor(configuredEventRetentionDays)))
+  : 3;
+const EVENT_RETENTION_MS = AUTOMATION_EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const WORKER_STATUS_HEARTBEAT_MS = 5 * 60 * 1000;
 
 const runEventRetention = (db: Database.Database, force = false): void => {
@@ -524,5 +528,6 @@ export const getAutomationDashboard = (eventLimit = 120) => {
   const riskConfig = { selected: riskProfile, profiles: RISK_PROFILES };
 
   return { events, workers, trades, activeTrades, summary, pairPerformance, riskConfig,
+    retention:{eventDays:AUTOMATION_EVENT_RETENTION_DAYS},
     appliedStrategy:getAppliedAutomationStrategy() };
 };

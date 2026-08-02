@@ -65,20 +65,27 @@ button{padding:10px 14px;border-radius:10px;border:1px solid #347451;background:
 button.stop{border-color:#78404a;background:#35171e;color:#ff9aa5}pre{white-space:pre-wrap;color:#a9bbb2;max-height:350px;overflow:auto}</style></head>
 <body><main><section class="hero"><h1>Automation Pulse &middot; Raspberry Pi</h1>
 <div class="muted">Demo-safe local control. Live mode cannot be started here.</div>
-<p><button onclick="act('start')">Start demo</button><button class="stop" onclick="act('stop')">Stop</button></p></section>
+<p><button id="demoButton" onclick="toggleDemo()">Checking demo...</button><button disabled title="Live trading remains safety-locked">Live &middot; not ready</button></p></section>
 <section class="card"><div class="grid"><div class="metric">Runtime<b id="runtime">&mdash;</b></div>
 <div class="metric">Workers<b id="workers">&mdash;</b></div><div class="metric">Open trades<b id="openTrades">&mdash;</b></div>
+<div class="metric">Net realized P/L<b id="netPL">&mdash;</b></div><div class="metric">Wins / losses<b id="record">&mdash;</b></div>
 <div class="metric">Applied config<b id="config">&mdash;</b></div></div></section>
+<section class="card"><b>Trade history</b><pre id="trades">Loading...</pre></section>
 <section class="card"><b>Recent events</b><pre id="events">Loading...</pre></section></main><script>
 let token=localStorage.pulseToken||prompt('Automation Pulse token (blank for localhost)')||'';localStorage.pulseToken=token;
 const headers=()=>token?{Authorization:'Bearer '+token}:{};
+let running=false;
 async function load(){let r=await fetch('/api/status',{headers:headers()});if(!r.ok){document.getElementById('events').textContent='Unauthorized or unavailable';return}
-let d=await r.json();document.getElementById('runtime').textContent=d.runtime.running?'DEMO ON':'STOPPED';
+let d=await r.json();running=d.runtime.running;document.getElementById('runtime').textContent=running?'DEMO RUNNING':'DEMO STOPPED';
+let button=document.getElementById('demoButton');button.textContent=running?'Stop demo':'Start demo';button.className=running?'stop':'';
 document.getElementById('workers').textContent=d.dashboard.workers.length;
 document.getElementById('openTrades').textContent=d.dashboard.activeTrades.length;
+document.getElementById('netPL').textContent=Number(d.dashboard.summary.realizedPL||0).toFixed(2);
+document.getElementById('record').textContent=d.dashboard.summary.wins+' / '+d.dashboard.summary.losses;
 document.getElementById('config').textContent=d.dashboard.appliedStrategy.sourceRunUid;
+document.getElementById('trades').textContent=d.dashboard.trades.length?d.dashboard.trades.map(t=>t.closedAt+' '+t.pair+' '+t.outcome+' '+Number(t.realizedPL||0).toFixed(2)).join('\\n'):'No completed trades yet.';
 document.getElementById('events').textContent=d.dashboard.events.map(e=>e.createdAt+' '+(e.pair||'')+' '+e.message).join('\\n')}
-async function act(action){await fetch('/api/'+action,{method:'POST',headers:headers()});await load()}load();setInterval(load,5000)</script></body></html>`;
+async function act(action){await fetch('/api/'+action,{method:'POST',headers:headers()});await load()}async function toggleDemo(){await act(running?'stop':'start')}load();setInterval(load,5000)</script></body></html>`;
 
 const server=http.createServer(async(request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);

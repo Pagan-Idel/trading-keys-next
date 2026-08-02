@@ -32,9 +32,11 @@ if ($localCommit -ne $remoteCommit) {
 
 $mode = if ($Candidate) { 'validated candidate (no restart)' } else { 'validated promotion' }
 Write-Host "Deploying $($localCommit.Substring(0, 12)) to $HostName as $mode..."
-$remoteArguments = @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', $HostName, 'sudo bash -s --')
-if (-not $Candidate) { $remoteArguments += '--promote' }
-Get-Content -Raw -LiteralPath (Join-Path $repository 'pi\deploy.sh') | & ssh @remoteArguments
+$deploySource = (Get-Content -Raw -LiteralPath (Join-Path $repository 'pi\deploy.sh')).Replace("`r`n", "`n")
+$deployBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($deploySource))
+$promotionArgument = if ($Candidate) { '' } else { ' --promote' }
+$remoteCommand = "echo $deployBase64 | base64 -d | sudo bash -s --$promotionArgument"
+& ssh -o BatchMode=yes -o ConnectTimeout=10 $HostName $remoteCommand
 if ($LASTEXITCODE -ne 0) {
   throw "Pi deployment failed with exit code $LASTEXITCODE."
 }

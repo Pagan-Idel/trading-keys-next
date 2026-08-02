@@ -73,7 +73,7 @@ mv -Tf "$UNIT_TARGET.next" "$UNIT_TARGET"
 "$SYSTEMCTL" daemon-reload
 "$SYSTEMCTL" enable "$SERVICE"
 "$SYSTEMCTL" restart "$SERVICE"
-if ! "$RELEASE/pi/verify-deployment.sh" "$COMMIT"; then
+if ! bash "$RELEASE/pi/verify-deployment.sh" "$COMMIT"; then
   echo "Verification failed; rolling back to $PREVIOUS"
   if [[ -f "$UNIT_BACKUP" ]]; then
     cp -p "$UNIT_BACKUP" "$UNIT_TARGET.rollback"
@@ -91,7 +91,7 @@ if ! "$RELEASE/pi/verify-deployment.sh" "$COMMIT"; then
   ln -s "$PREVIOUS" "$ACTIVE.rollback"
   mv -Tf "$ACTIVE.rollback" "$ACTIVE"
   "$SYSTEMCTL" restart "$SERVICE"
-  "$RELEASE/pi/verify-deployment.sh" "$(cat "$PREVIOUS/DEPLOYED_COMMIT")"
+  bash "$RELEASE/pi/verify-deployment.sh" "$(cat "$PREVIOUS/DEPLOYED_COMMIT")"
   exit 1
 fi
 echo "Promoted $RELEASE_APP"

@@ -38,7 +38,7 @@ DESIRED_STATE="$(node -e 'const value=JSON.parse(process.argv[1]);const state=va
 if [[ "$DESIRED_STATE" == running ]]; then
   READY=false
   for _attempt in {1..30}; do
-    if pgrep -af 'runner/startRunner' >/dev/null && pgrep -af 'goldilocksWorker' >/dev/null; then READY=true; break; fi
+    if pgrep -af 'startRunner\.mjs|runner/startRunner' >/dev/null && pgrep -af 'goldilocksWorker\.mjs' >/dev/null; then READY=true; break; fi
     sleep 1
   done
   [[ "$READY" == true ]] || { echo "Deployment verification timed out waiting for demo workers."; exit 1; }

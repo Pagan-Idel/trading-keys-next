@@ -18,5 +18,7 @@ data/service-logs/
 tmp/
 dev-server.*.log
 data/dev-server*.log
+data/local-dashboard*.log
+data/pi-tunnel*.log
 tsconfig.tsbuildinfo
 /artifacts/

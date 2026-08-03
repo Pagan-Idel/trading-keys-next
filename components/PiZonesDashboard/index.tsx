@@ -55,14 +55,25 @@ export default function PiZonesDashboard(){
   const setup=snapshot?.setups?.at(-1);
   const scenario=useMemo(()=>snapshot?{candles,timeframe,leg,zones:snapshot.zones,tradeSetup,tradeSetups}:undefined,[candles,leg,snapshot,timeframe,tradeSetup,tradeSetups]);
   return <section>
-    <div style={{display:'flex',gap:12,alignItems:'center',marginBottom:16,flexWrap:'wrap'}}>
-      <select aria-label="Pi automation pair" value={pair} onChange={e=>setPair(e.target.value)}>{forexPairs.map(p=><option key={p}>{p}</option>)}</select>
-      <span style={{color:error?'#ff8d98':'#69e69a'}}>{error?'Pi connection unavailable':'Connected to Pi'}</span>
+    <div style={{display:'flex',gap:10,alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',padding:'10px 12px',border:'1px solid #29313d',borderRadius:12,background:'linear-gradient(135deg,#111820,#0d1117)'}}>
+      <label style={{display:'flex',alignItems:'center',gap:10,color:'#8793a5',fontSize:12,fontWeight:800,textTransform:'uppercase',letterSpacing:'.08em'}}>
+        Pair
+        <span style={{position:'relative',display:'inline-flex',alignItems:'center'}}>
+          <select aria-label="Pi automation pair" value={pair} onChange={e=>setPair(e.target.value)} style={{appearance:'none',WebkitAppearance:'none',minWidth:132,border:'1px solid #3a4656',borderRadius:9,background:'#171d25',color:'#f4f7fb',padding:'9px 34px 9px 12px',fontSize:14,fontWeight:850,outline:'none',cursor:'pointer'}}>{forexPairs.map(p=><option key={p}>{p}</option>)}</select>
+          <span aria-hidden style={{position:'absolute',right:12,color:'#79eda2',fontSize:11,pointerEvents:'none'}}>▼</span>
+        </span>
+      </label>
+      <span style={{display:'inline-flex',alignItems:'center',gap:7,border:`1px solid ${error?'#69323b':'#285b3a'}`,borderRadius:999,background:error?'rgba(104,32,43,.22)':'rgba(31,111,59,.18)',color:error?'#ff8d98':'#79eda2',padding:'7px 10px',fontSize:12,fontWeight:800}}><span style={{width:7,height:7,borderRadius:'50%',background:'currentColor',boxShadow:error?'none':'0 0 10px #58e78a'}}/>{error?'Pi unavailable':'Pi connected'}</span>
       {error&&<button type="button" onClick={()=>location.reload()}>Reconnect</button>}
     </div>
     {error&&<p style={{color:'#ff8d98'}}>{error}</p>}
     {snapshot&&<>
-      <p>{snapshot.trend.toUpperCase()} · {snapshot.zones.length} active base zone(s) · {snapshot.confirmationCount} actionable confirmation(s) · {active?`ACTIVE ${active.direction} TRADE · `:''}Pi scan {new Date(scannedAt||snapshot.scannedAt).toLocaleString()}</p>
+      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',margin:'0 0 12px'}}>
+        <span style={{border:'1px solid #34404e',borderRadius:999,background:'#161c24',color:'#d5dbe5',padding:'6px 10px',fontSize:12,fontWeight:800}}>{snapshot.zones.length} active base zone{snapshot.zones.length===1?'':'s'}</span>
+        <span style={{border:'1px solid #34404e',borderRadius:999,background:'#161c24',color:snapshot.confirmationCount?'#ffd66b':'#8d98a8',padding:'6px 10px',fontSize:12,fontWeight:800}}>{snapshot.confirmationCount} actionable setup{snapshot.confirmationCount===1?'':'s'}</span>
+        {active&&<span style={{border:'1px solid #34784c',borderRadius:999,background:'rgba(32,112,58,.22)',color:'#7af0a1',padding:'6px 10px',fontSize:12,fontWeight:850}}>Active {active.direction} trade</span>}
+        <span style={{marginLeft:'auto',color:'#697587',fontSize:11}}>Pi scan {new Date(scannedAt||snapshot.scannedAt).toLocaleTimeString()}</span>
+      </div>
       <StrategyLabChart direction={snapshot.trend==='bearish'?'bearish':'bullish'} timeframe={timeframe} onTimeframeChange={setTimeframe} drawingStorageKey={`pi-${pair}-${timeframe}`} tradeId={active?.tradeId} pricePrecision={pair.endsWith('/JPY')?3:5} scenario={scenario} />
       {(active||setup)&&<details style={{marginTop:14,border:'1px solid #303846',borderRadius:12,padding:'12px 14px',background:'#11151b'}} open={Boolean(active)}>
         <summary style={{cursor:'pointer',fontWeight:800}}>{active?'Active Pi trade details':'Latest actionable setup details'}</summary>

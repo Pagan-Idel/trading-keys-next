@@ -795,6 +795,15 @@ subscription and closes that network stream when no leases remain. `openTrades` 
 for actionable confirmations, during trade reconciliation, and immediately before
 order submission; far/no-zone scans do not request it.
 
+After every pair scan, including a market-hours safety pause, the Pi stores a compact
+read-only visualization snapshot containing its bounded M15/M5 candles, H1 trend,
+active base zones, scan timestamp, and actionable-confirmation count. Continuations
+are excluded from this display payload. The Pi control service exposes one selected
+pair at `/api/zones`; the PC-side `/api/automation/pi-zones` route proxies that payload
+through the authenticated SSH/Tailscale connection. `/pi-zones` performs all chart
+rendering and drawing interaction on the PC, so the Pi remains the authoritative
+scanner without running the Next.js chart application.
+
 The stream-release policy can represent broker-protected set-and-forget management,
 but live/demo automation still accepts only `secure-half-atr-runner-v3`. Set-and-forget
 remains backtest-only until a separately reviewed strategy-contract change enables it;

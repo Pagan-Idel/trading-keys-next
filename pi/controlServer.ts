@@ -1,6 +1,6 @@
 import http from "http";
 import { URL } from "url";
-import { getAutomationDashboard } from "../utils/automationStore.ts";
+import { getAutomationDashboard,getAutomationZoneSnapshot } from "../utils/automationStore.ts";
 import {
   getAutomationRuntime,
   recoverDesiredAutomation,
@@ -103,6 +103,12 @@ const server=http.createServer(async(request, response) => {
       send(response, 200, { runtime: getAutomationRuntime(), dashboard: getAutomationDashboard(80),
         stagedStrategy:readStagedApprovedStrategy()?.sourceRunUid??null });
       return;
+    }
+    if(url.pathname==="/api/zones"&&request.method==="GET"){
+      const pair=url.searchParams.get('pair')??'';
+      const snapshot=getAutomationZoneSnapshot(pair);
+      if(!snapshot){send(response,404,{error:`No automation zone snapshot is available for ${pair}.`});return}
+      send(response,200,snapshot);return;
     }
     if(url.pathname==="/api/config-sync"&&request.method==="POST"){
       if(!strategyPoller){send(response,409,{error:"Approved strategy synchronization is disabled."});return}

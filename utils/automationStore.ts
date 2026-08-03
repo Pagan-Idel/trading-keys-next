@@ -70,6 +70,12 @@ export interface AppliedAutomationStrategy {
   config:BacktestRunConfig;
 }
 
+export interface AutomationZoneSnapshot {
+  pair:string;mode:'live'|'demo';scannedAt:string;trend:'bullish'|'bearish'|'unknown';
+  zoneTimeframe:string;confirmationTimeframe:string;
+  zones:unknown[];candles:Record<string,unknown[]>;confirmationCount:number;
+}
+
 const DATA_DIRECTORY = path.resolve(process.env.TRADING_KEYS_DATA_DIRECTORY??path.join(process.cwd(), 'data'));
 const DATABASE_PATH = path.join(DATA_DIRECTORY, 'automation.sqlite');
 
@@ -181,6 +187,9 @@ const getDatabase = (): Database.Database => {
     );
     CREATE INDEX IF NOT EXISTS idx_automation_strategy_active
       ON automation_strategy_versions(active,applied_at DESC);
+    CREATE TABLE IF NOT EXISTS automation_zone_snapshots (
+      pair TEXT PRIMARY KEY,mode TEXT NOT NULL,scanned_at TEXT NOT NULL,payload_json TEXT NOT NULL
+    );
   `);
   const zonePrimaryKey=(database.prepare('PRAGMA table_info(zone_lifecycle)').all() as Array<{name:string;pk:number}>)
     .filter(column=>column.pk>0).sort((a,b)=>a.pk-b.pk).map(column=>column.name).join(',');
@@ -203,6 +212,17 @@ const getDatabase = (): Database.Database => {
   ensureColumn('active_trades', 'risk_profile', 'TEXT');
   ensureColumn('active_trades', 'risk_percentage', 'REAL');
   return database;
+};
+
+export const saveAutomationZoneSnapshot=(snapshot:AutomationZoneSnapshot)=>{
+  getDatabase().prepare(`INSERT INTO automation_zone_snapshots(pair,mode,scanned_at,payload_json)
+    VALUES(?,?,?,?) ON CONFLICT(pair) DO UPDATE SET mode=excluded.mode,scanned_at=excluded.scanned_at,payload_json=excluded.payload_json`)
+    .run(snapshot.pair,snapshot.mode,snapshot.scannedAt,JSON.stringify(snapshot));
+};
+
+export const getAutomationZoneSnapshot=(pair:string):AutomationZoneSnapshot|undefined=>{
+  const row=getDatabase().prepare('SELECT payload_json AS payloadJson FROM automation_zone_snapshots WHERE pair=?').get(pair) as {payloadJson:string}|undefined;
+  return row?JSON.parse(row.payloadJson) as AutomationZoneSnapshot:undefined;
 };
 
 export const validateAutomationDatabaseForRecovery=():{

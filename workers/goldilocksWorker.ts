@@ -15,7 +15,7 @@ import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 import { isInHighImpactNewsWindow, getActiveNewsEvent, getNewsGuardError } from '../utils/newsGuard.ts';
 import { getPrecision, isForexMarketOpen, normalizePairKeyUnderscore, wait } from '../utils/shared.ts';
 import { isHolidayCloseWindow, isWeekendCloseWindow, isWeekendLiquidationWindow } from '../utils/marketCloseGuard.ts';
-import { clearActiveTrade, getActiveTrade, getAppliedAutomationStrategy, getRiskProfile, getZoneLifecycle, persistZoneLifecycle, recordTradeManagementEvent, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
+import { clearActiveTrade, getActiveTrade, getAppliedAutomationStrategy, getRiskProfile, getZoneLifecycle, persistZoneLifecycle, recordTradeManagementEvent, saveAutomationZoneSnapshot, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { classifyTradeOutcome, saveTradeRecord, type JournalData } from '../utils/tradeHistory.ts';
 import { GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_LIVE_CANDLE_LIMITS, GOLDILOCKS_TIMEFRAME_SECONDS, getGoldilocksMinimumScore } from '../utils/goldilocksConfig.ts';
@@ -590,11 +590,6 @@ const safetyBlockReason = async (): Promise<string | null> => {
 
 const scan = async () => {
   logMemoryTelemetry();
-  const blocked = await safetyBlockReason();
-  if (blocked) {
-    updateWorkerStatus(pair, 'paused', 'safety_guard', blocked, mode);
-    return;
-  }
   updateWorkerStatus(pair, 'scanning', 'loading_zones', `Scanning ${ZONE_TIMEFRAME} Goldilocks zones and ${CONFIRMATION_TIMEFRAME} confirmation candles.`, mode);
   const snapshot = await loadZoneHistory();
   for(const zone of snapshot.history.zones){
@@ -609,6 +604,19 @@ const scan = async () => {
   const confirmationRaw = await loadConfirmationCandles();
   const confirmationCandles = toStrategyCandles(confirmationRaw);
   const confirmations = findFreshGoldilocksConfirmations(snapshot.history, confirmationCandles, CONFIRMATION_SECONDS,Date.now(),snapshot.candles,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME]);
+  const trendCandles=readWorkingCandles(TREND_TIMEFRAME);
+  saveAutomationZoneSnapshot({
+    pair,mode,scannedAt:new Date().toISOString(),trend:getGoldilocksTrend(trendCandles.slice(-5_000)),
+    zoneTimeframe:ZONE_TIMEFRAME,confirmationTimeframe:CONFIRMATION_TIMEFRAME,
+    zones:snapshot.history.activeZones.filter(zone=>zone.kind==='base'),
+    candles:{[ZONE_TIMEFRAME]:snapshot.candles.slice(-400),[CONFIRMATION_TIMEFRAME]:confirmationCandles.slice(-500)},
+    confirmationCount:confirmations.length,
+  });
+  const blocked = await safetyBlockReason();
+  if (blocked) {
+    updateWorkerStatus(pair, 'paused', 'safety_guard', blocked, mode);
+    return;
+  }
   if (!confirmations.length) {
     if(!usesSharedMarketDataHub)schedulePriceStreamIdleStop(pair,mode);
     else await setMarketDataInterest(pair,false,marketDataOwner);

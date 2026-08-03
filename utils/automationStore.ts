@@ -73,7 +73,7 @@ export interface AppliedAutomationStrategy {
 export interface AutomationZoneSnapshot {
   pair:string;mode:'live'|'demo';scannedAt:string;trend:'bullish'|'bearish'|'unknown';
   zoneTimeframe:string;confirmationTimeframe:string;
-  zones:unknown[];candles:Record<string,unknown[]>;confirmationCount:number;
+  zones:unknown[];candles:Record<string,unknown[]>;confirmationCount:number;setups?:unknown[];activeTrade?:ActiveTradeInput;
 }
 
 const DATA_DIRECTORY = path.resolve(process.env.TRADING_KEYS_DATA_DIRECTORY??path.join(process.cwd(), 'data'));
@@ -222,7 +222,9 @@ export const saveAutomationZoneSnapshot=(snapshot:AutomationZoneSnapshot)=>{
 
 export const getAutomationZoneSnapshot=(pair:string):AutomationZoneSnapshot|undefined=>{
   const row=getDatabase().prepare('SELECT payload_json AS payloadJson FROM automation_zone_snapshots WHERE pair=?').get(pair) as {payloadJson:string}|undefined;
-  return row?JSON.parse(row.payloadJson) as AutomationZoneSnapshot:undefined;
+  if(!row)return undefined;
+  const snapshot=JSON.parse(row.payloadJson) as AutomationZoneSnapshot;
+  return {...snapshot,activeTrade:getActiveTrade(pair)};
 };
 
 export const validateAutomationDatabaseForRecovery=():{

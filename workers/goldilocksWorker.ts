@@ -604,13 +604,21 @@ const scan = async () => {
   const confirmationRaw = await loadConfirmationCandles();
   const confirmationCandles = toStrategyCandles(confirmationRaw);
   const confirmations = findFreshGoldilocksConfirmations(snapshot.history, confirmationCandles, CONFIRMATION_SECONDS,Date.now(),snapshot.candles,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME]);
+  const setups=confirmations.map(confirmation=>{
+    const touchIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.touchCandle.time);
+    const confirmationIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.confirmationCandle.time);
+    return {zone:confirmation.zone,touchCandle:confirmation.touchCandle,confirmationCandle:confirmation.confirmationCandle,
+      approachPressure:touchIndex>=0&&confirmationIndex>touchIndex?measureGoldilocksApproachPressure(confirmation.zone,confirmationCandles,touchIndex,confirmationIndex):undefined};
+  });
   const trendCandles=readWorkingCandles(TREND_TIMEFRAME);
+  const executionCandles=readWorkingCandles(GOLDILOCKS_DEMO_TIMEFRAMES.execution,500);
   saveAutomationZoneSnapshot({
     pair,mode,scannedAt:new Date().toISOString(),trend:getGoldilocksTrend(trendCandles.slice(-5_000)),
     zoneTimeframe:ZONE_TIMEFRAME,confirmationTimeframe:CONFIRMATION_TIMEFRAME,
     zones:snapshot.history.activeZones.filter(zone=>zone.kind==='base'),
-    candles:{[ZONE_TIMEFRAME]:snapshot.candles.slice(-400),[CONFIRMATION_TIMEFRAME]:confirmationCandles.slice(-500)},
-    confirmationCount:confirmations.length,
+    candles:{[ZONE_TIMEFRAME]:snapshot.candles.slice(-400),[CONFIRMATION_TIMEFRAME]:confirmationCandles.slice(-500),
+      [TREND_TIMEFRAME]:toStrategyCandles(trendCandles).slice(-400),[GOLDILOCKS_DEMO_TIMEFRAMES.execution]:toStrategyCandles(executionCandles).slice(-500)},
+    confirmationCount:confirmations.length,setups,
   });
   const blocked = await safetyBlockReason();
   if (blocked) {

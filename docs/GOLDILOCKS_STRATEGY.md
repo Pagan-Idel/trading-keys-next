@@ -796,12 +796,15 @@ for actionable confirmations, during trade reconciliation, and immediately befor
 order submission; far/no-zone scans do not request it.
 
 After every pair scan, including a market-hours safety pause, the Pi stores a compact
-read-only visualization snapshot containing its bounded M15/M5 candles, H1 trend,
-active base zones, scan timestamp, and actionable-confirmation count. Continuations
+read-only visualization snapshot containing bounded M1/M5/M15/H1 candles, H1 trend,
+active base zones, scan timestamp, actionable confirmations, and their causal approach
+pressure evidence. The control response merges the current broker-trade ledger so the
+PC chart can draw an active entry, stop, and target without waiting for another scan. Continuations
 are excluded from this display payload. The Pi control service exposes one selected
 pair at `/api/zones`; the PC-side `/api/automation/pi-zones` route proxies that payload
 through the authenticated SSH/Tailscale connection. `/pi-zones` performs all chart
-rendering and drawing interaction on the PC, so the Pi remains the authoritative
+rendering, timeframe switching, sweep/fast-attack labels, and drawing interaction on
+the PC, so the Pi remains the authoritative
 scanner without running the Next.js chart application.
 
 The stream-release policy can represent broker-protected set-and-forget management,

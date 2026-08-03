@@ -15,7 +15,7 @@ import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
 import { isInHighImpactNewsWindow, getActiveNewsEvent, getNewsGuardError } from '../utils/newsGuard.ts';
 import { getPrecision, isForexMarketOpen, normalizePairKeyUnderscore, wait } from '../utils/shared.ts';
 import { isHolidayCloseWindow, isWeekendCloseWindow, isWeekendLiquidationWindow } from '../utils/marketCloseGuard.ts';
-import { clearActiveTrade, getActiveTrade, getAppliedAutomationStrategy, getRiskProfile, getZoneLifecycle, persistZoneLifecycle, recordTradeManagementEvent, saveAutomationZoneSnapshot, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
+import { clearActiveTrade, getActiveTrade, getAppliedAutomationStrategy, getAutomationZoneSnapshot, getRiskProfile, getZoneLifecycle, persistZoneLifecycle, recordTradeManagementEvent, saveAutomationZoneSnapshot, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { classifyTradeOutcome, saveTradeRecord, type JournalData } from '../utils/tradeHistory.ts';
 import { GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_LIVE_CANDLE_LIMITS, GOLDILOCKS_TIMEFRAME_SECONDS, getGoldilocksMinimumScore } from '../utils/goldilocksConfig.ts';
@@ -612,13 +612,15 @@ const scan = async () => {
   });
   const trendCandles=readWorkingCandles(TREND_TIMEFRAME);
   const executionCandles=readWorkingCandles(GOLDILOCKS_DEMO_TIMEFRAMES.execution,500);
+  const snapshotSetups=setups.length?setups:getActiveTrade(pair)
+    ?((getAutomationZoneSnapshot(pair)?.setups??[]) as typeof setups):[];
   saveAutomationZoneSnapshot({
     pair,mode,scannedAt:new Date().toISOString(),trend:getGoldilocksTrend(trendCandles.slice(-5_000)),
     zoneTimeframe:ZONE_TIMEFRAME,confirmationTimeframe:CONFIRMATION_TIMEFRAME,
     zones:snapshot.history.activeZones.filter(zone=>zone.kind==='base'),
     candles:{[ZONE_TIMEFRAME]:snapshot.candles.slice(-400),[CONFIRMATION_TIMEFRAME]:confirmationCandles.slice(-500),
       [TREND_TIMEFRAME]:toStrategyCandles(trendCandles).slice(-400),[GOLDILOCKS_DEMO_TIMEFRAMES.execution]:toStrategyCandles(executionCandles).slice(-500)},
-    confirmationCount:confirmations.length,setups,
+    confirmationCount:confirmations.length,setups:snapshotSetups,
   });
   const blocked = await safetyBlockReason();
   if (blocked) {

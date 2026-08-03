@@ -60,6 +60,7 @@ export interface ActiveTradeInput {
   score?: number;
   riskProfile?: RiskProfile;
   riskPercentage?: number;
+  openedAt?: string;
 }
 
 export interface AppliedAutomationStrategy {
@@ -418,7 +419,7 @@ export const getActiveTrade = (pair: string): ActiveTradeInput | undefined =>
   getDatabase().prepare(`
     SELECT trade_id AS tradeId, pair, direction, entry, stop_loss AS stopLoss,
       take_profit AS takeProfit, mode, score, risk_profile AS riskProfile,
-      risk_percentage AS riskPercentage
+      risk_percentage AS riskPercentage, opened_at AS openedAt
     FROM active_trades WHERE pair = ?
   `).get(pair) as ActiveTradeInput | undefined;
 

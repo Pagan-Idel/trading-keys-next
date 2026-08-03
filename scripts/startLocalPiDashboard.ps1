@@ -22,6 +22,9 @@ if ([string]::IsNullOrWhiteSpace($env:PULSE_CONTROL_TOKEN)) {
 }
 
 Set-Location -LiteralPath $repository
-& (Join-Path $repository 'node_modules\.bin\next.cmd') start -p 4000 `
-  1>> (Join-Path $logDirectory 'local-dashboard.log') `
-  2>> (Join-Path $logDirectory 'local-dashboard.error.log')
+Start-Process -FilePath (Join-Path $repository 'node_modules\.bin\next.cmd') `
+  -ArgumentList 'start','-p','4000' `
+  -WorkingDirectory $repository `
+  -WindowStyle Hidden `
+  -RedirectStandardOutput (Join-Path $logDirectory 'local-dashboard.log') `
+  -RedirectStandardError (Join-Path $logDirectory 'local-dashboard.error.log')

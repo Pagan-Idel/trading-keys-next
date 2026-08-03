@@ -740,7 +740,6 @@ export default function StrategyLab() {
         : undefined;
     const zoneTime = Number(router.query.zoneTime);
     if (
-      !Number.isFinite(tradeTime) ||
       !forexPairs.includes(linkedPair) ||
       !["M1", "M5", "M15", "H1"].includes(linkedTimeframe)
     ) {

@@ -1,21 +1,20 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import {
-  getAutomationRuntime,
-  startDemoAutomation,
-  stopAutomation,
-} from '../../../utils/automationProcessManager';
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Cache-Control', 'no-store');
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ error: 'Pi runtime is read-only from the local dashboard.' });
+  }
+  const base=(process.env.PI_PULSE_URL??'http://127.0.0.1:4080').replace(/\/$/,'');
+  const token=process.env.PI_PULSE_CONTROL_TOKEN??process.env.PULSE_CONTROL_TOKEN;
   try {
-    if (req.method === 'GET') return res.status(200).json(getAutomationRuntime());
-    if (req.method === 'POST') return res.status(200).json(startDemoAutomation());
-    if (req.method === 'DELETE') return res.status(200).json(stopAutomation());
-    res.setHeader('Allow', 'GET, POST, DELETE');
-    return res.status(405).json({ error: 'Method not allowed' });
+    const response=await fetch(`${base}/api/status`,{
+      headers:token?{Authorization:`Bearer ${token}`}:{},cache:'no-store',signal:AbortSignal.timeout(5000),
+    });
+    const payload=await response.json();
+    return res.status(response.status).json(payload.runtime??payload);
   } catch (error) {
-    console.error('[automation/runtime]', error);
-    return res.status(500).json({ error: (error as Error).message });
+    return res.status(502).json({ error: `Pi runtime bridge unavailable: ${error instanceof Error?error.message:String(error)}` });
   }
 }
-

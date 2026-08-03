@@ -96,8 +96,8 @@ const server=http.createServer(async(request, response) => {
   }
   const remote=request.socket.remoteAddress??'';
   const loopback=remote==='127.0.0.1'||remote==='::1'||remote==='::ffff:127.0.0.1';
-  const localReadOnlyZones=loopback&&url.pathname==='/api/zones'&&request.method==='GET';
-  if (!localReadOnlyZones&&!authorized(request)) {
+  const localReadOnlyBridge=loopback&&request.method==='GET'&&['/api/zones','/api/status'].includes(url.pathname);
+  if (!localReadOnlyBridge&&!authorized(request)) {
     send(response, 401, { error: "Unauthorized" });
     return;
   }

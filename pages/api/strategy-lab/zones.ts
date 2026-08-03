@@ -12,9 +12,7 @@ import {
   summarizeZoneTimeframeTouches,
   summarizeConfirmationTimeframeTouches,
   validateFinalEntryAfterEngulf,
-  validateGoldilocksDepartureQuality,
   validateGoldilocksEntryProximity,
-  validateGoldilocksZoneApproach,
   validateTwoToOneRunway,
   type GoldilocksEntryProximityCheck,
   type GoldilocksZone,
@@ -599,8 +597,6 @@ export default async function handler(
     }> = [];
     const historicalEntrySetups = deepZoneHistory.zones.flatMap((zone) => {
       if (zone.kind !== "base") return [];
-      const departureQuality = validateGoldilocksDepartureQuality(zone);
-      if (!departureQuality.allowed) return [];
       const formationWindow = getGoldilocksZoneFormationWindow(
         zone,
         zoneCandleSeconds,
@@ -671,15 +667,6 @@ export default async function handler(
           candle.close,
           candle.close,
         );
-        const approachGate = validateGoldilocksZoneApproach(
-          zone,
-          historicalCandles,
-          touchState.touchCandleIndex,
-        );
-        if (!approachGate.allowed) {
-          proximity.allowed = false;
-          proximity.reason = approachGate.reason;
-        }
         if (!proximity.allowed) break;
         const knownAtConfirmation = deepZoneHistory.zones.filter((item) =>
           zoneWasUsableAt(item, candle.time),

@@ -70,7 +70,7 @@ execution. Require explicit user approval for material live-risk changes.
   trail the remaining 50% with the default 2x ATR(14) runner. A break-even runner
   stop banks +0.5R total.
 - Maximum three qualifying touches; invalidate on the fourth.
-- Expire active zones after two calendar years.
+- Expire active zones after 30 calendar days.
 - Preserve one open trade per pair and restart recovery.
 - Backtests include historical news, configured U.S. holiday blocks, and DST-aware weekend entry/exit rules, but still
   omit historical spread, pair-session availability, slippage, latency, and financing charges.

@@ -2848,6 +2848,50 @@ test("rejects a fast oversized approach but preserves a wick-sweep reclaim as ab
   assert.match(reclaimed.reason, /absorption/i);
 });
 
+test("keeps adverse approach evidence score-only in the automation confirmation scanner", () => {
+  const zone = {
+    id: "approach-score-only",
+    kind: "base" as const,
+    side: "demand" as const,
+    candleIndex: 0,
+    candleTime: 0,
+    availableAt: 1,
+    low: 100,
+    high: 101,
+    width: 1,
+    legMidpoint: 105,
+    legRange: 10,
+    departureMultiple: 3,
+    strength2x: true,
+    touches: 0,
+    maxPenetration: 0,
+    state: "fresh" as const,
+    reasons: [],
+  };
+  const candles: StrategyCandle[] = Array.from({ length: 14 }, (_, index) => ({
+    time: index * 300,
+    open: 105 - index * 0.05,
+    high: 105.5 - index * 0.05,
+    low: 104.5 - index * 0.05,
+    close: 104.9 - index * 0.05,
+  }));
+  candles.push(
+    { time: 4_200, open: 104, high: 102.4, low: 100, close: 101 },
+    { time: 4_500, open: 101.5, high: 102.7, low: 101.3, close: 102.5 },
+  );
+  assert.equal(validateGoldilocksZoneApproach(zone, candles, 14).allowed, false);
+  const confirmations = findFreshGoldilocksConfirmations(
+    { zones: [zone], activeZones: [zone], activeDemand: zone },
+    candles,
+    300,
+    5_099_000,
+    candles,
+    300,
+  );
+  assert.equal(confirmations.length, 1);
+  assert.equal(confirmations[0].proximity.allowed, true);
+});
+
 test("uses explicit market timezones for daylight-saving sessions and news timestamps", () => {
   assert.equal(
     isTradeSessionOpen("USD/CAD", new Date("2026-07-16T12:30:00Z")),

@@ -8,7 +8,6 @@ import {
   summarizeZoneTimeframeTouches,
   summarizeConfirmationTimeframeTouches,
   validateGoldilocksEntryProximity,
-  validateGoldilocksZoneApproach,
   type GoldilocksEntryProximityCheck,
   type GoldilocksDirection,
   type GoldilocksZone,
@@ -294,8 +293,6 @@ export const findFreshGoldilocksConfirmations = (
       ? confirmationCandle.close > confirmationCandle.open && confirmationCandle.close > touchCandle.high
       : confirmationCandle.close < confirmationCandle.open && confirmationCandle.close < touchCandle.low;
     const proximity=validateGoldilocksEntryProximity(zone,touchCandle,confirmationCandle.close);
-    const approachGate=validateGoldilocksZoneApproach(zone,candles,touchIndex);
-    if(!approachGate.allowed){proximity.allowed=false;proximity.reason=approachGate.reason}
     return confirmed ? [{
       zone:{...zone,touches:purity.touches,maxPenetration:0},
       direction,firstOutsideTime:purity.firstOutsideTime!,touchCandle,confirmationCandle,

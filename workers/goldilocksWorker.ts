@@ -8,7 +8,7 @@ import { closeTradePartial } from '../utils/oanda/api/close-partial.ts';
 import { ACTION } from '../utils/oanda/orderTypes.ts';
 import { placeTrade } from '../utils/placeTrade.ts';
 import { annotateConfluenceAt, buildGoldilocksHistory, buildGoldilocksHistoryChunked, findFreshGoldilocksConfirmations, getGoldilocksTrend, toStrategyCandles } from '../utils/goldilocksScanner.ts';
-import { getGoldilocksZoneFormationWindow, validateFinalEntryAfterEngulf, validateGoldilocksDepartureQuality, validateGoldilocksEntryProximity, validateGoldilocksFinalExecutableEntry } from '../utils/goldilocksStrategy.ts';
+import { getGoldilocksZoneFormationWindow, validateFinalEntryAfterEngulf, validateGoldilocksEntryProximity, validateGoldilocksFinalExecutableEntry } from '../utils/goldilocksStrategy.ts';
 import { getHistoricalNewsGateForRange } from '../utils/historicalNewsStore.ts';
 import { evaluateSpread } from '../utils/spreadGuard.ts';
 import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
@@ -632,17 +632,6 @@ const scan = async () => {
     lifecycle=transitionZoneLifecycle(lifecycle,{type:'approach'});lifecycle=transitionZoneLifecycle(lifecycle,{type:'arm'});
     lifecycle=transitionZoneLifecycle(lifecycle,{type:'touch',touchKey:key});persistZoneLifecycle(lifecycle);
     if (attemptedConfirmations.has(key)) continue;
-    const departureQuality=validateGoldilocksDepartureQuality(confirmation.zone);
-    if(!departureQuality.allowed){
-      rememberAttemptedConfirmation(key);
-      logMessage(`DEPARTURE QUALITY REJECTED · ${pair} · ${departureQuality.reason}`, {
-        zoneId:confirmation.zone.id,
-        confirmationTime:confirmation.confirmationCandle.time,
-        departureQuality:departureQuality.quality,
-      }, {pair,level:'warn',fileName:'goldilocksWorker',step:'departure_quality_rejected'});
-      updateWorkerStatus(pair,'waiting','departure_quality_rejected',departureQuality.reason,mode);
-      continue;
-    }
     const formationWindow=getGoldilocksZoneFormationWindow(confirmation.zone,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME]);
     const formationNewsGate=getHistoricalNewsGateForRange(pair,formationWindow.start,formationWindow.end);
     if(!formationNewsGate.allowed){

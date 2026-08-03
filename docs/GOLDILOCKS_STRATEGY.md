@@ -51,8 +51,8 @@ opposite-side zone that was active at entry. Generic historical context zones ar
 For a Set-and-forget opposing-base run, replay additionally restores the exact selected
 target base even when it formed before the normal chart window. Its target label reports
 `OPPOSING BASE` and the stored dynamic R multiple; the final target exit uses the stored
-target price rather than reconstructing a fixed 2R exit. A nearer continuation may still
-appear as context, but it is not the selected base.
+target price rather than reconstructing a fixed 2R exit. Continuation zones remain
+internal context and are not drawn.
 Its permanent trade ID appears as a candy-styled copyable badge along the bottom of the
 chart so screenshots and visual audits retain the recorded-trade identity.
 For a stored trade using the secure-half manager, replay draws the +1R partial and the
@@ -261,9 +261,9 @@ A continuation must:
 
 If several candidates qualify, select the most discounted demand candidate or the
 most premium supply candidate. At most one base and one continuation are retained per
-leg. Continuations remain detected and drawn as context for runway and confluence
+leg. Continuations remain detected as internal context for runway and confluence
 calculations, but cannot arm a touch, create a confirmation, receive a trade score, or
-become an entry zone. Only base zones can create trades.
+become an entry zone or chart rectangle. Only base zones can create trades or be drawn.
 
 ### Retired imbalance-balance-imbalance overlay
 
@@ -699,8 +699,8 @@ Historical simulation currently:
 - Evaluates configured U.S. no-trade holidays using the historical America/New_York
   market date, including EST/EDT boundaries, with the same pure calendar helper used
   by live/demo safety checks
-- Rejects shock/rejection departures using the same shared M15 quality measurement as
-  live/demo workers. Replays expose range/ATR, rejection-wick percentage, close-based
+- Measures shock/rejection departures using the same shared M15 quality diagnostic as
+  live/demo workers without treating it as a veto. Replays expose range/ATR, rejection-wick percentage, close-based
   displacement, wick excursion, and available M1 concentration diagnostics.
 - Imports Forex Factory high-impact calendar events into SQLite with their original
   currency, source-local date/time, exact UTC timestamp, and inclusive one-hour block

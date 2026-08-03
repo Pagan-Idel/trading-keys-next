@@ -14,7 +14,7 @@ export default function PiZonesDashboard(){
   const [snapshot,setSnapshot]=useState<Snapshot|null>(null),[error,setError]=useState('');
   const [scannedAt,setScannedAt]=useState('');
   const chartSignatureRef=useRef('');
-  useEffect(()=>{if(typeof router.query.pair==='string'&&forexPairs.includes(router.query.pair))setPair(router.query.pair)},[router.query.pair]);
+  useEffect(()=>{const requestedPair=typeof router.query.pair==='string'?router.query.pair:new URLSearchParams(window.location.search).get('pair');if(requestedPair&&forexPairs.includes(requestedPair))setPair(requestedPair)},[router.isReady,router.query.pair]);
   useEffect(()=>{let active=true;chartSignatureRef.current='';const load=async()=>{try{const r=await fetch(`/api/automation/pi-zones?pair=${encodeURIComponent(pair)}`,{cache:'no-store'});const p=await r.json() as Snapshot&{error?:string};if(!r.ok)throw new Error(p.error);if(active){const signature=JSON.stringify({pair:p.pair,trend:p.trend,zones:p.zones,candles:p.candles,setups:p.setups,activeTrade:p.activeTrade});if(signature!==chartSignatureRef.current){chartSignatureRef.current=signature;setSnapshot(p)}setScannedAt(p.scannedAt);setError('')}}catch(e){if(active)setError(e instanceof Error?e.message:String(e))}};void load();const timer=setInterval(load,3000);return()=>{active=false;clearInterval(timer)}},[pair]);
   const candles=useMemo(()=>snapshot?.candles[timeframe]??[],[snapshot,timeframe]);
   const leg=useMemo<SwingLeg>(()=>({direction:snapshot?.trend==='bearish'?'bearish':'bullish',startIndex:0,endIndex:Math.max(0,candles.length-1),startPrice:candles[0]?.close??0,endPrice:candles.at(-1)?.close??0,range:Math.abs((candles.at(-1)?.close??0)-(candles[0]?.close??0)),startSwing:'L',endSwing:'H'}),[candles,snapshot?.trend]);

@@ -4,7 +4,7 @@ import { isRiskProfile } from '../../../utils/dynamicRisk';
 import { getAutomationRuntime } from '../../../utils/automationProcessManager';
 import { getLatestAutomationRecommendation } from '../../../utils/automationStrategyPromotion';
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (!['GET', 'POST'].includes(req.method ?? '')) {
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'Method not allowed' });
@@ -17,6 +17,20 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
 
   try {
     res.setHeader('Cache-Control', 'no-store');
+    if(req.method==='GET'){
+      const base=(process.env.PI_PULSE_URL??'http://127.0.0.1:4080').replace(/\/$/,'');
+      const token=process.env.PI_PULSE_CONTROL_TOKEN??process.env.PULSE_CONTROL_TOKEN;
+      const response=await fetch(`${base}/api/status`,{
+        headers:token?{Authorization:`Bearer ${token}`}:{},cache:'no-store',signal:AbortSignal.timeout(10000),
+      });
+      const payload=await response.json();
+      if(!response.ok)return res.status(response.status).json(payload);
+      return res.status(200).json({
+        ...payload.dashboard,
+        strategyRecommendation:getLatestAutomationRecommendation(),
+        generatedAt:new Date().toISOString(),
+      });
+    }
     if (req.method === 'POST') {
       if(req.body?.action==='move-to-latest'){
         const runtime=getAutomationRuntime(),dashboard=getAutomationDashboard(20);

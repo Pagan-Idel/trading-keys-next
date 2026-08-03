@@ -505,6 +505,9 @@ export interface FinalEntryCheck extends TradeRunwayCheck {
   priceMoved: boolean;
 }
 
+export const getDrawableGoldilocksZones = (zones: GoldilocksZone[]) =>
+  zones.filter((zone) => zone.kind === "base");
+
 export const getMostRecentActiveOpposingZone = (
   entryZone: GoldilocksZone,
   knownZones: GoldilocksZone[],

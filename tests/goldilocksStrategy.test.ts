@@ -20,6 +20,7 @@ import {
   detectGoldilocksImbalanceBalanceZones,
   findFullCandleEngulfing,
   findCloseBeyondTouchedCandle,
+  getDrawableGoldilocksZones,
   findGoldilocksZoneDistalBreakTime,
   getGoldilocksZoneFormationWindow,
   isZoneAtOrBelowLegMidpoint,
@@ -2430,6 +2431,11 @@ test("accepts only the latest completed confirmation candle after a zone departu
     id: "continuation-context-only",
     kind: "continuation" as const,
   };
+  assert.deepEqual(
+    getDrawableGoldilocksZones([continuation, zone]).map((item) => item.id),
+    [zone.id],
+    "only base zones are drawable",
+  );
   assert.equal(
     findFreshGoldilocksConfirmations(
       {

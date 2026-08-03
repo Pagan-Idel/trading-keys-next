@@ -6,6 +6,7 @@ import {
   detectGoldilocksZoneHistory,
   detectGoldilocksZones,
   findCloseBeyondTouchedCandle,
+  getDrawableGoldilocksZones,
   getGoldilocksZoneFormationWindow,
   measureGoldilocksIntrabarDepartureSpeed,
   summarizeZoneTimeframeTouches,
@@ -562,6 +563,8 @@ export default async function handler(
       ...displayZonesWithConfluence,
       ...researchDisplayZones,
     ];
+    const drawableZones = getDrawableGoldilocksZones(displayZonesWithResearch);
+    const drawableNearestZones = getDrawableGoldilocksZones(nearestZones);
     const deepConfirmationRaw =
       timeframe === strategyStack.confirmation
         ? candles
@@ -1347,7 +1350,7 @@ export default async function handler(
       ? getStrategyReplayContextAnchor(
           historicalEntrySetup.zone.candleTime,
           historicalEntrySetup.priorTouchDetails.map((touch) => touch.time),
-          displayZonesWithResearch.map((zone) => zone.candleTime),
+          drawableZones.map((zone) => zone.candleTime),
         )
       : undefined;
     const replayBaseContextIndex =
@@ -1500,7 +1503,7 @@ export default async function handler(
         replayDisplayTime ??
           strategyCandles.at(-1)?.time ??
           Number.NEGATIVE_INFINITY,
-        new Set(displayZonesWithResearch.map((zone) => zone.id)),
+        new Set(drawableZones.map((zone) => zone.id)),
       ).filter(
         (rejected) =>
           rejected.time >=
@@ -1541,11 +1544,11 @@ export default async function handler(
                 viewStart,
             }
           : null,
-        nearestZones: nearestZones.map((zone) => ({
+        nearestZones: drawableNearestZones.map((zone) => ({
           ...zone,
           candleIndex: displayIndexAtOrAfter(zone.candleTime) - viewStart,
         })),
-        displayZones: displayZonesWithResearch.map((zone) => ({
+        displayZones: drawableZones.map((zone) => ({
           ...zone,
           candleIndex: displayIndexAtOrAfter(zone.candleTime) - viewStart,
         })),

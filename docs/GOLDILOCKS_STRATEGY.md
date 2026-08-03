@@ -269,7 +269,9 @@ become an entry zone. Only base zones can create trades.
 
 The experimental purple IBI overlays are no longer drawn in Strategy Lab. They were
 research-only, never created live/demo entries, and never changed the 20-point score.
-Strategy Lab now displays only the original Goldilocks base and continuation zones.
+Strategy Lab displays only Goldilocks base zones. Continuation zones remain internal
+context for runway and confluence calculations, but are not drawn and cannot trigger
+a trade.
 
 ## Zone lifecycle
 

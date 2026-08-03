@@ -13,6 +13,7 @@ import { getAppliedAutomationStrategy,recordAutomationEvent } from "../utils/aut
 import { activateStagedApprovedStrategy } from "../utils/approvedStrategyActivation.ts";
 import { readStagedApprovedStrategy } from "../utils/approvedStrategySync.ts";
 import { createApprovedStrategyPoller,type ApprovedStrategyPollEvent } from "../utils/approvedStrategyPoller.ts";
+import { handleOandaLogin } from "../utils/oanda/api/login.ts";
 
 const host = process.env.PULSE_HOST ?? "127.0.0.1";
 const port = Math.max(1024, Number(process.env.PULSE_PORT ?? 4080));
@@ -96,7 +97,7 @@ const server=http.createServer(async(request, response) => {
   }
   const remote=request.socket.remoteAddress??'';
   const loopback=remote==='127.0.0.1'||remote==='::1'||remote==='::ffff:127.0.0.1';
-  const localReadOnlyBridge=loopback&&request.method==='GET'&&['/api/zones','/api/status'].includes(url.pathname);
+  const localReadOnlyBridge=loopback&&request.method==='GET'&&['/api/zones','/api/status','/api/account'].includes(url.pathname);
   if (!localReadOnlyBridge&&!authorized(request)) {
     send(response, 401, { error: "Unauthorized" });
     return;
@@ -105,6 +106,12 @@ const server=http.createServer(async(request, response) => {
     if (url.pathname === "/api/status" && request.method === "GET") {
       send(response, 200, { runtime: getAutomationRuntime(), dashboard: getAutomationDashboard(80),
         stagedStrategy:readStagedApprovedStrategy()?.sourceRunUid??null });
+      return;
+    }
+    if(url.pathname==="/api/account"&&request.method==="GET"){
+      const {account}=await handleOandaLogin(undefined,'demo');
+      send(response,200,{account:{id:account.id,currency:account.currency,balance:account.balance,
+        NAV:account.NAV,unrealizedPL:account.unrealizedPL,marginAvailable:account.marginAvailable}});
       return;
     }
     if(url.pathname==="/api/zones"&&request.method==="GET"){

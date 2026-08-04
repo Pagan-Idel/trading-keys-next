@@ -166,7 +166,7 @@ export const getAutoResearchDashboard=(campaignId?:string)=>{
   return {campaigns,selectedCampaignId:selected,trials,counts,events};
 };
 
-export const getBestAutoResearchResult=()=>{
+export const getTopAutoResearchResults=(limit=3)=>{
   const rows=database().prepare(`SELECT config_json AS configJson,metrics_json AS metricsJson
     ,id,backtest_run_id AS backtestRunId,completed_at AS completedAt
     FROM research_trials WHERE status='completed' AND metrics_json IS NOT NULL`).all() as Array<{id:string;backtestRunId:string;completedAt:string;configJson:string;metricsJson:string}>;
@@ -176,8 +176,11 @@ export const getBestAutoResearchResult=()=>{
     metrics:JSON.parse(row.metricsJson) as {official?:{sampleTrades?:number;expectancyR?:number|null;maxDrawdownR?:number}},
   })).filter(row=>Number(row.metrics.official?.sampleTrades??0)>=100)
     .sort((left,right)=>Number(right.metrics.official?.expectancyR??Number.NEGATIVE_INFINITY)-Number(left.metrics.official?.expectancyR??Number.NEGATIVE_INFINITY)
-      ||Number(left.metrics.official?.maxDrawdownR??Number.POSITIVE_INFINITY)-Number(right.metrics.official?.maxDrawdownR??Number.POSITIVE_INFINITY))[0];
+      ||Number(left.metrics.official?.maxDrawdownR??Number.POSITIVE_INFINITY)-Number(right.metrics.official?.maxDrawdownR??Number.POSITIVE_INFINITY))
+    .slice(0,Math.max(0,limit));
 };
+
+export const getBestAutoResearchResult=()=>getTopAutoResearchResults(1)[0];
 
 export const getBestAutoResearchConfiguration=()=>getBestAutoResearchResult()?.config;
 

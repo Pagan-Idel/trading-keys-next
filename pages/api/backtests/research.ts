@@ -1,5 +1,5 @@
 import type { NextApiRequest,NextApiResponse } from 'next';
-import { getAutoResearchDashboard,getAutoResearchTrial,getBestAutoResearchResult,moveQueuedResearchTrial,removeQueuedResearchTrial,updateQueuedResearchTrial } from '../../../utils/autoResearchStore.ts';
+import { getAutoResearchDashboard,getAutoResearchTrial,getTopAutoResearchResults,moveQueuedResearchTrial,removeQueuedResearchTrial,updateQueuedResearchTrial } from '../../../utils/autoResearchStore.ts';
 import { pauseAutoResearch,recoverOrStartAutoResearch,resumeAutoResearch,startAutoResearch,stopAutoResearch } from '../../../utils/autoResearchRunner.ts';
 import { normalizeBacktestConfig } from '../../../utils/backtestRunner.ts';
 import { getCandleArchiveStorageUsage } from '../../../utils/candleArchive.ts';
@@ -30,11 +30,13 @@ export default function handler(req:NextApiRequest,res:NextApiResponse){
       }
       const dashboard=getAutoResearchDashboard(typeof req.query.campaignId==='string'?req.query.campaignId:undefined);
       const selected=dashboard.campaigns.find(item=>item.id===dashboard.selectedCampaignId)??dashboard.campaigns[0];
-      const globalLeader=getBestAutoResearchResult();
-      const globalLeaderRun=globalLeader?(getBacktestDashboard(globalLeader.backtestRunId) as any).runs?.find((run:any)=>run.id===globalLeader.backtestRunId):null;
+      const allTimeRecords=getTopAutoResearchResults(3).map(record=>{
+        const run=(getBacktestDashboard(record.backtestRunId) as any).runs?.find((item:any)=>item.id===record.backtestRunId);
+        return {...record,runUid:run?.runUid??null,compatibility:getAutomationCompatibility(record.config)};
+      });
       return res.status(200).json({
         ...dashboard,archive:getCandleArchiveStorageUsage(),
-        globalLeader:globalLeader?{...globalLeader,runUid:globalLeaderRun?.runUid??null,compatibility:getAutomationCompatibility(globalLeader.config)}:null,
+        allTimeRecords,globalLeader:allTimeRecords[0]??null,
         appliedStrategy:getAppliedAutomationStrategy(),
         researchVersion:GOLDILOCKS_RESEARCH_VERSION,timeframeProfiles:GOLDILOCKS_TIMEFRAME_PROFILES,
         workerAlive:isProcessAlive(selected?.workerPid),activeBacktest:activeBacktestStatus(),serverTime:new Date().toISOString(),

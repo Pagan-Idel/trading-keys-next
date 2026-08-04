@@ -117,7 +117,8 @@ type ResearchData={
   activeBacktest:ActiveBacktest|null;researchVersion:string;
   archive:{usedBytes:number;maxBytes:number;remainingBytes:number;percent:number};
   globalLeader:null|{id:string;backtestRunId:string;runUid:string|null;config:TrialConfig;metrics:{official?:Performance};compatibility:{compatible:boolean;blockers:string[]}};
-  appliedStrategy:{sourceRunUid:string};
+  allTimeRecords:Array<{id:string;backtestRunId:string;runUid:string|null;config:TrialConfig;metrics:{official?:Performance};compatibility:{compatible:boolean;blockers:string[]}}>;
+  appliedStrategy:{sourceRunUid:string;appliedAt:string;config:TrialConfig};
   coverage:Array<{pair:string;timeframe:string;startTime:number;endTime:number;candleCount:number}>;
 };
 
@@ -126,7 +127,6 @@ const formatFactor=(value:number|null|undefined)=>value==null?'—':Number.isFin
 const formatTime=(value?:string)=>value?new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'}).format(new Date(value)):'—';
 const formatBytes=(value:number)=>`${(value/1024/1024/1024).toFixed(2)} GiB`;
 const statusTone=(status?:string):'good'|'warn'|'bad'|'idle'=>status==='running'?'good':status==='preparing'||status==='waiting'||status==='queued'||status==='paused'?'warn':status==='failed'||status==='cancelled'?'bad':'idle';
-const sampleQuality=(count:number)=>count>=100?'ELIGIBLE':count>=50?'EARLY · 50–99':'EARLY · <50';
 
 export default function ResearchStatus(){
   const requestInFlight=useRef(false);
@@ -158,10 +158,8 @@ export default function ResearchStatus(){
     Number(right.metrics?.official?.expectancyR??Number.NEGATIVE_INFINITY)-Number(left.metrics?.official?.expectancyR??Number.NEGATIVE_INFINITY)
     || Number(left.metrics?.official?.maxDrawdownR??Number.POSITIVE_INFINITY)-Number(right.metrics?.official?.maxDrawdownR??Number.POSITIVE_INFINITY)
   ),[data?.trials]);
-  const eligibleTrials=completedTrials.filter(trial=>Number(trial.metrics?.official?.sampleTrades??0)>=100);
-  const globalLeader=data?.globalLeader;
-  const globalMetric=globalLeader?.metrics?.official;
-  const globalLeaderSynced=Boolean(globalLeader?.runUid&&data?.appliedStrategy?.sourceRunUid===globalLeader.runUid);
+  const appliedConfig=data?.appliedStrategy?.config;
+  const appliedManager=GOLDILOCKS_BACKTEST_MANAGERS.find(manager=>manager.id===appliedConfig?.tradeManager)?.label.replace(' (default)','')??appliedConfig?.tradeManager??'Loading';
   const active=data?.activeBacktest;
   const activeProgress=Math.max(0,Math.min(100,Number(active?.progressPercent??0)));
   const queuedTrials=(data?.trials??[]).filter(trial=>trial.status==='queued');
@@ -232,8 +230,9 @@ export default function ResearchStatus(){
 
     <Grid>
       <Card><Label>{campaign?.status==='preparing'?'Dataset acquisition':'Campaign progress'}</Label><Metric>{campaign?.status==='preparing'?`${campaign.preparationDone??0} / ${campaign.preparationTotal??0}`:`${finished} / ${total}`}</Metric><Small>{campaign?.status==='preparing'?'Unique pair/timeframe histories cached once':`${counts.running??0} running - ${counts.queued??0} queued - ${counts.failed??0} failed`}</Small></Card>
-      <Card><Label>Trial trade observations</Label><Metric>{completedTrials.reduce((sum,trial)=>sum+Number(trial.metrics?.official?.sampleTrades??0),0)}</Metric><Small>Repeated strategy observations across completed configurations, not unique market trades</Small></Card>
-      <Card><Label>All-time #1 record</Label><Metric style={{color:Number(globalMetric?.netR??0)>=0?'#68efb3':'#ff8795'}}>{formatR(globalMetric?.netR,true)}</Metric><Small>{globalLeader?`${getGoldilocksTimeframeProfile(globalLeader.config.timeframeProfile).label} · score ${globalLeader.config.minimumScore} · ${globalMetric?.sampleTrades??0} trades`:'Requires at least 100 trades in one configuration'}</Small>{globalLeader&&<Button style={{marginTop:12}} title={!globalLeader.compatibility.compatible?globalLeader.compatibility.blockers.join(' '):globalLeaderSynced?'This record is already the approved Windows strategy exposed to Pi sync.':'Approval requires stopped automation and no open trade.'} disabled={sendingLeader||globalLeaderSynced||!globalLeader.compatibility.compatible} onClick={()=>void sendGlobalLeaderToPi()}>{globalLeaderSynced?'Already approved for Pi':sendingLeader?'Approving…':'Send #1 to Pi'}</Button>}{globalLeader&&!globalLeader.compatibility.compatible&&<Small style={{color:'#e5b56e'}}>Not Pi-compatible: {globalLeader.compatibility.blockers[0]}</Small>}</Card>
+      <Card><Label>Current Pi configuration</Label><Metric style={{fontSize:'1rem'}}>{appliedConfig?getGoldilocksTimeframeProfile(appliedConfig.timeframeProfile).label:'Loading'}</Metric><Small>Score {appliedConfig?.minimumScore??'—'}/20 · {String(appliedConfig?.riskProfile??'—')} risk<br/>Source {data?.appliedStrategy?.sourceRunUid??'—'}</Small></Card>
+      <Card><Label>Pi trade management</Label><Metric style={{fontSize:'1rem'}}>{appliedManager}</Metric><Small>{appliedConfig?.confirmationMode??'—'} confirmation · {appliedConfig?.setAndForgetTargetMode==='opposing-base'?'opposing-base target':appliedConfig?.setAndForgetTargetR?`${appliedConfig.setAndForgetTargetR}R target`:'manager-controlled target'}</Small></Card>
+      <Card><Label>Trial trade observations</Label><Metric>{completedTrials.reduce((sum,trial)=>sum+Number(trial.metrics?.official?.sampleTrades??0),0)}</Metric><Small>Current campaign observations only; these do not define the all-time records below</Small></Card>
       <Card><Label>Candle archive</Label><Metric>{data?formatBytes(data.archive.usedBytes):'—'}</Metric><Small>{data?`${data.archive.percent.toFixed(1)}% of ${formatBytes(data.archive.maxBytes)} · ${formatBytes(data.archive.remainingBytes)} free`:'Loading storage…'}</Small></Card>
     </Grid>
 
@@ -276,13 +275,13 @@ export default function ResearchStatus(){
     </Section>
 
     <Section>
-      <SectionHead><div><h2>Leading configurations</h2><p>Only configurations with at least 100 realized trades receive a rank. Expectancy leads; drawdown breaks ties. Click any row for every frozen input, gate, score component, diagnostic, manager, pair result, and trade audit.</p></div><div style={{color:'#718093',fontSize:11}}>{eligibleTrials.length} eligible / {completedTrials.length} completed</div></SectionHead>
-      {completedTrials.length?<TableWrap><table><thead><tr><th>Rank</th><th title="Eligible requires at least 100 completed trades. Early results have fewer observations.">Evidence</th><th>Configuration</th><th>Stack</th><th>Score</th><th>Trades</th><th>Net result</th><th>Profit factor</th><th>Max DD</th><th>Best manager</th></tr></thead><tbody>
-        {completedTrials.slice(0,24).map(trial=>{const metric=trial.metrics?.official;const policy=trial.metrics?.policies?.[0];const trades=Number(metric?.sampleTrades??0);const rank=eligibleTrials.findIndex(item=>item.id===trial.id);return <tr key={trial.id} style={{cursor:'pointer'}}>
-          <td><Link href={`/research/trials/${trial.id}`} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>{rank>=0?`#${rank+1}`:'--'}</Link></td><td>{sampleQuality(trades)}</td><td><Link href={`/research/trials/${trial.id}`} style={{color:'#dce8f4',textDecoration:'none'}}>{trial.config.label}</Link></td><td>{getGoldilocksTimeframeProfile(trial.config.timeframeProfile).label}</td><td>{trial.config.minimumScore}/20</td><td>{trades}</td>
-          <td className={Number(metric?.netR??0)>=0?'good':'bad'}>{formatR(metric?.netR,true)}</td><td>{formatFactor(metric?.profitFactor)}</td><td>{formatR(metric?.maxDrawdownR)}</td><td>{policy?.policyId??'--'}</td>
+      <SectionHead><div><h2>All-time top 3 records</h2><p>Global records across every campaign, each backed by at least 100 trades. Net result is the full result for that configuration; expectancy determines rank and drawdown breaks ties.</p></div><div style={{color:'#718093',fontSize:11}}>Showing {(data?.allTimeRecords??[]).length} record{(data?.allTimeRecords??[]).length===1?'':'s'}</div></SectionHead>
+      {data?.allTimeRecords?.length?<TableWrap><table><thead><tr><th>Rank</th><th>Configuration</th><th>Stack</th><th>Score</th><th>Trades</th><th>Net result</th><th>Profit factor</th><th>Max DD</th><th>Trade manager</th><th>Pi status</th></tr></thead><tbody>
+        {data.allTimeRecords.slice(0,3).map((record,index)=>{const metric=record.metrics?.official;const synced=Boolean(record.runUid&&data.appliedStrategy?.sourceRunUid===record.runUid);const manager=GOLDILOCKS_BACKTEST_MANAGERS.find(item=>item.id===record.config.tradeManager)?.label.replace(' (default)','')??record.config.tradeManager??'—';return <tr key={record.id} style={{background:synced?'#123b3126':'transparent'}}>
+          <td><Link href={`/research/trials/${record.id}`} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>#{index+1}</Link></td><td><Link href={`/research/trials/${record.id}`} style={{color:'#dce8f4',textDecoration:'none'}}>{record.config.label??record.id.slice(0,8)}</Link></td><td>{getGoldilocksTimeframeProfile(record.config.timeframeProfile).label}</td><td>{record.config.minimumScore}/20</td><td>{metric?.sampleTrades??0}</td>
+          <td className={Number(metric?.netR??0)>=0?'good':'bad'}>{formatR(metric?.netR,true)}</td><td>{formatFactor(metric?.profitFactor)}</td><td>{formatR(metric?.maxDrawdownR)}</td><td>{manager}</td><td>{index===0?<Button title={!record.compatibility.compatible?record.compatibility.blockers.join(' '):synced?'This record is already the approved Pi configuration.':'Approval requires stopped automation and no open trade.'} disabled={sendingLeader||synced||!record.compatibility.compatible} onClick={()=>void sendGlobalLeaderToPi()}>{synced?'Active on Pi':sendingLeader?'Sending…':'Send #1 to Pi'}</Button>:synced?<QueueStatus $tone="live">Active on Pi</QueueStatus>:'—'}</td>
         </tr>})}
-      </tbody></table></TableWrap>:<Empty>The leaderboard will populate after sealed-data trials finish.</Empty>}
+      </tbody></table></TableWrap>:<Empty>The all-time table will populate after a configuration completes at least 100 trades.</Empty>}
     </Section>
 
     <Section>

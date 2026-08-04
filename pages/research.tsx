@@ -37,7 +37,7 @@ const DangerButton=styled(Button)`border-color:#63303b;background:#2b141a;color:
 const Field=styled.input`width:100%;min-width:110px;border:1px solid #344352;background:#0a1016;color:#eaf4ff;border-radius:9px;padding:8px;`;
 const Select=styled.select`border:1px solid #344352;background:#0a1016;color:#eaf4ff;border-radius:9px;padding:8px;`;
 const Grid=styled.div`
-  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:16px;
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px;
   @media(max-width:900px){grid-template-columns:repeat(2,minmax(0,1fr));}
   @media(max-width:520px){grid-template-columns:1fr;}
 `;
@@ -45,6 +45,13 @@ const Card=styled.div`padding:18px;border:1px solid #2b3541;border-radius:18px;b
 const Label=styled.div`font-size:.65rem;color:#7f8d9d;text-transform:uppercase;letter-spacing:.12em;font-weight:850;`;
 const Metric=styled.div`margin-top:7px;font-size:clamp(1.25rem,3vw,2rem);font-weight:950;color:#f7fbff;`;
 const Small=styled.div`margin-top:7px;color:#8493a4;font-size:.72rem;line-height:1.45;overflow-wrap:anywhere;`;
+const ActivePanel=styled.section`
+  margin-top:16px;padding:17px;border:1px solid #34404e;border-radius:18px;background:linear-gradient(145deg,#151b24,#0a0e13);
+  display:grid;grid-template-columns:minmax(220px,1.25fr) repeat(5,minmax(110px,.7fr));gap:12px;align-items:stretch;
+  @media(max-width:1050px){grid-template-columns:repeat(3,1fr)} @media(max-width:600px){grid-template-columns:1fr}
+`;
+const ActiveIntro=styled.div`padding:4px 7px;display:flex;flex-direction:column;justify-content:center;h2{margin:0 0 6px;font-size:1rem;}`;
+const ActiveFact=styled.div`border:1px solid #2b3542;background:#0b1016;border-radius:13px;padding:11px 12px;span{display:block;color:#758395;font-size:.59rem;text-transform:uppercase;letter-spacing:.09em;font-weight:850;margin-bottom:5px}strong{display:block;color:#edf5ff;font-size:.76rem;overflow-wrap:anywhere}`;
 const Section=styled.section`
   margin-top:16px;padding:20px;border:1px solid #293441;border-radius:20px;background:linear-gradient(145deg,#10151c,#0a0e13);
 `;
@@ -211,7 +218,7 @@ export default function ResearchStatus(){
     <Hero>
       <Kicker>Goldilocks overnight discovery</Kicker>
       <Title>Research Status</Title>
-      <Sub>This page refreshes every five seconds. Each comparison cycle acquires a bounded historical snapshot once, seals it, and runs every configuration from local SQLite. A new sealed cycle is added whenever the queue finishes; research never changes live or demo trading.</Sub>
+      <Sub>Continuous one-year strategy research. The worker compares the active leader with focused adjustments and an occasional wildcard on sealed candle snapshots, then keeps the strongest eligible records without changing the Pi strategy automatically.</Sub>
       <StatusRow>
         <Badge $tone={statusTone(campaign?.status)}><Dot/>{campaign?.status?.toUpperCase()??'NOT STARTED'}</Badge>
         <Badge $tone={data?.workerAlive?'good':'bad'}><Dot/>{data?.workerAlive?'WORKER ONLINE':'WORKER OFFLINE'}</Badge>
@@ -230,11 +237,17 @@ export default function ResearchStatus(){
 
     <Grid>
       <Card><Label>{campaign?.status==='preparing'?'Dataset acquisition':'Campaign progress'}</Label><Metric>{campaign?.status==='preparing'?`${campaign.preparationDone??0} / ${campaign.preparationTotal??0}`:`${finished} / ${total}`}</Metric><Small>{campaign?.status==='preparing'?'Unique pair/timeframe histories cached once':`${counts.running??0} running - ${counts.queued??0} queued - ${counts.failed??0} failed`}</Small></Card>
-      <Card><Label>Current Pi configuration</Label><Metric style={{fontSize:'1rem'}}>{appliedConfig?getGoldilocksTimeframeProfile(appliedConfig.timeframeProfile).label:'Loading'}</Metric><Small>Score {appliedConfig?.minimumScore??'—'}/20 · {String(appliedConfig?.riskProfile??'—')} risk<br/>Source {data?.appliedStrategy?.sourceRunUid??'—'}</Small></Card>
-      <Card><Label>Pi trade management</Label><Metric style={{fontSize:'1rem'}}>{appliedManager}</Metric><Small>{appliedConfig?.confirmationMode??'—'} confirmation · {appliedConfig?.setAndForgetTargetMode==='opposing-base'?'opposing-base target':appliedConfig?.setAndForgetTargetR?`${appliedConfig.setAndForgetTargetR}R target`:'manager-controlled target'}</Small></Card>
       <Card><Label>Trial trade observations</Label><Metric>{completedTrials.reduce((sum,trial)=>sum+Number(trial.metrics?.official?.sampleTrades??0),0)}</Metric><Small>Current campaign observations only; these do not define the all-time records below</Small></Card>
-      <Card><Label>Candle archive</Label><Metric>{data?formatBytes(data.archive.usedBytes):'—'}</Metric><Small>{data?`${data.archive.percent.toFixed(1)}% of ${formatBytes(data.archive.maxBytes)} · ${formatBytes(data.archive.remainingBytes)} free`:'Loading storage…'}</Small></Card>
     </Grid>
+
+    <ActivePanel>
+      <ActiveIntro><h2>Current Pi strategy &amp; research run</h2><Small style={{marginTop:0}}>Approved run {data?.appliedStrategy?.sourceRunUid??'loading'}. Research may compare new configurations, but only explicit approval changes the Pi.</Small></ActiveIntro>
+      <ActiveFact><span>Pi strategy</span><strong>{appliedConfig?getGoldilocksTimeframeProfile(appliedConfig.timeframeProfile).label:'Loading'} · {appliedConfig?.minimumScore??'—'}/20</strong></ActiveFact>
+      <ActiveFact><span>Management</span><strong>{appliedManager} · {appliedConfig?.setAndForgetTargetMode==='opposing-base'?'Opposing base':appliedConfig?.setAndForgetTargetR?`${appliedConfig.setAndForgetTargetR}R`:'Manager target'}</strong></ActiveFact>
+      <ActiveFact><span>Running now</span><strong>{active?`${active.label??active.id} · ${activeProgress.toFixed(1)}%`:(campaign?.status==='preparing'?'Sealing dataset':'Waiting for next trial')}</strong></ActiveFact>
+      <ActiveFact><span>Pair / stage</span><strong>{active?`${active.progressPair??'Preparing'} · ${active.progressStage??active.latestEvent?.message??'Loading'}`:activity}</strong></ActiveFact>
+      <ActiveFact><span>Archive / heartbeat</span><strong>{data?`${formatBytes(data.archive.usedBytes)} · ${active?formatTime(active.heartbeatAt):'idle'}`:'Loading'}</strong></ActiveFact>
+    </ActivePanel>
 
     <Section>
       <SectionHead><div><h2>Campaign queue</h2><p>{campaign?.label??'No campaign yet'} · {campaign?.id??'—'}</p></div><div style={{color:'#718093',fontSize:11}}>Started {formatTime(campaign?.startedAt)}</div></SectionHead>
@@ -258,28 +271,11 @@ export default function ResearchStatus(){
     </Section>
 
     <Section>
-      <SectionHead><div><h2>What is running now</h2><p>The shared backtest lock prevents two large candle scans from corrupting or competing for the same state.</p></div></SectionHead>
-      {active?<>
-        <Grid style={{marginTop:0}}>
-          <Card><Label>Backtest</Label><Metric style={{fontSize:'1rem'}}>{active.status?.toUpperCase()??'ACTIVE'}</Metric><Small>{active.label??active.id}</Small></Card>
-          <Card><Label>Pair / stage</Label><Metric style={{fontSize:'1rem'}}>{active.progressPair??'Preparing'}</Metric><Small>{active.progressStage??active.latestEvent?.message??'Loading historical inputs'}</Small></Card>
-          <Card><Label>Backtest progress</Label><Metric>{activeProgress.toFixed(1)}%</Metric><Small>{active.progressDone??0} / {active.progressTotal??0} units · {active.totalTrades??0} trades found</Small></Card>
-          <Card><Label>Heartbeat</Label><Metric style={{fontSize:'1rem'}}>{formatTime(active.heartbeatAt)}</Metric><Small>{active.latestEvent?.message??'No event message yet'}</Small></Card>
-        </Grid>
-        <Meter><span style={{width:`${activeProgress}%`}}/></Meter>
-      </>:<Empty>{campaign?.status==='preparing'
-        ?`Historical dataset acquisition is active: ${campaign.preparationDone??0} of ${campaign.preparationTotal??0} pair/timeframe histories cached. Backtests will start automatically after this fixed snapshot is sealed.`
-        :campaign?.status==='completed'
-          ?'The sealed-snapshot campaign is complete; no backtest currently holds the lock.'
-          :'No backtest currently holds the lock. The research worker will claim the next queued trial automatically.'}</Empty>}
-    </Section>
-
-    <Section>
       <SectionHead><div><h2>All-time top 3 records</h2><p>Global records across every campaign, each backed by at least 100 trades. Net result is the full result for that configuration; expectancy determines rank and drawdown breaks ties.</p></div><div style={{color:'#718093',fontSize:11}}>Showing {(data?.allTimeRecords??[]).length} record{(data?.allTimeRecords??[]).length===1?'':'s'}</div></SectionHead>
-      {data?.allTimeRecords?.length?<TableWrap><table><thead><tr><th>Rank</th><th>Configuration</th><th>Stack</th><th>Score</th><th>Trades</th><th>Net result</th><th>Profit factor</th><th>Max DD</th><th>Trade manager</th><th>Pi status</th></tr></thead><tbody>
-        {data.allTimeRecords.slice(0,3).map((record,index)=>{const metric=record.metrics?.official;const synced=Boolean(record.runUid&&data.appliedStrategy?.sourceRunUid===record.runUid);const manager=GOLDILOCKS_BACKTEST_MANAGERS.find(item=>item.id===record.config.tradeManager)?.label.replace(' (default)','')??record.config.tradeManager??'—';return <tr key={record.id} style={{background:synced?'#123b3126':'transparent'}}>
-          <td><Link href={`/research/trials/${record.id}`} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>#{index+1}</Link></td><td><Link href={`/research/trials/${record.id}`} style={{color:'#dce8f4',textDecoration:'none'}}>{record.config.label??record.id.slice(0,8)}</Link></td><td>{getGoldilocksTimeframeProfile(record.config.timeframeProfile).label}</td><td>{record.config.minimumScore}/20</td><td>{metric?.sampleTrades??0}</td>
-          <td className={Number(metric?.netR??0)>=0?'good':'bad'}>{formatR(metric?.netR,true)}</td><td>{formatFactor(metric?.profitFactor)}</td><td>{formatR(metric?.maxDrawdownR)}</td><td>{manager}</td><td>{index===0?<Button title={!record.compatibility.compatible?record.compatibility.blockers.join(' '):synced?'This record is already the approved Pi configuration.':'Approval requires stopped automation and no open trade.'} disabled={sendingLeader||synced||!record.compatibility.compatible} onClick={()=>void sendGlobalLeaderToPi()}>{synced?'Active on Pi':sendingLeader?'Sending…':'Send #1 to Pi'}</Button>:synced?<QueueStatus $tone="live">Active on Pi</QueueStatus>:'—'}</td>
+      {data?.allTimeRecords?.length?<TableWrap><table><thead><tr><th>Rank / ID</th><th>Stack</th><th>Score</th><th>Manager</th><th>Target</th><th>Tune</th><th>Trades</th><th>Net result</th><th>Profit factor</th><th>Max DD</th><th>Pi status</th></tr></thead><tbody>
+        {data.allTimeRecords.slice(0,3).map((record,index)=>{const metric=record.metrics?.official;const synced=Boolean(record.runUid&&data.appliedStrategy?.sourceRunUid===record.runUid);const manager=GOLDILOCKS_BACKTEST_MANAGERS.find(item=>item.id===record.config.tradeManager)?.label.replace(' (default)','')??record.config.tradeManager??'—';const tweaks=record.config.strategyTweaks??{};const gates=record.config.gateSettings??{};const target=record.config.setAndForgetTargetMode==='opposing-base'?'Opp. base':record.config.setAndForgetTargetR?`${record.config.setAndForgetTargetR}R`:'—';return <tr key={record.id} style={{background:synced?'#123b3126':'transparent'}}>
+          <td><Link href={`/research/trials/${record.id}`} title={record.id} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>#{index+1} · {record.id.slice(0,8)}</Link></td><td>{getGoldilocksTimeframeProfile(record.config.timeframeProfile).label}</td><td>{record.config.minimumScore}/20</td><td>{manager}</td><td>{target}</td><td><details><summary style={{cursor:'pointer',color:'#8beeff'}}>Tune</summary><div style={{display:'grid',gap:5,minWidth:150,paddingTop:7,color:'#9eabba'}}><span>{record.config.confirmationMode==='touch-entry'?'Immediate touch':'Touch + engulf'}</span><span>Touches: {Number(tweaks.maximumPriorTouches??3)}</span><span>Distance: {Number(tweaks.maxEntryDistanceZoneFraction??0.5)}</span><span>Proximity: {gates.entryProximity===false?'off':'on'}</span><span>Risk: {String(record.config.riskProfile??'default')}</span></div></details></td><td>{metric?.sampleTrades??0}</td>
+          <td className={Number(metric?.netR??0)>=0?'good':'bad'}>{formatR(metric?.netR,true)}</td><td>{formatFactor(metric?.profitFactor)}</td><td>{formatR(metric?.maxDrawdownR)}</td><td>{index===0?<Button title={!record.compatibility.compatible?record.compatibility.blockers.join(' '):synced?'This record is already the approved Pi configuration.':'Approval requires stopped automation and no open trade.'} disabled={sendingLeader||synced||!record.compatibility.compatible} onClick={()=>void sendGlobalLeaderToPi()}>{synced?'Active on Pi':sendingLeader?'Sending…':'Send #1 to Pi'}</Button>:synced?<QueueStatus $tone="live">Active on Pi</QueueStatus>:'—'}</td>
         </tr>})}
       </tbody></table></TableWrap>:<Empty>The all-time table will populate after a configuration completes at least 100 trades.</Empty>}
     </Section>

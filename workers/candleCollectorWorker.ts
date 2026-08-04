@@ -10,7 +10,7 @@ const pair=process.argv[2]??'',mode: 'live'|'demo'=process.argv.some(value=>valu
 const controller=new AbortController();let stopped=false,lastRetentionAt=0;
 const strategy=getAppliedAutomationStrategy();
 const profile=getGoldilocksTimeframeProfile(strategy.config.timeframeProfile);
-const timeframes=[...new Set([profile.trend,profile.zone,profile.confirmation,profile.execution])];
+const timeframes=[...new Set([profile.trend,profile.zone,profile.confirmation])];
 const collectors=timeframes.map(timeframe=>new ContinuousCandleCollector({pair,timeframe,mode},{lookbackDays:strategy.config.lookbackDays,maxCandles:GOLDILOCKS_LIVE_CANDLE_LIMITS[timeframe],incrementalLimit:5_000}));
 const stop=()=>{stopped=true;controller.abort(new DOMException('Collector shutting down','AbortError'))};
 process.once('SIGINT',stop);process.once('SIGTERM',stop);

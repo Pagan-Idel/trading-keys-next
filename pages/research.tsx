@@ -203,7 +203,7 @@ export default function ResearchStatus(){
   const sendGlobalLeaderToPi=async()=>{
     setSendingLeader(true);
     try{
-      const response=await fetch('/api/automation/dashboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'move-to-latest'})});
+      const response=await fetch('/api/automation/dashboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'move-global-leader'})});
       const body=await response.json();if(!response.ok)throw new Error(body.error??'Unable to approve the record for Pi sync.');await load();
     }catch(sendError){setError(sendError instanceof Error?sendError.message:String(sendError))}finally{setSendingLeader(false)}
   };

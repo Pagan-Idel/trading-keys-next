@@ -13,6 +13,7 @@ let forcedCloseWindow: 'weekend' | 'holiday' | null = null;
 let monitorTimer: NodeJS.Timeout | null = null;
 let shuttingDown = false;
 let newsCoverageWeek='';
+let newsCoverageRefresh:Promise<void>|null=null;
 const modeArg = process.argv.find(argument => argument.startsWith('--mode='));
 const mode = modeArg?.split('=')[1] === 'live' ? 'live' : 'demo';
 const fixtureMode = process.env.TRADING_KEYS_AUTOMATION_E2E === 'true';
@@ -25,15 +26,17 @@ const writeReady = () => {
 const monitorMarket = async () => {
   const nowDate=new Date();
   const weekStart=new Date(Date.UTC(nowDate.getUTCFullYear(),nowDate.getUTCMonth(),nowDate.getUTCDate()-nowDate.getUTCDay())).toISOString().slice(0,10);
-  if(newsCoverageWeek!==weekStart){
-    try{
+  if(newsCoverageWeek!==weekStart&&!newsCoverageRefresh){
+    newsCoverageRefresh=(async()=>{
+      try{
       const now=Math.floor(Date.now()/1000);
       await ensureHistoricalNewsCoverage(now-35*86400,now+7*86400);
       newsCoverageWeek=weekStart;
       logMessage(`Historical news safety coverage checked for the current trading week; stored dates were reused.`);
-    }catch(error){
-      logMessage(`Historical news coverage refresh failed; affected setups remain paused: ${(error as Error).message}`);
-    }
+      }catch(error){
+        logMessage(`Historical news coverage refresh failed; affected setups remain paused: ${(error as Error).message}`);
+      }finally{newsCoverageRefresh=null}
+    })();
   }
   const currentlyOpen = isForexMarketOpen();
   const closeWindow = isWeekendCloseWindow() ? 'weekend' : isHolidayCloseWindow() ? 'holiday' : null;

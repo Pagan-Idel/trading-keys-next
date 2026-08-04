@@ -46,6 +46,11 @@ tailscale serve --bg --https=443 --set-path=/api/automation/approved-strategy ht
 tailscale serve status
 ```
 
+The backend target includes the same path because Tailscale Serve removes the matched
+mount prefix before proxying. If the Pi does not use tailnet MagicDNS, map the Windows
+Tailscale IPv4 address to its `*.ts.net` certificate hostname in `/etc/hosts`; do not
+replace the HTTPS URL with a raw IP address.
+
 Do not configure `/` and do not use `tailscale funnel`. Verify that another tailnet
 device receives 404 for unconfigured paths and 401 for the approved path without the
 bearer token. Tailscale supplies HTTPS and tailnet identity/access control; the bearer

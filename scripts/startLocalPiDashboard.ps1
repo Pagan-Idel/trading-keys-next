@@ -18,6 +18,10 @@ $env:PULSE_CONTROL_TOKEN = & ssh.exe -o BatchMode=yes 192.168.0.48 'sudo sed -n 
 if ([string]::IsNullOrWhiteSpace($env:PULSE_CONTROL_TOKEN)) {
   throw 'Could not load the Pi control token over the authenticated SSH connection.'
 }
+$env:AUTOMATION_CONFIG_READ_TOKEN = & ssh.exe -o BatchMode=yes 192.168.0.48 'sudo sed -n "s/^APPROVED_STRATEGY_SYNC_TOKEN=//p" /etc/trading-keys/automation.env'
+if ([string]::IsNullOrWhiteSpace($env:AUTOMATION_CONFIG_READ_TOKEN)) {
+  throw 'Could not load the approved-strategy token over the authenticated SSH connection.'
+}
 $env:OANDA_DEMO_ACCOUNT_ID = & ssh.exe -o BatchMode=yes 192.168.0.48 'sudo sed -n "s/^OANDA_DEMO_ACCOUNT_ID=//p" /etc/trading-keys/automation.env'
 $env:OANDA_DEMO_ACCOUNT_TOKEN = & ssh.exe -o BatchMode=yes 192.168.0.48 'sudo sed -n "s/^OANDA_DEMO_ACCOUNT_TOKEN=//p" /etc/trading-keys/automation.env'
 if ([string]::IsNullOrWhiteSpace($env:OANDA_DEMO_ACCOUNT_ID) -or [string]::IsNullOrWhiteSpace($env:OANDA_DEMO_ACCOUNT_TOKEN)) {

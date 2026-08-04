@@ -37,7 +37,7 @@ done
 DESIRED_STATE="$(node -e 'const value=JSON.parse(process.argv[1]);const state=value?.runtime?.desiredState;if(state!=="running"&&state!=="stopped")process.exit(1);process.stdout.write(state)' "$STATUS")"
 if [[ "$DESIRED_STATE" == running ]]; then
   READY=false
-  for _attempt in {1..30}; do
+  for _attempt in {1..120}; do
     if pgrep -af 'startRunner\.mjs|runner/startRunner' >/dev/null && pgrep -af 'goldilocksWorker\.mjs' >/dev/null; then READY=true; break; fi
     sleep 1
   done

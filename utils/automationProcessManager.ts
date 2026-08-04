@@ -18,7 +18,10 @@ const LOCK_PATH = path.join(DATA_DIRECTORY, 'automation-start.lock');
 const READY_PATH = path.join(DATA_DIRECTORY, 'automation-runner.ready');
 const LOG_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_RUNTIME_LOG_BYTES = 5 * 1024 * 1024;
-const READY_TIMEOUT_MS = Number(process.env.TRADING_KEYS_RUNNER_READY_TIMEOUT_MS ?? 20_000);
+// A nine-pair Pi cold start must spawn collectors and every session-eligible worker
+// before the runner publishes readiness. Keep the bound finite, but allow slower
+// storage and broker/news initialization on a freshly promoted release.
+const READY_TIMEOUT_MS = Number(process.env.TRADING_KEYS_RUNNER_READY_TIMEOUT_MS ?? 90_000);
 const MAX_RECOVERY_RETRIES = 3;
 const RETRY_DELAYS_MS = [1_000, 5_000, 15_000];
 let operation: Promise<unknown> = Promise.resolve();

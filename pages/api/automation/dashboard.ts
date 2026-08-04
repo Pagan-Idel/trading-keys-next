@@ -20,14 +20,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     res.setHeader('Cache-Control', 'no-store');
-    if(req.method==='GET'){
+    const getPiStatus=async()=>{
       const base=(process.env.PI_PULSE_URL??'http://127.0.0.1:4080').replace(/\/$/,'');
       const token=process.env.PI_PULSE_CONTROL_TOKEN??process.env.PULSE_CONTROL_TOKEN;
       const response=await fetch(`${base}/api/status`,{
         headers:token?{Authorization:`Bearer ${token}`}:{},cache:'no-store',signal:AbortSignal.timeout(10000),
       });
       const payload=await response.json();
-      if(!response.ok)return res.status(response.status).json(payload);
+      if(!response.ok)throw new Error(payload?.error??'Pi status check failed.');
+      return payload;
+    };
+    if(req.method==='GET'){
+      const payload=await getPiStatus();
       return res.status(200).json({
         ...payload.dashboard,
         strategyRecommendation:getLatestAutomationRecommendation(),
@@ -36,9 +40,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
     if (req.method === 'POST') {
       if(req.body?.action==='move-global-leader'){
-        const runtime=getAutomationRuntime(),dashboard=getAutomationDashboard(20);
-        if(runtime.running)return res.status(409).json({error:'Stop automation before changing its strategy configuration.'});
-        if(dashboard.activeTrades.length)return res.status(409).json({error:'Strategy configuration cannot change while the automation ledger has an open trade.'});
+        const pi=await getPiStatus();
+        if(pi.runtime?.running)return res.status(409).json({error:'Stop Pi automation before changing its strategy configuration.'});
+        if((pi.dashboard?.activeTrades??[]).length)return res.status(409).json({error:'Strategy configuration cannot change while the Pi ledger has an open trade.'});
         const leader=getBestAutoResearchResult();
         if(!leader)return res.status(409).json({error:'No all-time research leader is available.'});
         const compatibility=getAutomationCompatibility(leader.config);

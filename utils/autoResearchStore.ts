@@ -48,6 +48,9 @@ const database=()=>{
   if(!campaignColumns.has('preparation_done'))connection.exec('ALTER TABLE research_campaigns ADD COLUMN preparation_done INTEGER NOT NULL DEFAULT 0');
   if(!campaignColumns.has('preparation_total'))connection.exec('ALTER TABLE research_campaigns ADD COLUMN preparation_total INTEGER NOT NULL DEFAULT 0');
   if(!campaignColumns.has('dataset_key'))connection.exec('ALTER TABLE research_campaigns ADD COLUMN dataset_key TEXT');
+  const trialColumns=new Set((connection.prepare('PRAGMA table_info(research_trials)').all() as Array<{name:string}>).map(column=>column.name));
+  if(!trialColumns.has('queue_position'))connection.exec('ALTER TABLE research_trials ADD COLUMN queue_position INTEGER NOT NULL DEFAULT 0');
+  connection.exec(`UPDATE research_trials SET queue_position=rowid WHERE queue_position=0`);
   return connection;
 };
 
@@ -69,16 +72,32 @@ export const getActiveAutoResearchCampaign=()=>database().prepare(`SELECT id,sta
 
 export const enqueueAutoResearchCycle=(campaignId:string,datasetKey:string,configurations:BacktestRunConfig[])=>{
   const db=database(),createdAt=Date.now();
-  const insert=db.prepare(`INSERT OR IGNORE INTO research_trials(id,campaign_id,dataset_key,config_hash,config_json,status,created_at)
-    VALUES(?,?,?,?,?,'queued',?)`);
+  const insert=db.prepare(`INSERT OR IGNORE INTO research_trials(id,campaign_id,dataset_key,config_hash,config_json,status,created_at,queue_position)
+    VALUES(?,?,?,?,?,'queued',?,?)`);
+  const nextPosition=Number((db.prepare('SELECT COALESCE(MAX(queue_position),0)+1 AS value FROM research_trials WHERE campaign_id=?').get(campaignId) as {value:number}).value);
   let added=0;
   db.transaction(()=>{
     for(const [index,config] of configurations.entries()){
-      const result=insert.run(randomUUID(),campaignId,datasetKey,researchConfigHash(config),json(config),new Date(createdAt+index).toISOString());
+      const result=insert.run(randomUUID(),campaignId,datasetKey,researchConfigHash(config),json(config),new Date(createdAt+index).toISOString(),nextPosition+index);
       added+=result.changes;
     }
   })();
   return added;
+};
+
+export const replaceQueuedAutoResearchCycle=(campaignId:string,datasetKey:string,configurations:BacktestRunConfig[])=>{
+  const db=database();
+  const campaign=db.prepare('SELECT config_json AS configJson FROM research_campaigns WHERE id=?').get(campaignId) as {configJson:string}|undefined;
+  if(!campaign)throw new Error('Auto research campaign not found.');
+  const campaignConfig=JSON.parse(campaign.configJson) as AutoResearchCampaignConfig;
+  campaignConfig.configurations=configurations;
+  db.transaction(()=>{
+    db.prepare(`DELETE FROM research_trials WHERE campaign_id=? AND status='queued'`).run(campaignId);
+    db.prepare('UPDATE research_campaigns SET config_json=?,updated_at=? WHERE id=?').run(json(campaignConfig),now(),campaignId);
+  })();
+  const queued=enqueueAutoResearchCycle(campaignId,datasetKey,configurations);
+  addAutoResearchEvent(campaignId,'queue_rebased',`QUEUE REBASED · ${queued} trials anchored to the current eligible leader.`,undefined,{datasetKey,queued});
+  return queued;
 };
 
 export const createAutoResearchCampaign=(config:AutoResearchCampaignConfig,datasetKey:string,enqueue=true)=>{
@@ -110,7 +129,7 @@ export const claimNextAutoResearchTrial=(campaignId:string)=>{
   const db=database(),startedAt=now();
   return db.transaction(()=>{
     const row=db.prepare(`SELECT id,config_json AS configJson,dataset_key AS datasetKey FROM research_trials
-      WHERE campaign_id=? AND status='queued' ORDER BY created_at,id LIMIT 1`).get(campaignId) as {id:string;configJson:string;datasetKey:string}|undefined;
+      WHERE campaign_id=? AND status='queued' ORDER BY queue_position,created_at,id LIMIT 1`).get(campaignId) as {id:string;configJson:string;datasetKey:string}|undefined;
     if(!row)return undefined;
     db.prepare(`UPDATE research_trials SET status='running',started_at=? WHERE id=?`).run(startedAt,row.id);
     updateAutoResearchCampaign(campaignId,{currentTrialId:row.id,status:'running'});
@@ -135,8 +154,8 @@ export const getAutoResearchDashboard=(campaignId?:string)=>{
     FROM research_campaigns ORDER BY created_at DESC LIMIT 20`).all() as Array<Record<string,unknown>>);
   const selected=campaignId??String(campaigns[0]?.id??'');
   const trials=selected?(db.prepare(`SELECT id,dataset_key AS datasetKey,status,backtest_run_id AS backtestRunId,config_json AS configJson,
-    metrics_json AS metricsJson,error,created_at AS createdAt,started_at AS startedAt,completed_at AS completedAt
-    FROM research_trials WHERE campaign_id=? ORDER BY created_at,id`).all(selected) as Array<Record<string,unknown>>).map(row=>{
+    metrics_json AS metricsJson,error,created_at AS createdAt,started_at AS startedAt,completed_at AS completedAt,queue_position AS queuePosition
+    FROM research_trials WHERE campaign_id=? ORDER BY queue_position,created_at,id`).all(selected) as Array<Record<string,unknown>>).map(row=>{
       const summaryConfig=JSON.parse(String(row.configJson)) as BacktestRunConfig;
       delete summaryConfig.researchManifest;
       return {...row,config:summaryConfig,metrics:row.metricsJson?JSON.parse(String(row.metricsJson)):null,configJson:undefined,metricsJson:undefined};
@@ -145,6 +164,52 @@ export const getAutoResearchDashboard=(campaignId?:string)=>{
   const events=selected?db.prepare(`SELECT id,trial_id AS trialId,created_at AS createdAt,step,message,data_json AS dataJson
     FROM research_events WHERE campaign_id=? ORDER BY id DESC LIMIT 200`).all(selected).map((row:any)=>({...row,data:row.dataJson?JSON.parse(row.dataJson):undefined,dataJson:undefined})):[];
   return {campaigns,selectedCampaignId:selected,trials,counts,events};
+};
+
+export const getBestAutoResearchResult=()=>{
+  const rows=database().prepare(`SELECT config_json AS configJson,metrics_json AS metricsJson
+    ,id,backtest_run_id AS backtestRunId,completed_at AS completedAt
+    FROM research_trials WHERE status='completed' AND metrics_json IS NOT NULL`).all() as Array<{id:string;backtestRunId:string;completedAt:string;configJson:string;metricsJson:string}>;
+  return rows.map(row=>({
+    id:row.id,backtestRunId:row.backtestRunId,completedAt:row.completedAt,
+    config:JSON.parse(row.configJson) as BacktestRunConfig,
+    metrics:JSON.parse(row.metricsJson) as {official?:{sampleTrades?:number;expectancyR?:number|null;maxDrawdownR?:number}},
+  })).filter(row=>Number(row.metrics.official?.sampleTrades??0)>=100)
+    .sort((left,right)=>Number(right.metrics.official?.expectancyR??Number.NEGATIVE_INFINITY)-Number(left.metrics.official?.expectancyR??Number.NEGATIVE_INFINITY)
+      ||Number(left.metrics.official?.maxDrawdownR??Number.POSITIVE_INFINITY)-Number(right.metrics.official?.maxDrawdownR??Number.POSITIVE_INFINITY))[0];
+};
+
+export const getBestAutoResearchConfiguration=()=>getBestAutoResearchResult()?.config;
+
+export const updateQueuedResearchTrial=(campaignId:string,trialId:string,config:BacktestRunConfig)=>{
+  const result=database().prepare(`UPDATE research_trials SET config_json=?,config_hash=?
+    WHERE id=? AND campaign_id=? AND status='queued'`).run(json(config),researchConfigHash(config),trialId,campaignId);
+  if(!result.changes)throw new Error('Only queued research configurations can be edited.');
+  addAutoResearchEvent(campaignId,'trial_config_updated',`QUEUE UPDATED · ${config.label}.`,trialId,{config});
+  return {id:trialId,status:'queued' as const};
+};
+
+export const removeQueuedResearchTrial=(campaignId:string,trialId:string)=>{
+  const result=database().prepare(`DELETE FROM research_trials WHERE id=? AND campaign_id=? AND status='queued'`).run(trialId,campaignId);
+  if(!result.changes)throw new Error('Only queued research configurations can be removed.');
+  addAutoResearchEvent(campaignId,'trial_removed','QUEUE UPDATED · queued configuration removed.',trialId);
+  return {id:trialId,removed:true};
+};
+
+export const moveQueuedResearchTrial=(campaignId:string,trialId:string,direction:'up'|'down')=>{
+  const db=database();
+  db.transaction(()=>{
+    const current=db.prepare(`SELECT id,queue_position AS position FROM research_trials WHERE id=? AND campaign_id=? AND status='queued'`).get(trialId,campaignId) as {id:string;position:number}|undefined;
+    if(!current)throw new Error('Only queued research configurations can be moved.');
+    const operator=direction==='up'?'<':'>';
+    const order=direction==='up'?'DESC':'ASC';
+    const neighbor=db.prepare(`SELECT id,queue_position AS position FROM research_trials WHERE campaign_id=? AND status='queued' AND queue_position ${operator} ? ORDER BY queue_position ${order} LIMIT 1`).get(campaignId,current.position) as {id:string;position:number}|undefined;
+    if(!neighbor)return;
+    db.prepare('UPDATE research_trials SET queue_position=? WHERE id=?').run(neighbor.position,current.id);
+    db.prepare('UPDATE research_trials SET queue_position=? WHERE id=?').run(current.position,neighbor.id);
+  })();
+  addAutoResearchEvent(campaignId,'trial_moved',`QUEUE UPDATED · configuration moved ${direction}.`,trialId);
+  return {id:trialId,direction};
 };
 
 export type AutoResearchTrialDetail={

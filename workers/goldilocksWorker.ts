@@ -8,7 +8,7 @@ import { closeTradePartial } from '../utils/oanda/api/close-partial.ts';
 import { ACTION } from '../utils/oanda/orderTypes.ts';
 import { placeTrade } from '../utils/placeTrade.ts';
 import { annotateConfluenceAt, buildGoldilocksHistory, buildGoldilocksHistoryChunked, findFreshGoldilocksConfirmations, getGoldilocksTrend, toStrategyCandles } from '../utils/goldilocksScanner.ts';
-import { getGoldilocksZoneFormationWindow, validateFinalEntryAfterEngulf, validateGoldilocksEntryProximity, validateGoldilocksFinalExecutableEntry } from '../utils/goldilocksStrategy.ts';
+import { getGoldilocksZoneFormationWindow, validateGoldilocksEntryProximity, validateTwoToOneRunway } from '../utils/goldilocksStrategy.ts';
 import { getHistoricalNewsGateForRange } from '../utils/historicalNewsStore.ts';
 import { evaluateSpread } from '../utils/spreadGuard.ts';
 import { isTradeSessionOpen } from '../utils/sessionUtils.ts';
@@ -18,7 +18,7 @@ import { isHolidayCloseWindow, isWeekendCloseWindow, isWeekendLiquidationWindow 
 import { clearActiveTrade, getActiveTrade, getAppliedAutomationStrategy, getAutomationZoneSnapshot, getRiskProfile, getZoneLifecycle, persistZoneLifecycle, recordTradeManagementEvent, saveAutomationZoneSnapshot, setActiveTrade, updateWorkerStatus } from '../utils/automationStore.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { classifyTradeOutcome, saveTradeRecord, type JournalData } from '../utils/tradeHistory.ts';
-import { GOLDILOCKS_DEMO_TIMEFRAMES, GOLDILOCKS_LIVE_CANDLE_LIMITS, GOLDILOCKS_TIMEFRAME_SECONDS, getGoldilocksMinimumScore } from '../utils/goldilocksConfig.ts';
+import { getGoldilocksTimeframeProfile, GOLDILOCKS_LIVE_CANDLE_LIMITS, GOLDILOCKS_TIMEFRAME_SECONDS, getGoldilocksMinimumScore } from '../utils/goldilocksConfig.ts';
 import { scoreGoldilocksSetup, type GoldilocksScoreResult } from '../utils/goldilocksScoring.ts';
 import { calculateScoreRisk, type RiskProfile } from '../utils/dynamicRisk.ts';
 import { formatGoldilocksZoneAge, getGoldilocksZoneAgeDays, getGoldilocksZoneAgeSeconds } from '../utils/zoneAge.ts';
@@ -36,9 +36,11 @@ import {
   getGoldilocksPartialClosePlan,
 } from '../utils/goldilocksTradeManagement.ts';
 
-const TREND_TIMEFRAME = GOLDILOCKS_DEMO_TIMEFRAMES.trend;
-const ZONE_TIMEFRAME = GOLDILOCKS_DEMO_TIMEFRAMES.zone;
-const CONFIRMATION_TIMEFRAME = GOLDILOCKS_DEMO_TIMEFRAMES.confirmation;
+const appliedStrategy=getAppliedAutomationStrategy();
+const TIMEFRAMES=getGoldilocksTimeframeProfile(appliedStrategy.config.timeframeProfile);
+const TREND_TIMEFRAME = TIMEFRAMES.trend;
+const ZONE_TIMEFRAME = TIMEFRAMES.zone;
+const CONFIRMATION_TIMEFRAME = TIMEFRAMES.confirmation;
 const CONFIRMATION_SECONDS = GOLDILOCKS_TIMEFRAME_SECONDS[CONFIRMATION_TIMEFRAME];
 const CANDLE_CLOSE_GRACE_MS = 350;
 const ZONE_CANDLE_COUNT = 5_000;
@@ -49,8 +51,11 @@ const modeArg = process.argv.find(argument => argument.startsWith('--mode='));
 const mode: 'live' | 'demo' = modeArg?.split('=')[1] === 'live' ? 'live' : 'demo';
 const usesSharedMarketDataHub = Boolean(process.env.OANDA_MARKET_DATA_HUB_URL);
 const marketDataOwner=`worker-${process.pid}-${pair}`;
-const appliedStrategy=getAppliedAutomationStrategy();
 const minimumScore = Number(appliedStrategy.config.minimumScore??getGoldilocksMinimumScore());
+const confirmationMode=appliedStrategy.config.confirmationMode??'close-through';
+const tradeManager=appliedStrategy.config.tradeManager??GOLDILOCKS_DEFAULT_MANAGEMENT.policyId;
+const setAndForget=tradeManager==='set-and-forget-2r-v1';
+const riskProfile=appliedStrategy.config.riskProfile??getRiskProfile();
 
 let killed = false;
 const shutdownController=new AbortController();
@@ -117,7 +122,7 @@ const tradeManagerLog = (
 ) => {
   logMessage(message, data, { pair, level, fileName: 'goldilocksTradeManager', step });
   if(data&&typeof data==='object'&&'tradeId' in data&&typeof (data as {tradeId?:unknown}).tradeId==='string'){
-    recordTradeManagementEvent({tradeId:(data as {tradeId:string}).tradeId,pair,mode,step,policyId:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,data:{message,level,...data}});
+    recordTradeManagementEvent({tradeId:(data as {tradeId:string}).tradeId,pair,mode,step,policyId:tradeManager,data:{message,level,...data}});
   }
 };
 
@@ -139,7 +144,7 @@ const journalFor = (
     bid: String(spread.bid), ask: String(spread.ask), raw: spread.rawSpread,
     buffer: 0, pipSize: spread.pipSize,
   },
-  tf: `${TREND_TIMEFRAME}/${ZONE_TIMEFRAME}/${CONFIRMATION_TIMEFRAME}/${GOLDILOCKS_DEMO_TIMEFRAMES.execution}`,
+  tf: `${TREND_TIMEFRAME}/${ZONE_TIMEFRAME}/${CONFIRMATION_TIMEFRAME}/${TIMEFRAMES.execution}`,
   timestamp: new Date().toISOString(),
   goldilocks: {
     zoneId: zone.id, kind: zone.kind, side: zone.side, touches: zone.touches,
@@ -221,12 +226,12 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
   let lastTrailingAttempt = 0;
   const price = (value: number) => Number.isFinite(value) ? value.toFixed(precision) : 'unavailable';
   journal.tradeManagement = {
-    breakEvenAtOneR: true,
-    policyId:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+    breakEvenAtOneR: !setAndForget,
+    policyId:tradeManager,
     breakEvenActivated,
     breakEvenPrice: entry,
-    partialProfitAtOneR: true,
-    partialCloseFraction: GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
+    partialProfitAtOneR: !setAndForget,
+    partialCloseFraction: setAndForget?0:GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
     partialProfitTaken,
     partialUnitsClosed,
     ...(partialProfitTaken
@@ -247,10 +252,12 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
   });
   tradeManagerLog(
     'trade_manager_armed',
-    `MANAGER ARMED · ${direction} ${pair} · entry ${price(entry)} · at +1R bank 50%, remove TP, and trail the remainder with 2x ATR(14).`,
+    setAndForget
+      ?`MANAGER ARMED · ${direction} ${pair} · entry ${price(entry)} · original stop and broker target remain untouched.`
+      :`MANAGER ARMED · ${direction} ${pair} · entry ${price(entry)} · at +1R bank 50%, remove TP, and trail the remainder with 2x ATR(14).`,
     { tradeId: trade.id, direction, entry, stopLoss: managedStopLoss, retainedTarget, riskDistance, currentUnits:trade.currentUnits, breakEvenActivated, partialProfitTaken, mode },
   );
-  tradeManagerLog(
+  if(!setAndForget)tradeManagerLog(
     breakEvenActivated ? 'trade_manager_break_even' : 'trade_manager_break_even_armed',
     breakEvenActivated
       ? `PROFIT PROTECTION ACTIVE · broker stop is at entry ${price(entry)}${partialProfitTaken ? ' and the 50% partial is already banked' : ''}.`
@@ -274,7 +281,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
   const firstReachedAt:Record<string,number>={};
   while (!killed) {
     if(usesSharedMarketDataHub)await setMarketDataInterest(pair,true,marketDataOwner);
-    if(isWeekendLiquidationWindow()&&Date.now()-lastWeekendCloseAttempt>=60_000){
+    if(appliedStrategy.config.closeTradesBeforeWeekend!==false&&isWeekendLiquidationWindow()&&Date.now()-lastWeekendCloseAttempt>=60_000){
       lastWeekendCloseAttempt=Date.now();
       tradeManagerLog('trade_manager_weekend_liquidation', `WEEKEND LIQUIDATION · closing ${pair} before the Friday market close to avoid carrying the position over the weekend.`, {tradeId:trade.id,cutoffTimeZone:'America/New_York',cutoffHour:16}, 'warn');
       const closed=await closeTrade({action:ACTION.CLOSE,pair},pair,undefined,mode);
@@ -282,7 +289,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
         journal.tradeManagement={
           ...journal.tradeManagement,
           breakEvenAtOneR:true,
-          policyId:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
+          policyId:tradeManager,
           breakEvenActivated,
           partialProfitAtOneR:true,
           partialCloseFraction:GOLDILOCKS_DEFAULT_MANAGEMENT.partialCloseFraction,
@@ -353,7 +360,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
         const key=`${milestone>=0?'+':''}${milestone}R`;
         if((milestone>=0?progressR>=milestone:progressR<=milestone)&&firstReachedAt[key]===undefined)firstReachedAt[key]=quoteTime;
       }
-      if (
+      if (!setAndForget &&
         !breakEvenActivated &&
         (partialProfitTaken ||
           progressR >= GOLDILOCKS_DEFAULT_MANAGEMENT.breakEvenAtR) &&
@@ -381,7 +388,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
           tradeManagerLog('trade_manager_break_even_retry', `BREAK-EVEN MOVE DELAYED · ${pair} reached +1.00R but the broker did not accept the stop update; retrying safely.`, { tradeId: trade.id, reason: result.reason }, 'warn');
         }
       }
-      if (
+      if (!setAndForget &&
         breakEvenActivated &&
         !partialProfitTaken &&
         progressR >= GOLDILOCKS_DEFAULT_MANAGEMENT.partialAtR &&
@@ -432,7 +439,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
           }
         }
       }
-      if (partialProfitTaken && breakEvenActivated) {
+      if (!setAndForget && partialProfitTaken && breakEvenActivated) {
         favorableExtreme = direction === 'BUY'
           ? Math.max(favorableExtreme, currentPrice)
           : Math.min(favorableExtreme, currentPrice);
@@ -515,7 +522,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
     await wait(15_000);
   }
   const path:TradePathSummary={coverageStartTime,coverageEndTime,candleCount:quoteCount,mfeR:Number.isFinite(mfeR)?mfeR:0,maeR:Number.isFinite(maeR)?maeR:0,endingR,firstReachedAt,ambiguousCandles:[]};
-  journal.tradeManagement={...journal.tradeManagement!,policyId:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,partialProfitTaken,partialUnitsClosed,path};
+  journal.tradeManagement={...journal.tradeManagement!,policyId:tradeManager,partialProfitTaken,partialUnitsClosed,path};
   tradeManagerLog('trade_manager_path_summary',`MANAGEMENT PATH SAVED · ${pair} sampled ${quoteCount} executable quotes · MFE ${path.mfeR.toFixed(2)}R · MAE ${path.maeR.toFixed(2)}R.`,{tradeId:trade.id,path});
   if (!killed) {
     await recordClosedTrade(trade, journal, breakEvenActivated);
@@ -542,7 +549,7 @@ const recoverOpenTrade = async () => {
       high: Number(trade.takeProfitOrder?.price ?? 0),
     },
     spread: { bid: '', ask: '', raw: 0, buffer: 0, pipSize: emptySpread.pipSize },
-    tf: `${TREND_TIMEFRAME}/${ZONE_TIMEFRAME}/${CONFIRMATION_TIMEFRAME}/${GOLDILOCKS_DEMO_TIMEFRAMES.execution}`,
+    tf: `${TREND_TIMEFRAME}/${ZONE_TIMEFRAME}/${CONFIRMATION_TIMEFRAME}/${TIMEFRAMES.execution}`,
     timestamp: trade.openTime ?? new Date().toISOString(),
   };
   tradeManagerLog('trade_manager_recovered', `TRADE RECOVERED · found open broker trade ${trade.id}; restoring the dashboard ledger and manager.`, { tradeId: trade.id, openedAt: trade.openTime });
@@ -561,7 +568,7 @@ const loadZoneHistory = async () => {
 };
 
 const loadScoringContext = async (zone: Parameters<typeof annotateConfluenceAt>[0], time: number, entry:number, direction:'BUY'|'SELL',stopLoss:number,takeProfit:number) => {
-  const snapshots = await Promise.all(GOLDILOCKS_DEMO_TIMEFRAMES.confluence.map(async timeframe => {
+  const snapshots = await Promise.all(TIMEFRAMES.confluence.map(async timeframe => {
     if (timeframe === ZONE_TIMEFRAME && cachedHistory) return { timeframe, history: cachedHistory.history, candles: [],strategyCandles:cachedHistory.candles };
     const candles=readWorkingCandles(timeframe);
     return { timeframe, history: buildGoldilocksHistoryChunked(candles, 1_000, 200), candles,strategyCandles:toStrategyCandles(candles) };
@@ -603,7 +610,7 @@ const scan = async () => {
   }
   const confirmationRaw = await loadConfirmationCandles();
   const confirmationCandles = toStrategyCandles(confirmationRaw);
-  const confirmations = findFreshGoldilocksConfirmations(snapshot.history, confirmationCandles, CONFIRMATION_SECONDS,Date.now(),snapshot.candles,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME]);
+  const confirmations = findFreshGoldilocksConfirmations(snapshot.history, confirmationCandles, CONFIRMATION_SECONDS,Date.now(),snapshot.candles,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME],confirmationMode);
   const setups=confirmations.map(confirmation=>{
     const touchIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.touchCandle.time);
     const confirmationIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.confirmationCandle.time);
@@ -611,7 +618,7 @@ const scan = async () => {
       approachPressure:touchIndex>=0&&confirmationIndex>touchIndex?measureGoldilocksApproachPressure(confirmation.zone,confirmationCandles,touchIndex,confirmationIndex):undefined};
   });
   const trendCandles=readWorkingCandles(TREND_TIMEFRAME);
-  const executionCandles=readWorkingCandles(GOLDILOCKS_DEMO_TIMEFRAMES.execution,500);
+  const executionCandles=readWorkingCandles(TIMEFRAMES.execution,500);
   const snapshotSetups=setups.length?setups:getActiveTrade(pair)
     ?((getAutomationZoneSnapshot(pair)?.setups??[]) as typeof setups):[];
   saveAutomationZoneSnapshot({
@@ -619,7 +626,7 @@ const scan = async () => {
     zoneTimeframe:ZONE_TIMEFRAME,confirmationTimeframe:CONFIRMATION_TIMEFRAME,
     zones:snapshot.history.activeZones.filter(zone=>zone.kind==='base'),
     candles:{[ZONE_TIMEFRAME]:snapshot.candles.slice(-400),[CONFIRMATION_TIMEFRAME]:confirmationCandles.slice(-500),
-      [TREND_TIMEFRAME]:toStrategyCandles(trendCandles).slice(-400),[GOLDILOCKS_DEMO_TIMEFRAMES.execution]:toStrategyCandles(executionCandles).slice(-500)},
+      [TREND_TIMEFRAME]:toStrategyCandles(trendCandles).slice(-400),[TIMEFRAMES.execution]:toStrategyCandles(executionCandles).slice(-500)},
     confirmationCount:confirmations.length,setups:snapshotSetups,
   });
   const blocked = await safetyBlockReason();
@@ -699,12 +706,10 @@ const scan = async () => {
       updateWorkerStatus(pair, 'waiting', 'entry_proximity_rejected', liveProximity.reason, mode);
       continue;
     }
-    const finalCheck = validateFinalEntryAfterEngulf(
-      confirmation.zone,
-      snapshot.history.activeZones,
-      confirmation.confirmationCandle.close,
-      liveEntry,
-    );
+    const finalCheck = validateTwoToOneRunway(confirmation.zone,snapshot.history.activeZones,liveEntry,{
+      targetRewardRatio:setAndForget?appliedStrategy.config.setAndForgetTargetR:2,
+      targetOpposingBase:setAndForget&&appliedStrategy.config.setAndForgetTargetMode==='opposing-base',
+    });
     if (!finalCheck.allowed) {
       rememberAttemptedConfirmation(key);
       updateWorkerStatus(pair, 'waiting', 'runway_rejected', finalCheck.reason, mode);
@@ -752,7 +757,7 @@ const scan = async () => {
       {pair,fileName:'goldilocksWorker',step:'approach_pressure_measured'},
     );
     logMessage(
-      `ZONE CORRIDOR · ${pair} · normalized demand-to-supply space captured for ${GOLDILOCKS_DEMO_TIMEFRAMES.confluence.join('/')}.`,
+      `ZONE CORRIDOR · ${pair} · normalized demand-to-supply space captured for ${TIMEFRAMES.confluence.join('/')}.`,
       {zoneId:scoringContext.zone.id,confirmationTime:confirmation.confirmationCandle.time,zoneCorridors:scoringContext.zoneCorridors},
       {pair,fileName:'goldilocksWorker',step:'zone_corridor_measured'},
     );
@@ -773,7 +778,7 @@ const scan = async () => {
       continue;
     }
 
-    const riskDecision = calculateScoreRisk(score.total, score.minimumScore, getRiskProfile());
+    const riskDecision = calculateScoreRisk(score.total, score.minimumScore, riskProfile);
     logMessage(
       `DYNAMIC RISK | ${pair} | ${score.total}/20 uses ${riskDecision.riskPercentage.toFixed(3)}% account equity (${riskDecision.profile} profile).`,
       riskDecision,
@@ -794,16 +799,14 @@ const scan = async () => {
       action: direction,
       stopLoss: finalCheck.stopLoss,
       takeProfit: finalCheck.takeProfit,
-      exactRewardRisk: 2,
+      exactRewardRisk:setAndForget&&appliedStrategy.config.setAndForgetTargetMode==='opposing-base'
+        ?undefined:(setAndForget?appliedStrategy.config.setAndForgetTargetR??2:2),
       risk: riskDecision.riskPercentage,
       executableEntryGuard:({executableEntry})=>{
-        const executionCheck=validateGoldilocksFinalExecutableEntry(
-          confirmation.zone,
-          snapshot.history.activeZones,
-          confirmation.touchCandle,
-          confirmation.confirmationCandle.close,
-          executableEntry,
-        );
+        const executionCheck=validateTwoToOneRunway(confirmation.zone,snapshot.history.activeZones,executableEntry,{
+          targetRewardRatio:setAndForget?appliedStrategy.config.setAndForgetTargetR:2,
+          targetOpposingBase:setAndForget&&appliedStrategy.config.setAndForgetTargetMode==='opposing-base',
+        });
         return {allowed:executionCheck.allowed,reason:executionCheck.reason};
       },
     }, mode);
@@ -828,7 +831,7 @@ const scan = async () => {
 
 const run = async () => {
   if (!pair) throw new Error('No pair was provided to the Goldilocks worker.');
-  updateWorkerStatus(pair, 'starting', 'goldilocks_starting', `Goldilocks demo worker starting: ${TREND_TIMEFRAME} trend → ${ZONE_TIMEFRAME} zones → ${CONFIRMATION_TIMEFRAME} departure/touch/confirmation → ${GOLDILOCKS_DEMO_TIMEFRAMES.execution} trade management · dynamic ${getRiskProfile()} risk · minimum score ${minimumScore} · config ${appliedStrategy.sourceRunUid}.`, mode);
+  updateWorkerStatus(pair, 'starting', 'goldilocks_starting', `Goldilocks demo worker starting: ${TREND_TIMEFRAME} trend → ${ZONE_TIMEFRAME} zones → ${CONFIRMATION_TIMEFRAME} ${confirmationMode} → ${TIMEFRAMES.execution} execution · ${tradeManager} · ${riskProfile} risk · minimum score ${minimumScore} · config ${appliedStrategy.sourceRunUid}.`, mode);
   await recoverOpenTrade();
   while (!killed) {
     try {

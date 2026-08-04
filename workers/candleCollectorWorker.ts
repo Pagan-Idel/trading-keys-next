@@ -1,5 +1,6 @@
 import { ContinuousCandleCollector } from '../utils/continuousCandleCollector.ts';
-import { GOLDILOCKS_DEMO_TIMEFRAMES,GOLDILOCKS_LIVE_CANDLE_LIMITS } from '../utils/goldilocksConfig.ts';
+import { getGoldilocksTimeframeProfile,GOLDILOCKS_LIVE_CANDLE_LIMITS } from '../utils/goldilocksConfig.ts';
+import { getAppliedAutomationStrategy } from '../utils/automationStore.ts';
 import { pruneArchivedCandles } from '../utils/candleArchive.ts';
 import { logMessage } from '../utils/automationLogger.ts';
 import { workerScanJitterMs } from '../utils/workerRuntime.ts';
@@ -7,8 +8,10 @@ import { isExpectedCollectorShutdown } from '../utils/candleCollectorRuntime.ts'
 
 const pair=process.argv[2]??'',mode: 'live'|'demo'=process.argv.some(value=>value==='--mode=live')?'live':'demo';
 const controller=new AbortController();let stopped=false,lastRetentionAt=0;
-const timeframes=[...new Set([GOLDILOCKS_DEMO_TIMEFRAMES.trend,GOLDILOCKS_DEMO_TIMEFRAMES.zone,GOLDILOCKS_DEMO_TIMEFRAMES.confirmation])];
-const collectors=timeframes.map(timeframe=>new ContinuousCandleCollector({pair,timeframe,mode},{lookbackDays:730,maxCandles:GOLDILOCKS_LIVE_CANDLE_LIMITS[timeframe],incrementalLimit:5_000}));
+const strategy=getAppliedAutomationStrategy();
+const profile=getGoldilocksTimeframeProfile(strategy.config.timeframeProfile);
+const timeframes=[...new Set([profile.trend,profile.zone,profile.confirmation,profile.execution])];
+const collectors=timeframes.map(timeframe=>new ContinuousCandleCollector({pair,timeframe,mode},{lookbackDays:strategy.config.lookbackDays,maxCandles:GOLDILOCKS_LIVE_CANDLE_LIMITS[timeframe],incrementalLimit:5_000}));
 const stop=()=>{stopped=true;controller.abort(new DOMException('Collector shutting down','AbortError'))};
 process.once('SIGINT',stop);process.once('SIGTERM',stop);
 const wait=(milliseconds:number)=>new Promise<void>(resolve=>{const timer=setTimeout(resolve,milliseconds);controller.signal.addEventListener('abort',()=>{clearTimeout(timer);resolve()},{once:true})});

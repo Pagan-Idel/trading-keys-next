@@ -64,6 +64,22 @@ key, backtest run ID, official realized-R metrics, per-pair metrics, and every
 versioned management-policy summary remain attached to each trial. The default
 archive ceiling is 5 GiB including the candle SQLite WAL/SHM and retained legacy gzip
 sources; acquisition pauses at the high-water mark instead of silently deleting data.
+Automatic research is continuous by default. After all configurations finish on one
+sealed snapshot, the worker waits for a later five-minute dataset boundary, acquires
+and seals that bounded snapshot, and queues the same comparison matrix again. Each
+trial remains attached to its own immutable dataset key and end time. The campaign
+continues until a user explicitly pauses or stops it; live/demo strategy settings are
+never promoted automatically.
+Automatic comparison matrices use a fixed 365-day lookback for every strategy stack.
+The queue editor identifies trials by their immutable primary key and exposes only
+research inputs; labels are generated from the trial ID, stack, and score threshold.
+Each continuous cycle contains five trials. The first four stay anchored to the best
+eligible stored configuration: an exact control, a one-point score adjustment, a
+one-factor touch adjustment, and a fixed-target manager comparison. The fifth is a
+seeded wildcard that rotates among manager, target, confirmation, entry-distance,
+touch-limit, and score-weight variants. Wildcards remain research-only and never
+change live/demo settings automatically. Session availability is not manually editable
+from the queue.
 
 ## Event vocabulary
 
@@ -137,11 +153,12 @@ unchanged, so counterfactual manager research cannot silently alter strategy beh
 The read-only `GET /api/automation/trade-management?tradeId=<broker-trade-id>` endpoint
 returns the permanent live/demo manager ledger for one broker trade.
 
-Live/demo automation and automatic research campaigns execute
+The built-in demo automation and automatic research control execute
 `secure-half-atr-runner-v3` (`Secure Half + ATR Runner`): at +1R the stop moves to entry first, 50% is closed,
 the broker take-profit is removed, and the remaining 50% follows a causal 2x ATR(14)
-chandelier stop that never loosens or moves behind entry. The research child rows expose all policies side by
-side for comparison. A manual Backtesting run may explicitly select the prior
+chandelier stop that never loosens or moves behind entry. An explicitly approved demo
+configuration may instead use set-and-forget with its selected fixed-R or opposing-base
+target. The research child rows expose all policies side by side for comparison. A manual Backtesting run may explicitly select the prior
 `legacy-score-tiered-2r-4r-v1` manager instead; that choice is frozen in the run
 configuration and affects official realized-R and portfolio metrics without changing
 live/demo automation. Fresh manual runs default to `set-and-forget-2r-v1`, which retains

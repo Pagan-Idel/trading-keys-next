@@ -32,7 +32,7 @@ execution constraints.
 These are intentionally small for rapid practice testing. Keep them centralized in
 `utils/goldilocksConfig.ts` when moving to higher timeframes.
 
-Backtesting, automatic research, and Strategy Lab also expose the non-live
+Backtesting, automatic research, Strategy Lab, and approved demo automation expose the
 `m15-m5-m1-research-v3` profile: M15 trend/range, M5 zones and first-outside
 lifecycle, and M1 prior-touch purity plus first-touch/later close-through
 confirmation. M1 is also the lowest available post-entry resolution. Entry becomes
@@ -119,12 +119,14 @@ contains only components capable of awarding points.
 The Score Components card leads with the stored total out of 20, its minimum threshold,
 and the resulting pass/fail status.
 
-The historical research runner also exposes a separate, non-live
+The historical research runner and approved demo automation also expose a separate
 `d1-h4-h1-research-v3` profile. It mirrors the contract as D1 trend/range, H4 zones,
 first-outside and prior-touch purity, H1 first touch plus a distinct later H1
 close-through confirmation, and M5 post-entry ordering. Confluence is H1/H4/D1.
-Selecting either research profile on Backtesting does not change the live/demo worker,
-which remains locked to H1/M15/M5/M1.
+Selecting either research profile on Backtesting does not itself change automation.
+After explicit approval and a stopped/start activation with no open trade, the demo
+worker uses the approved profile's trend, zone, confirmation, execution, and confluence
+timeframes.
 
 Backtesting also stores a selected trade manager with every run. New manual runs default
 to `Set and forget` with the automatic opposing-base target. The live-aligned manager
@@ -163,8 +165,8 @@ risk-off signal: any position above the final 25% runner is banked at that
 retracement level. A slow-momentum 50% partial has already performed that
 defensive reduction and does not trigger a redundant cut.
 This selector changes realized R, trade outcome time, overlap filtering, projected
-income, expectancy, profit factor, and drawdown for that backtest only. It never
-changes live/demo automation.
+income, expectancy, profit factor, and drawdown. Backtests remain isolated; an explicit
+approved-strategy activation can select the same manager for demo automation.
 
 Manual backtests also store one of two explicit confirmation modes. `First touch +
 engulf confirmation` is the default and preserves the production contract: after the
@@ -727,6 +729,14 @@ including days with zero high-impact events, is stored in
 research does not depend on a later website response. The source and fetch timestamp
 remain attached to every row.
 
+The demo runner checks a rolling 35-day historical-news window plus the next seven days
+at startup and when the UTC calendar week changes. Explicit stored day coverage,
+including zero-event days, is reused permanently; Forex Factory is contacted only for
+weeks containing a missing required date. This covers the maximum active-zone age and
+the upcoming trading week with minimal scraping. A failed refresh remains fail-closed: workers may
+continue scanning, but any setup whose formation or entry interval lacks explicit
+coverage is rejected until the source data is stored successfully.
+
 Therefore backtest win rate is a research metric, not live expected performance.
 Compare tweaks on identical data windows, include walk-forward tests, and retain losing
 and abandoned runs to reduce selection bias.
@@ -753,7 +763,11 @@ The dedicated `/research` status page polls every five seconds and distinguishes
 campaign queue from the currently active deterministic backtest. It reports worker
 process health, campaign and backtest progress, the latest heartbeat and stage, candle
 storage, completed-trial leaders, and recent research events. It can start, pause,
-resume, or stop a campaign, but it cannot change live/demo risk or strategy settings.
+resume, or stop a campaign. Queued configurations may be reordered, edited, or removed
+before they start; completed and running trials remain immutable evidence. The Windows
+dashboard startup task recovers an interrupted non-paused campaign, returns its running
+trial to the queue, and launches a new bounded batch when no active campaign exists.
+Ranked leaders remain advisory and cannot change live/demo risk or strategy settings.
 Historical scans pre-index each zone's first completed outside candle once and then
 advance causally through confirmation candles. They must not rescan the complete zone
 timeframe archive for every active-zone/confirmation-candle combination.
@@ -807,10 +821,10 @@ rendering, timeframe switching, sweep/fast-attack labels, and drawing interactio
 the PC, so the Pi remains the authoritative
 scanner without running the Next.js chart application.
 
-The stream-release policy can represent broker-protected set-and-forget management,
-but live/demo automation still accepts only `secure-half-atr-runner-v3`. Set-and-forget
-remains backtest-only until a separately reviewed strategy-contract change enables it;
-this lifecycle infrastructure does not make that manager selectable in production.
+The demo worker accepts an approved set-and-forget manager. It submits the selected
+fixed-R or causally selected opposing-base target with the original stop and performs no
+interim stop, partial-close, or trailing action. The broker-side stop and target remain
+active while the price stream is idle. Secure-half retains its existing active manager.
 
 ## Code map
 

@@ -60,6 +60,7 @@ import {
   goldilocksScoreContractVersionNumber,
 } from "../utils/goldilocksScoreDisplay";
 import { classifyTradeOutcome } from "../utils/tradeHistory";
+import { getAutomationCompatibility } from "../utils/automationStrategyCompatibility";
 import {
   buildProtectedOutcomeResolver,
   reverseGoldilocksExecution,
@@ -150,7 +151,7 @@ import {
 } from "../utils/goldilocksTradeManagement";
 import { measureZoneCorridor } from "../utils/zoneCorridor";
 import { mergeCandleCoverageRanges } from "../utils/candleArchive";
-import { buildAutoResearchConfigurations } from "../utils/autoResearchRunner";
+import { buildAutoResearchConfigurations, getAutoResearchDatasetEndTime } from "../utils/autoResearchRunner";
 import { normalizeBacktestConfig } from "../utils/backtestRunner";
 import { researchConfigHash } from "../utils/autoResearchStore";
 import { buildGoldilocksResearchManifest } from "../utils/goldilocksResearchManifest";
@@ -767,16 +768,16 @@ test("builds a deterministic overnight matrix without varying account risk", () 
   const configurations = buildAutoResearchConfigurations({
     pairs: ["EUR/USD"],
     continuous: false,
+    explorationSeed: 4,
   });
-  assert.equal(configurations.length, 105);
-  assert.deepEqual(
-    [...new Set(configurations.map((config) => config.minimumScore))],
-    [10, 12, 14, 16, 18],
-  );
-  assert.deepEqual(
-    [...new Set(configurations.map((config) => config.timeframeProfile))],
-    ["lowerTimeframe", "intraday", "higherTimeframe"],
-  );
+  assert.equal(configurations.length, 5);
+  assert.equal(configurations[0].minimumScore, 11);
+  assert.equal(configurations[1].minimumScore, 12);
+  assert.equal(configurations[2].strategyTweaks?.maximumPriorTouches, 2);
+  assert.equal(configurations[3].tradeManager, GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID);
+  assert.equal(configurations[3].setAndForgetTargetMode, "fixed-r");
+  assert.equal(configurations[3].setAndForgetTargetR, 3);
+  assert.notEqual(configurations[4].label, configurations[0].label);
   assert.ok(configurations.every((config) => config.riskProfile === "default"));
   assert.ok(
     configurations.every(
@@ -795,15 +796,6 @@ test("builds a deterministic overnight matrix without varying account risk", () 
         config.gateSettings?.twoToOneRunway,
     ),
   );
-  assert.equal(
-    configurations.filter(
-      (config) =>
-        config.timeframeProfile === "intraday" &&
-        config.minimumScore === 14 &&
-        config.gateSettings?.pairSession === false,
-    ).length,
-    1,
-  );
   assert.ok(
     configurations.every((config) => {
       const categories = getGoldilocksScoreCategoryWeights(config.scoreWeights);
@@ -814,15 +806,18 @@ test("builds a deterministic overnight matrix without varying account risk", () 
       );
     }),
   );
-  assert.equal(
-    configurations.find(
-      (config) => config.timeframeProfile === "higherTimeframe",
-    )?.lookbackDays,
-    3650,
-  );
+  assert.ok(configurations.every((config) => config.lookbackDays === 365));
   assert.equal(
     researchConfigHash(configurations[0]),
     researchConfigHash({ ...configurations[0] }),
+  );
+});
+
+test("aligns continuous research to a closed five-minute sealed snapshot", () => {
+  const now = Date.UTC(2026, 7, 3, 20, 7, 42);
+  assert.equal(
+    getAutoResearchDatasetEndTime(now),
+    Date.UTC(2026, 7, 3, 20, 0, 0) / 1000,
   );
 });
 
@@ -4843,4 +4838,34 @@ test("merges overlapping and candle-adjacent archive coverage without inventing 
       { startTime: 261, endTime: 400 },
     ],
   );
+});
+
+test("automation touch-entry treats the latest completed first-touch candle as the signal", () => {
+  const zone = {
+    id:"live-touch-entry",kind:"base" as const,side:"demand" as const,candleIndex:0,candleTime:0,
+    availableAt:1,low:99,high:100,width:1,legMidpoint:105,legRange:12,departureMultiple:3,
+    strength2x:true,touches:0,maxPenetration:0,state:"fresh" as const,reasons:[],
+  };
+  const candles:StrategyCandle[]=[
+    {time:100,open:101,high:102,low:100.5,close:101.5},
+    {time:200,open:100.5,high:100.6,low:99.8,close:100.1},
+  ];
+  const found=findFreshGoldilocksConfirmations(
+    {zones:[zone],activeZones:[zone],activeDemand:zone},candles,100,300_000,candles,100,'touch-entry',
+  );
+  assert.equal(found.length,1);
+  assert.equal(found[0].touchCandle.time,200);
+  assert.equal(found[0].confirmationCandle.time,200);
+});
+
+test("automation compatibility accepts the sealed lower-timeframe set-and-forget contract",()=>{
+  const compatibility=getAutomationCompatibility({
+    pairs:['GBP/JPY'],lookbackDays:365,minimumScore:11,label:'sealed winner',
+    strategyVersion:'m15-m5-m1-research-v3',timeframeProfile:'lowerTimeframe',
+    riskProfile:'easy',tradeManager:'set-and-forget-2r-v1',confirmationMode:'touch-entry',
+    setAndForgetTargetR:2,setAndForgetTargetMode:'opposing-base',closeTradesBeforeWeekend:false,
+    strategyTweaks:GOLDILOCKS_BACKTEST_TWEAK_DEFAULTS,gateSettings:GOLDILOCKS_BACKTEST_GATE_DEFAULTS,
+    scoreWeights:GOLDILOCKS_SCORE_WEIGHTS,
+  });
+  assert.deepEqual(compatibility,{compatible:true,blockers:[]});
 });

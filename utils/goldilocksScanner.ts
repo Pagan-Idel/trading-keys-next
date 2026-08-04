@@ -266,6 +266,7 @@ export const findFreshGoldilocksConfirmations = (
   nowMs = Date.now(),
   zoneCandles: StrategyCandle[] = confirmationCandles,
   zoneSeconds = confirmationSeconds,
+  confirmationMode: 'close-through' | 'touch-entry' = 'close-through',
 ): FreshGoldilocksConfirmation[] => {
   if (confirmationCandles.length < 2) return [];
   const candles = [...confirmationCandles].sort((a, b) => a.time - b.time);
@@ -281,18 +282,20 @@ export const findFreshGoldilocksConfirmations = (
     let touchIndex=-1;
     for (let index=0;index<candles.length;index+=1) {
       const candle=candles[index];
-      if (candle.time < armed.firstOutsideTime || candle.time >= confirmationCandle.time) continue;
+      if (candle.time < armed.firstOutsideTime || candle.time > confirmationCandle.time ||
+        (confirmationMode==='close-through'&&candle.time===confirmationCandle.time)) continue;
       if (breaks(zone, candle)) {touchCandle=undefined;break}
       if(!touchCandle&&candle.high>=zone.low&&candle.low<=zone.high){touchCandle=candle;touchIndex=index}
     }
-    if (!touchCandle || breaks(zone, confirmationCandle)) return [];
+    if (!touchCandle || (confirmationMode==='close-through'&&breaks(zone, confirmationCandle))) return [];
     const purity=summarizeConfirmationTimeframeTouches(zone,candles,confirmationSeconds,touchCandle.time);
     if(purity.invalidated)return [];
     const direction: GoldilocksDirection = zone.side === 'demand' ? 'bullish' : 'bearish';
-    const confirmed = direction === 'bullish'
+    const confirmed = confirmationMode==='touch-entry'&&touchCandle.time===confirmationCandle.time?true:direction === 'bullish'
       ? confirmationCandle.close > confirmationCandle.open && confirmationCandle.close > touchCandle.high
       : confirmationCandle.close < confirmationCandle.open && confirmationCandle.close < touchCandle.low;
-    const proximity=validateGoldilocksEntryProximity(zone,touchCandle,confirmationCandle.close);
+    const proximity=validateGoldilocksEntryProximity(zone,touchCandle,
+      confirmationMode==='touch-entry'?(zone.side==='demand'?zone.high:zone.low):confirmationCandle.close);
     return confirmed ? [{
       zone:{...zone,touches:purity.touches,maxPenetration:0},
       direction,firstOutsideTime:purity.firstOutsideTime!,touchCandle,confirmationCandle,

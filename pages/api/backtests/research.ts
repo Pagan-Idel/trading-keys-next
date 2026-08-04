@@ -1,9 +1,12 @@
 import type { NextApiRequest,NextApiResponse } from 'next';
-import { getAutoResearchDashboard,getAutoResearchTrial } from '../../../utils/autoResearchStore.ts';
-import { pauseAutoResearch,resumeAutoResearch,startAutoResearch,stopAutoResearch } from '../../../utils/autoResearchRunner.ts';
+import { getAutoResearchDashboard,getAutoResearchTrial,getBestAutoResearchResult,moveQueuedResearchTrial,removeQueuedResearchTrial,updateQueuedResearchTrial } from '../../../utils/autoResearchStore.ts';
+import { pauseAutoResearch,recoverOrStartAutoResearch,resumeAutoResearch,startAutoResearch,stopAutoResearch } from '../../../utils/autoResearchRunner.ts';
+import { normalizeBacktestConfig } from '../../../utils/backtestRunner.ts';
 import { getCandleArchiveStorageUsage } from '../../../utils/candleArchive.ts';
 import { GOLDILOCKS_RESEARCH_VERSION,GOLDILOCKS_TIMEFRAME_PROFILES } from '../../../utils/goldilocksConfig.ts';
-import { getActiveBacktestRun,getBacktestStatusSnapshot,getBacktestTradeAudits } from '../../../utils/backtestStore.ts';
+import { getActiveBacktestRun,getBacktestDashboard,getBacktestStatusSnapshot,getBacktestTradeAudits } from '../../../utils/backtestStore.ts';
+import { getAutomationCompatibility } from '../../../utils/automationStrategyCompatibility.ts';
+import { getAppliedAutomationStrategy } from '../../../utils/automationStore.ts';
 
 const isProcessAlive=(pid:unknown)=>{
   const processId=Number(pid);
@@ -27,20 +30,31 @@ export default function handler(req:NextApiRequest,res:NextApiResponse){
       }
       const dashboard=getAutoResearchDashboard(typeof req.query.campaignId==='string'?req.query.campaignId:undefined);
       const selected=dashboard.campaigns.find(item=>item.id===dashboard.selectedCampaignId)??dashboard.campaigns[0];
+      const globalLeader=getBestAutoResearchResult();
+      const globalLeaderRun=globalLeader?(getBacktestDashboard(globalLeader.backtestRunId) as any).runs?.find((run:any)=>run.id===globalLeader.backtestRunId):null;
       return res.status(200).json({
         ...dashboard,archive:getCandleArchiveStorageUsage(),
+        globalLeader:globalLeader?{...globalLeader,runUid:globalLeaderRun?.runUid??null,compatibility:getAutomationCompatibility(globalLeader.config)}:null,
+        appliedStrategy:getAppliedAutomationStrategy(),
         researchVersion:GOLDILOCKS_RESEARCH_VERSION,timeframeProfiles:GOLDILOCKS_TIMEFRAME_PROFILES,
         workerAlive:isProcessAlive(selected?.workerPid),activeBacktest:activeBacktestStatus(),serverTime:new Date().toISOString(),
       });
     }
-    if(req.method==='POST')return res.status(202).json(startAutoResearch(req.body??{}));
+    if(req.method==='POST'){
+      if(req.body?.action==='recover')return res.status(202).json(recoverOrStartAutoResearch(req.body??{}));
+      return res.status(202).json(startAutoResearch(req.body??{}));
+    }
     const id=typeof req.query.campaignId==='string'?req.query.campaignId:String(req.body?.campaignId??'');
     if(!id)throw new Error('A campaign ID is required.');
     if(req.method==='PATCH'){
       const action=String(req.body?.action??'');
       if(action==='pause')return res.status(200).json(pauseAutoResearch(id));
       if(action==='resume')return res.status(200).json(resumeAutoResearch(id));
-      throw new Error('Research action must be pause or resume.');
+      const trialId=String(req.body?.trialId??'');
+      if(action==='move'&&trialId)return res.status(200).json(moveQueuedResearchTrial(id,trialId,req.body?.direction==='up'?'up':'down'));
+      if(action==='edit'&&trialId)return res.status(200).json(updateQueuedResearchTrial(id,trialId,normalizeBacktestConfig(req.body?.config??{})));
+      if(action==='remove'&&trialId)return res.status(200).json(removeQueuedResearchTrial(id,trialId));
+      throw new Error('Unknown research action.');
     }
     if(req.method==='DELETE')return res.status(200).json(stopAutoResearch(id));
     res.setHeader('Allow','GET, POST, PATCH, DELETE');

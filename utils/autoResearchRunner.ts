@@ -13,6 +13,7 @@ import {
   expandGoldilocksScoreCategoryWeights,
   getGoldilocksTimeframeProfile,
   normalizeGoldilocksBacktestGates,
+  normalizeGoldilocksBacktestTweaks,
   type GoldilocksScoreCategoryWeights,
   type GoldilocksTimeframeProfileId,
 } from './goldilocksConfig.ts';
@@ -22,7 +23,7 @@ import { fetchCandleHistory } from './oanda/api/fetchCandleHistory.ts';
 import {
   addAutoResearchEvent, cancelAutoResearchCampaign, claimNextAutoResearchTrial, completeAutoResearchTrial,
   createAutoResearchCampaign, enqueueAutoResearchCycle, failAutoResearchTrial, getAutoResearchCampaignRuntime,getAutoResearchDashboard,
-  resetInterruptedAutoResearchTrials, updateAutoResearchCampaign, type AutoResearchCampaignConfig,
+  getBestAutoResearchConfiguration, resetInterruptedAutoResearchTrials, updateAutoResearchCampaign, type AutoResearchCampaignConfig,
 } from './autoResearchStore.ts';
 
 export interface StartAutoResearchInput {
@@ -31,7 +32,24 @@ export interface StartAutoResearchInput {
   pairs?:string[];
   minimumScores?:number[];
   timeframeProfiles?:GoldilocksTimeframeProfileId[];
+  baselineConfig?:BacktestRunConfig;
+  explorationSeed?:number;
 }
+
+const isProcessAlive=(pid:unknown)=>{
+  const processId=Number(pid);
+  if(!Number.isInteger(processId)||processId<=0)return false;
+  try{process.kill(processId,0);return true}catch{return false}
+};
+
+const launchResearchWorker=(campaignId:string)=>{
+  const child=spawn(process.execPath,['--import','tsx','workers/autoResearchWorker.ts',campaignId],{
+    cwd:process.cwd(),detached:true,stdio:'ignore',windowsHide:true,
+  });
+  updateAutoResearchCampaign(campaignId,{workerPid:child.pid??null});
+  child.unref();
+  return child.pid??null;
+};
 
 const archiveDatasetKey=(datasetEndTime?:number)=>{
   const summary=getCandleArchiveSummary();
@@ -60,24 +78,40 @@ export const AUTO_RESEARCH_STRATEGY_FAMILIES:AutoResearchStrategyFamily[]=[
 export const buildAutoResearchConfigurations=(input:StartAutoResearchInput={}):BacktestRunConfig[]=>{
   const pairs=[...new Set((input.pairs??forexPairs).filter(pair=>forexPairs.includes(pair)))];
   if(!pairs.length)throw new Error('Auto research requires at least one supported pair.');
-  const profiles:GoldilocksTimeframeProfileId[]=[...new Set(input.timeframeProfiles??(['lowerTimeframe','intraday','higherTimeframe'] as GoldilocksTimeframeProfileId[]))];
-  const scores=[...new Set((input.minimumScores??[10,12,14,16,18]).map(value=>Math.min(20,Math.max(0,Math.floor(value)))))].sort((a,b)=>a-b);
-  return profiles.flatMap(timeframeProfile=>{
-    const profile=getGoldilocksTimeframeProfile(timeframeProfile);
-    return AUTO_RESEARCH_STRATEGY_FAMILIES.flatMap(family=>
-      scores.map(minimumScore=>normalizeBacktestConfig({
-        pairs,timeframeProfile,minimumScore,lookbackDays:profile.defaultLookbackDays,
-        backfillPages:0,
-        label:`${profile.label} | ${family.label} | score ${minimumScore}`,
-        riskProfile:'default',startingBalance:1000,leverage:30,
-        tradeManager:GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,
-        scoreWeights:expandGoldilocksScoreCategoryWeights(family.scoreCategories),
-        gateSettings:normalizeGoldilocksBacktestGates(
-          family.disabledGate?{[family.disabledGate]:false}:undefined,
-        ),
-      })),
-    );
-  });
+  const fallbackFamily=AUTO_RESEARCH_STRATEGY_FAMILIES[0];
+  const fallback=normalizeBacktestConfig({pairs,timeframeProfile:input.timeframeProfiles?.[0]??'lowerTimeframe',minimumScore:input.minimumScores?.[0]??11,
+    lookbackDays:365,backfillPages:0,label:'Leader control',riskProfile:'default',startingBalance:1000,leverage:30,
+    tradeManager:'set-and-forget-2r-v1',setAndForgetTargetMode:'opposing-base',setAndForgetTargetR:2,
+    scoreWeights:expandGoldilocksScoreCategoryWeights(fallbackFamily.scoreCategories),gateSettings:normalizeGoldilocksBacktestGates(undefined)});
+  const leader=normalizeBacktestConfig({...fallback,...input.baselineConfig,pairs,lookbackDays:365,backfillPages:0});
+  const score=Math.min(20,Math.max(0,leader.minimumScore));
+  const touches=Math.min(3,Math.max(0,Number(leader.strategyTweaks?.maximumPriorTouches??3)));
+  const seed=Math.abs(Math.floor(input.explorationSeed??Date.now()));
+  const exploratoryManagers=['secure-half-atr-runner-v3','legacy-score-tiered-2r-4r-v1','bank-half-untouched-stop-runner-v1','adaptive-attack-scale-out-runner-v1'] as const;
+  const wildcardKind=seed%6;
+  const wildcard:BacktestRunConfig={...leader,label:'Wildcard test'};
+  if(wildcardKind===0){
+    wildcard.tradeManager=exploratoryManagers[Math.floor(seed/6)%exploratoryManagers.length];
+    wildcard.setAndForgetTargetMode=undefined;wildcard.setAndForgetTargetR=undefined;wildcard.label='Wildcard · manager';
+  }else if(wildcardKind===1){
+    wildcard.confirmationMode=leader.confirmationMode==='touch-entry'?'close-through':'touch-entry';wildcard.label='Wildcard · confirmation';
+  }else if(wildcardKind===2){
+    const distances=[0.3,0.7,1];wildcard.strategyTweaks={...normalizeGoldilocksBacktestTweaks(leader.strategyTweaks),maxEntryDistanceZoneFraction:distances[Math.floor(seed/6)%distances.length]};wildcard.label='Wildcard · entry distance';
+  }else if(wildcardKind===3){
+    const family=AUTO_RESEARCH_STRATEGY_FAMILIES[1+Math.floor(seed/6)%4];wildcard.scoreWeights=expandGoldilocksScoreCategoryWeights(family.scoreCategories);wildcard.label=`Wildcard · ${family.label}`;
+  }else if(wildcardKind===4){
+    const targets=[1.5,2.5,4,5];wildcard.tradeManager='set-and-forget-2r-v1';wildcard.setAndForgetTargetMode='fixed-r';wildcard.setAndForgetTargetR=targets[Math.floor(seed/6)%targets.length];wildcard.label=`Wildcard · ${wildcard.setAndForgetTargetR}R target`;
+  }else{
+    wildcard.strategyTweaks={...normalizeGoldilocksBacktestTweaks(leader.strategyTweaks),maximumPriorTouches:Math.floor(seed/6)%4};wildcard.label='Wildcard · touch limit';
+  }
+  const variants:BacktestRunConfig[]=[
+    {...leader,label:'Leader control'},
+    {...leader,minimumScore:Math.min(20,score+1),label:'Leader +1 score'},
+    {...leader,strategyTweaks:{...normalizeGoldilocksBacktestTweaks(leader.strategyTweaks),maximumPriorTouches:Math.max(0,touches-1)},label:'Leader tighter touches'},
+    {...leader,tradeManager:'set-and-forget-2r-v1',setAndForgetTargetMode:'fixed-r',setAndForgetTargetR:3,label:'Leader fixed 3R target'},
+    wildcard,
+  ];
+  return variants.map(config=>normalizeBacktestConfig({...config,pairs,lookbackDays:365,backfillPages:0}));
 };
 
 const summarizeRun=(runId:string)=>{
@@ -120,6 +154,10 @@ const summarizeRun=(runId:string)=>{
 };
 
 const delay=(milliseconds:number)=>new Promise(resolve=>setTimeout(resolve,milliseconds));
+const SEALED_SNAPSHOT_INTERVAL_SECONDS=5*60;
+
+export const getAutoResearchDatasetEndTime=(now=Date.now())=>
+  Math.floor((Math.floor(now/1000)-SEALED_SNAPSHOT_INTERVAL_SECONDS)/SEALED_SNAPSHOT_INTERVAL_SECONDS)*SEALED_SNAPSHOT_INTERVAL_SECONDS;
 
 interface DatasetTask {pair:string;timeframe:string;lookbackDays:number;maxCandles:number;backfillPages:number}
 
@@ -189,17 +227,20 @@ export const executeAutoResearchCampaign=async(campaignId:string)=>{
   updateAutoResearchCampaign(campaignId,{status:'running',startedAt:new Date().toISOString(),workerPid:process.pid,error:null});
   addAutoResearchEvent(campaignId,'campaign_started',`AUTO RESEARCH STARTED · ${campaignConfig.configurations.length} configuration(s) · live trading remains unchanged.`);
   try{
-    const existingTrials=getAutoResearchDashboard(campaignId).trials;
-    if(!existingTrials.length){
-      const datasetEndTime=campaignConfig.datasetEndTime??Math.floor(Date.now()/1000)-300;
+    const prepareCycle=async(datasetEndTime:number)=>{
       const datasetKey=await acquireSealedDataset(campaignId,campaignConfig.configurations,datasetEndTime);
-      campaignConfig.configurations=campaignConfig.configurations.map(config=>({
+      const configurations=campaignConfig.configurations.map(config=>({
         ...config,archiveOnly:true,backfillPages:0,datasetEndTime,datasetKey,
         researchManifest:buildGoldilocksResearchManifest(config.timeframeProfile??'intraday',config.minimumScore),
       }));
-      const queued=enqueueAutoResearchCycle(campaignId,datasetKey,campaignConfig.configurations);
+      const queued=enqueueAutoResearchCycle(campaignId,datasetKey,configurations);
       updateAutoResearchCampaign(campaignId,{status:'running',currentTrialId:null});
-      addAutoResearchEvent(campaignId,'trials_queued',`TRIALS QUEUED · ${queued} configurations will use sealed SQLite dataset ${datasetKey}; no trial can call OANDA.`,undefined,{datasetKey,queued});
+      addAutoResearchEvent(campaignId,'trials_queued',`TRIALS QUEUED · ${queued} configurations will use sealed SQLite dataset ${datasetKey}; no trial can call OANDA.`,undefined,{datasetKey,queued,datasetEndTime});
+      return {datasetKey,queued};
+    };
+    const existingTrials=getAutoResearchDashboard(campaignId).trials;
+    if(!existingTrials.length){
+      await prepareCycle(campaignConfig.datasetEndTime??getAutoResearchDatasetEndTime());
     }
     while(true){
       const state=getAutoResearchCampaignRuntime(campaignId);
@@ -212,9 +253,26 @@ export const executeAutoResearchCampaign=async(campaignId:string)=>{
       }
       const trial=claimNextAutoResearchTrial(campaignId);
       if(!trial){
-        updateAutoResearchCampaign(campaignId,{status:'completed',completedAt:new Date().toISOString(),workerPid:null,currentTrialId:null});
-        addAutoResearchEvent(campaignId,'campaign_complete','AUTO RESEARCH COMPLETE · every configuration was evaluated on the same sealed local dataset.');
-        break;
+        if(!campaignConfig.continuous){
+          updateAutoResearchCampaign(campaignId,{status:'completed',completedAt:new Date().toISOString(),workerPid:null,currentTrialId:null});
+          addAutoResearchEvent(campaignId,'campaign_complete','AUTO RESEARCH COMPLETE · every configuration was evaluated on the same sealed local dataset.');
+          break;
+        }
+        const previousEndTime=Math.max(0,...getAutoResearchDashboard(campaignId).trials.map(item=>Number((item.config as BacktestRunConfig).datasetEndTime)||0));
+        let nextEndTime=getAutoResearchDatasetEndTime();
+        if(nextEndTime<=previousEndTime){
+          updateAutoResearchCampaign(campaignId,{status:'waiting',currentTrialId:null,preparationStage:'Waiting for the next sealed snapshot boundary'});
+          await delay(30_000);
+          continue;
+        }
+        addAutoResearchEvent(campaignId,'continuous_cycle_started',`CONTINUOUS RESEARCH · comparison queue exhausted; sealing the next historical snapshot ending ${new Date(nextEndTime*1000).toISOString()}.`,undefined,{previousEndTime,datasetEndTime:nextEndTime});
+        campaignConfig.configurations=buildAutoResearchConfigurations({baselineConfig:getBestAutoResearchConfiguration(),explorationSeed:nextEndTime});
+        const cycle=await prepareCycle(nextEndTime);
+        if(!cycle.queued){
+          updateAutoResearchCampaign(campaignId,{status:'waiting',currentTrialId:null,preparationStage:'Waiting for a distinct sealed snapshot'});
+          await delay(30_000);
+        }
+        continue;
       }
       addAutoResearchEvent(campaignId,'trial_started',`TRIAL STARTED · ${trial.config.label}.`,trial.id,{datasetKey:trial.datasetKey,config:trial.config});
       let backtestRunId:string|undefined;
@@ -244,20 +302,28 @@ export const executeAutoResearchCampaign=async(campaignId:string)=>{
   assertResearchAllowed();
 
 export const startAutoResearch=(input:StartAutoResearchInput={})=>{
-  const configurations=buildAutoResearchConfigurations(input);
+  const configurations=buildAutoResearchConfigurations({...input,baselineConfig:input.baselineConfig??getBestAutoResearchConfiguration()});
   const config:AutoResearchCampaignConfig={
     label:String(input.label??`${GOLDILOCKS_RESEARCH_VERSION} | overnight discovery`).slice(0,120),
-    continuous:false,
+    continuous:input.continuous??true,
     configurations,
-    datasetEndTime:Math.floor(Date.now()/1000)-300,
+    datasetEndTime:getAutoResearchDatasetEndTime(),
   };
   const campaign=createAutoResearchCampaign(config,`preparing-${config.datasetEndTime}`,false);
-  const child=spawn(process.execPath,['--import','tsx','workers/autoResearchWorker.ts',campaign.id],{
-    cwd:process.cwd(),detached:true,stdio:'ignore',windowsHide:true,
-  });
-  updateAutoResearchCampaign(campaign.id,{workerPid:child.pid??null});
-  child.unref();
+  launchResearchWorker(campaign.id);
   return {...campaign,config};
+};
+
+export const recoverOrStartAutoResearch=(input:StartAutoResearchInput={})=>{
+  const active=getAutoResearchDashboard().campaigns.find(item=>['queued','preparing','running','waiting','paused'].includes(String(item.status)));
+  if(!active)return startAutoResearch(input);
+  if(active.status==='paused')return {id:active.id,status:'paused' as const,recovered:false};
+  if(isProcessAlive(active.workerPid))return {id:active.id,status:active.status,recovered:false,workerPid:active.workerPid};
+  const reset=resetInterruptedAutoResearchTrials(String(active.id));
+  updateAutoResearchCampaign(String(active.id),{status:'queued',workerPid:null,currentTrialId:null,error:null});
+  addAutoResearchEvent(String(active.id),'campaign_recovered',`AUTO RESEARCH RECOVERED · stale worker cleared · ${reset} interrupted trial(s) returned to the queue.`);
+  const workerPid=launchResearchWorker(String(active.id));
+  return {id:active.id,status:'queued' as const,recovered:true,workerPid};
 };
 
 export const pauseAutoResearch=(id:string)=>{
@@ -274,6 +340,7 @@ export const resumeAutoResearch=(id:string)=>{
   if(!runtime)throw new Error('Auto research campaign not found.');
   if(runtime.status!=='paused')throw new Error(`Campaign is ${runtime.status}, not paused.`);
   updateAutoResearchCampaign(id,{status:'running'});
+  if(!isProcessAlive(runtime.workerPid))launchResearchWorker(id);
   addAutoResearchEvent(id,'campaign_resumed','AUTO RESEARCH RESUMED.');
   return {id,status:'running' as const};
 };

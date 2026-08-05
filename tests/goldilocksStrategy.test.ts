@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { calculateScoreRisk } from "../utils/dynamicRisk.ts";
 import {rankAutoResearchResults} from "../utils/autoResearchRanking.ts";
+import {manualBacktestDefaultsFromLeader} from "../utils/backtestDefaults.ts";
 import {
   effectiveOandaLeverage,
   simulateBacktestPortfolio,
@@ -821,6 +822,24 @@ test("research ranking trades up to 3R for more than five percent lower drawdown
     ['safer-close','net-leader','too-far'],
   );
   assert.equal(rankAutoResearchResults([row('net-leader',100,20),row('exactly-five',98,19)])[0].id,'net-leader');
+});
+
+test("manual backtests inherit the research leader without sealed-dataset fields",()=>{
+  const defaults=manualBacktestDefaultsFromLeader({
+    pairs:['EUR/USD'],lookbackDays:365,minimumScore:12,label:'Leader +1 score',
+    timeframeProfile:'lowerTimeframe',strategyVersion:'m15-m5-m1-research-v3',
+    riskProfile:'easy',tradeManager:'set-and-forget-2r-v1',confirmationMode:'touch-entry',
+    setAndForgetTargetMode:'opposing-base',setAndForgetTargetR:2,archiveOnly:true,
+    datasetEndTime:123,datasetKey:'sealed',researchManifest:{} as never,
+  });
+  assert.equal(defaults.minimumScore,12);
+  assert.equal(defaults.timeframeProfile,'lowerTimeframe');
+  assert.equal(defaults.riskProfile,'easy');
+  assert.equal(defaults.archiveOnly,false);
+  assert.equal(defaults.datasetEndTime,undefined);
+  assert.equal(defaults.datasetKey,undefined);
+  assert.equal(defaults.researchManifest,undefined);
+  assert.equal(defaults.label,undefined);
 });
 
 test("aligns continuous research to a closed five-minute sealed snapshot", () => {

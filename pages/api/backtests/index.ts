@@ -1,6 +1,8 @@
 import type { NextApiRequest,NextApiResponse } from 'next';
 import { clearAllBacktestData,deleteBacktestRun,getBacktestDashboard,getBacktestTradeById,getBacktestTrainingData } from '../../../utils/backtestStore';
 import { cancelBacktest, startBacktest } from '../../../utils/backtestRunner';
+import {getBestAutoResearchConfiguration} from '../../../utils/autoResearchStore.ts';
+import {manualBacktestDefaultsFromLeader} from '../../../utils/backtestDefaults.ts';
 
 export default function handler(req:NextApiRequest,res:NextApiResponse){
   try{
@@ -11,9 +13,10 @@ export default function handler(req:NextApiRequest,res:NextApiResponse){
         if(!trade)return res.status(404).json({error:'Trade ID was not found.'});
         return res.status(200).json({trade});
       }
-      return res.status(200).json(getBacktestDashboard(typeof req.query.runId==='string'?req.query.runId:undefined));
+      const leader=getBestAutoResearchConfiguration();
+      return res.status(200).json({...getBacktestDashboard(typeof req.query.runId==='string'?req.query.runId:undefined),defaultConfig:leader?manualBacktestDefaultsFromLeader(leader):null});
     }
-    if(req.method==='POST')return res.status(202).json(startBacktest(req.body??{}));
+    if(req.method==='POST')return res.status(202).json(startBacktest({...manualBacktestDefaultsFromLeader(getBestAutoResearchConfiguration()),...(req.body??{})}));
     if(req.method==='DELETE'){
       if(req.query.all==='true'&&req.query.permanent==='true')return res.status(200).json(clearAllBacktestData());
       const id=typeof req.query.runId==='string'?req.query.runId:String(req.body?.runId??'');

@@ -731,6 +731,7 @@ type RunResult = Run & {
   acceptedTrades: number;
 };
 type Dashboard = {
+  defaultConfig?: RunConfig|null;
   runs: Run[];
   runResults: RunResult[];
   selectedRunId: string;
@@ -932,6 +933,7 @@ const formatPayoff = (value: number | null) =>
 
 export default function Backtesting() {
   const dashboardRequestInFlight = useRef(false);
+  const leaderDefaultsApplied = useRef(false);
   const [data, setData] = useState<Dashboard | null>(null),
     [selected, setSelected] = useState<string[]>([...forexPairs]);
   const [label, setLabel] = useState(() =>
@@ -1086,6 +1088,28 @@ export default function Backtesting() {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(()=>{
+    const config=data?.defaultConfig;
+    if(!config||leaderDefaultsApplied.current)return;
+    leaderDefaultsApplied.current=true;
+    setSelected(Array.isArray(config.pairs)?[...config.pairs]:[...forexPairs]);
+    setMinimumScore(config.minimumScore);
+    setLookbackDays(365);
+    setTimeframeProfile(config.timeframeProfile??'intraday');
+    setStartingBalance(config.startingBalance??1000);
+    setLeverage(config.leverage??30);
+    setProjectionRiskProfile(config.riskProfile??'default');
+    setTradeManager(managerForRunConfig(config).id);
+    setConfirmationMode(config.confirmationMode??'close-through');
+    setSetAndForgetTargetR(config.setAndForgetTargetR??2);
+    setSetAndForgetTargetMode(config.setAndForgetTargetMode==='opposing-base'?'opposing-base':'fixed-r');
+    setCloseTradesBeforeWeekend(config.closeTradesBeforeWeekend!==false);
+    setReverseFinalSignal(Boolean(config.reverseFinalSignal));
+    setStrategyTweaks(normalizeGoldilocksBacktestTweaks(config.strategyTweaks));
+    setGateSettings(normalizeGoldilocksBacktestGates(config.gateSettings));
+    setScoreWeights(expandGoldilocksScoreCategoryWeights(getGoldilocksScoreCategoryWeights(config.scoreWeights)));
+    setLabel(getGoldilocksBacktestRunLabel(config.timeframeProfile??'intraday'));
+  },[data?.defaultConfig]);
   useEffect(() => {
     if (!data?.selectedRunId) return;
     const id = setInterval(

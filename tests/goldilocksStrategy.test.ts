@@ -2489,6 +2489,27 @@ test("accepts only the latest completed confirmation candle after a zone departu
   );
 });
 
+test("ignores confirmation candles from before a base is causally available", () => {
+  const zone = {
+    id: "causal-base-demand", kind: "base" as const, side: "demand" as const,
+    candleIndex: 0, candleTime: 0, availableAt: 1_000, low: 99, high: 100,
+    width: 1, legMidpoint: 105, legRange: 12, departureMultiple: 3,
+    strength2x: true, touches: 0, maxPenetration: 0, state: "fresh" as const, reasons: [],
+  };
+  const confirmationCandles: StrategyCandle[] = [
+    { time: 100, open: 102, high: 103, low: 101, close: 102 },
+    { time: 200, open: 100, high: 101, low: 98, close: 99 },
+    { time: 1_100, open: 102, high: 103, low: 101, close: 102 },
+    { time: 1_200, open: 100.5, high: 101, low: 99.8, close: 100.2 },
+  ];
+  const found = findFreshGoldilocksConfirmations(
+    { zones: [zone], activeZones: [zone], activeDemand: zone }, confirmationCandles,
+    100, 1_300_000, confirmationCandles, 100, "touch-entry",
+  );
+  assert.equal(found.length, 1);
+  assert.equal(found[0].touchCandle.time, 1_200);
+});
+
 test("does not let one M5 candle act as both the zone touch and its later confirmation", () => {
   const zone = {
     id: "base-supply-m5",

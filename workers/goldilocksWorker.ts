@@ -624,6 +624,7 @@ const scan = async () => {
   saveAutomationZoneSnapshot({
     pair,mode,scannedAt:new Date().toISOString(),trend:getGoldilocksTrend(trendCandles.slice(-5_000)),
     zoneTimeframe:ZONE_TIMEFRAME,confirmationTimeframe:CONFIRMATION_TIMEFRAME,
+    confirmationMode,minimumScore,
     zones:snapshot.history.activeZones.filter(zone=>zone.kind==='base'),
     candles:{[ZONE_TIMEFRAME]:snapshot.candles.slice(-400),[CONFIRMATION_TIMEFRAME]:confirmationCandles.slice(-500),
       [TREND_TIMEFRAME]:toStrategyCandles(trendCandles).slice(-400),[TIMEFRAMES.execution]:toStrategyCandles(executionCandles).slice(-500)},
@@ -637,7 +638,7 @@ const scan = async () => {
   if (!confirmations.length) {
     if(!usesSharedMarketDataHub)schedulePriceStreamIdleStop(pair,mode);
     else await setMarketDataInterest(pair,false,marketDataOwner);
-    updateWorkerStatus(pair, 'waiting', 'waiting_for_confirmation', `No fresh ${CONFIRMATION_TIMEFRAME} close-through confirmation is ready.`, mode);
+    updateWorkerStatus(pair, 'waiting', 'waiting_for_confirmation', `No fresh ${CONFIRMATION_TIMEFRAME} ${confirmationMode==='touch-entry'?'immediate touch':'close-through confirmation'} is ready.`, mode);
     return;
   }
   const open = await openNow(pair, mode,shutdownController.signal);

@@ -74,6 +74,7 @@ export interface AppliedAutomationStrategy {
 export interface AutomationZoneSnapshot {
   pair:string;mode:'live'|'demo';scannedAt:string;trend:'bullish'|'bearish'|'unknown';
   zoneTimeframe:string;confirmationTimeframe:string;
+  confirmationMode?:'close-through'|'touch-entry';minimumScore?:number;
   zones:unknown[];candles:Record<string,unknown[]>;confirmationCount:number;setups?:unknown[];activeTrade?:ActiveTradeInput;
 }
 

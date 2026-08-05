@@ -278,17 +278,21 @@ export const findFreshGoldilocksConfirmations = (
     if ((zone.availableAt ?? zone.candleTime) >= confirmationCandle.time) return [];
     const armed=summarizeZoneTimeframeTouches(zone,zoneCandles,zoneSeconds,confirmationCandle.time);
     if(armed.firstOutsideTime===undefined)return [];
+    // A zone cannot be touched, broken, or otherwise evaluated before the
+    // structure that created it is causally available to the strategy.
+    const signalStartTime=Math.max(armed.firstOutsideTime,zone.availableAt??zone.candleTime);
     let touchCandle:StrategyCandle|undefined;
     let touchIndex=-1;
     for (let index=0;index<candles.length;index+=1) {
       const candle=candles[index];
-      if (candle.time < armed.firstOutsideTime || candle.time > confirmationCandle.time ||
+      if (candle.time < signalStartTime || candle.time > confirmationCandle.time ||
         (confirmationMode==='close-through'&&candle.time===confirmationCandle.time)) continue;
       if (breaks(zone, candle)) {touchCandle=undefined;break}
       if(!touchCandle&&candle.high>=zone.low&&candle.low<=zone.high){touchCandle=candle;touchIndex=index}
     }
     if (!touchCandle || (confirmationMode==='close-through'&&breaks(zone, confirmationCandle))) return [];
-    const purity=summarizeConfirmationTimeframeTouches(zone,candles,confirmationSeconds,touchCandle.time);
+    const causalCandles=candles.filter(candle=>candle.time>=signalStartTime);
+    const purity=summarizeConfirmationTimeframeTouches(zone,causalCandles,confirmationSeconds,touchCandle.time);
     if(purity.invalidated)return [];
     const direction: GoldilocksDirection = zone.side === 'demand' ? 'bullish' : 'bearish';
     const confirmed = confirmationMode==='touch-entry'&&touchCandle.time===confirmationCandle.time?true:direction === 'bullish'

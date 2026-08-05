@@ -280,7 +280,7 @@ a trade.
 A zone can be fresh, touched, invalidated, or expired.
 
 1. The originating leg must complete before the zone is available.
-2. Once the structural break identifies the zone, scan forward from its M15 base: the first completed M15 candle fully outside is the originating departure and arms touch counting, even when it predates `availableAt`.
+2. Once the structural break identifies the zone, scan forward from its M15 base: the first completed M15 candle fully outside is the originating departure and arms touch counting, even when it predates `availableAt`. Confirmation-timeframe touches, breaks, and purity checks begin no earlier than `availableAt`; formation candles cannot invalidate or trigger a zone before it exists causally.
 3. Purity arms on the first completed M5 candle fully outside the zone after its base. Every later completed M5 candle whose wick enters the zone counts as one qualifying prior touch, provided it completes before the first M5 trade-trigger touch. Consecutive touching M5 candles count individually.
 4. Equality with the proximal boundary counts as a touch.
 5. Touch depth has no effect: any intersection with the zone counts as exactly one touch.

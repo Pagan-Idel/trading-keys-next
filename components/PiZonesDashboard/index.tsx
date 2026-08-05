@@ -15,7 +15,8 @@ export default function PiZonesDashboard(){
   const [snapshot,setSnapshot]=useState<Snapshot|null>(null),[error,setError]=useState('');
   const [scannedAt,setScannedAt]=useState('');
   const chartSignatureRef=useRef('');
-  useEffect(()=>{const requestedPair=typeof router.query.pair==='string'?router.query.pair:new URLSearchParams(window.location.search).get('pair');if(requestedPair&&forexPairs.includes(requestedPair))setPair(requestedPair)},[router.isReady,router.query.pair]);
+  useEffect(()=>{const params=new URLSearchParams(window.location.search);const requestedPair=typeof router.query.pair==='string'?router.query.pair:params.get('pair');const requestedTimeframe=typeof router.query.timeframe==='string'?router.query.timeframe:params.get('timeframe');if(requestedPair&&forexPairs.includes(requestedPair))setPair(requestedPair);if(['M1','M5','M15','H1'].includes(requestedTimeframe??''))setTimeframe(requestedTimeframe as 'M1'|'M5'|'M15'|'H1')},[router.isReady,router.query.pair,router.query.timeframe]);
+  const preserveChartLocation=(nextPair=pair,nextTimeframe=timeframe)=>{void router.replace({pathname:'/automation',query:{...router.query,tab:'zones',pair:nextPair,timeframe:nextTimeframe}},undefined,{shallow:true,scroll:false})};
   useEffect(()=>{let active=true;chartSignatureRef.current='';const load=async()=>{try{const r=await fetch(`/api/automation/pi-zones?pair=${encodeURIComponent(pair)}`,{cache:'no-store'});const p=await r.json() as Snapshot&{error?:string};if(!r.ok)throw new Error(p.error);if(active){const signature=JSON.stringify({pair:p.pair,trend:p.trend,zones:p.zones,candles:p.candles,setups:p.setups,activeTrade:p.activeTrade});if(signature!==chartSignatureRef.current){chartSignatureRef.current=signature;setSnapshot(p)}setScannedAt(p.scannedAt);setError('')}}catch(e){if(active)setError(e instanceof Error?e.message:String(e))}};void load();const timer=setInterval(load,3000);return()=>{active=false;clearInterval(timer)}},[pair]);
   const candles=useMemo(()=>snapshot?.candles[timeframe]??[],[snapshot,timeframe]);
   const swings=useMemo(()=>determineSwingPoints(candles.map((candle,candleIndex)=>({...candle,time:new Date(candle.time*1000).toISOString(),candleIndex})))
@@ -79,7 +80,7 @@ export default function PiZonesDashboard(){
       <label style={{display:'flex',alignItems:'center',gap:10,color:'#8793a5',fontSize:12,fontWeight:800,textTransform:'uppercase',letterSpacing:'.08em'}}>
         Change pair
         <span style={{position:'relative',display:'inline-flex',alignItems:'center'}}>
-          <select aria-label="Pi automation pair" value={pair} onChange={e=>setPair(e.target.value)} style={{appearance:'none',WebkitAppearance:'none',minWidth:132,border:'1px solid #3a4656',borderRadius:9,background:'#171d25',color:'#f4f7fb',padding:'9px 34px 9px 12px',fontSize:14,fontWeight:850,outline:'none',cursor:'pointer'}}>{forexPairs.map(p=><option key={p}>{p}</option>)}</select>
+          <select aria-label="Pi automation pair" value={pair} onChange={e=>{setPair(e.target.value);preserveChartLocation(e.target.value,timeframe)}} style={{appearance:'none',WebkitAppearance:'none',minWidth:132,border:'1px solid #3a4656',borderRadius:9,background:'#171d25',color:'#f4f7fb',padding:'9px 34px 9px 12px',fontSize:14,fontWeight:850,outline:'none',cursor:'pointer'}}>{forexPairs.map(p=><option key={p}>{p}</option>)}</select>
           <span aria-hidden style={{position:'absolute',right:12,color:'#79eda2',fontSize:11,pointerEvents:'none'}}>▼</span>
         </span>
       </label>
@@ -100,7 +101,7 @@ export default function PiZonesDashboard(){
         <div style={{padding:'12px 14px',background:'#111820'}}><small style={{color:'#7d899a',fontWeight:800}}>ENTRY RULE</small><div style={{marginTop:4,fontWeight:900,color:'#f4f7fb'}}>{focus.confirmationTimeframe} {snapshot.confirmationMode==='touch-entry'?'immediate touch':'close-through'}{snapshot.minimumScore!==undefined?` · ${snapshot.minimumScore}/20 min`:''}</div></div>
         <div style={{padding:'12px 14px',background:'#111820'}}><small style={{color:'#7d899a',fontWeight:800}}>WHY NO TRIGGER</small><div style={{marginTop:4,fontWeight:800,color:snapshot.confirmationCount?'#74efa0':'#f3c96b'}}>{snapshot.confirmationCount?'Actionable setup detected.':focus.lastTouch?`Last touch ${new Date(focus.lastTouch.time*1000).toLocaleString()}; it is no longer the newest completed ${focus.confirmationTimeframe} candle.`:'No completed candle has touched this base since it became available.'}</div></div>
       </div>}
-      <StrategyLabChart direction={snapshot.trend==='bearish'?'bearish':'bullish'} timeframe={timeframe} onTimeframeChange={setTimeframe} drawingStorageKey={`pi-${pair}-${timeframe}`} tradeId={active?.tradeId} pricePrecision={pair.endsWith('/JPY')?3:5} scenario={scenario} />
+      <StrategyLabChart direction={snapshot.trend==='bearish'?'bearish':'bullish'} timeframe={timeframe} onTimeframeChange={next=>{setTimeframe(next);preserveChartLocation(pair,next)}} drawingStorageKey={`pi-${pair}-${timeframe}`} tradeId={active?.tradeId} pricePrecision={pair.endsWith('/JPY')?3:5} scenario={scenario} />
       {(active||setup)&&<details style={{marginTop:14,border:'1px solid #303846',borderRadius:12,padding:'12px 14px',background:'#11151b'}} open={Boolean(active)}>
         <summary style={{cursor:'pointer',fontWeight:800}}>{active?'Active Pi trade details':'Latest actionable setup details'}</summary>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:10,marginTop:12,color:'#cbd3df'}}>

@@ -5,6 +5,7 @@ import { forexPairs } from './constants.ts';
 import { calculateBacktestPerformance } from './backtestAnalytics.ts';
 import { simulateBacktestPortfolio } from './backtestPortfolio.ts';
 import { BACKTEST_CANDLE_LIMITS, cancelBacktest, executeBacktestInline, normalizeBacktestConfig } from './backtestRunner.ts';
+import {autoPromoteResearchLeaderToPi} from './autoResearchPiPromotion.ts';
 import { getActiveBacktestRun, getBacktestDashboard, getBacktestRuntime, getBacktestTrainingData, type BacktestRunConfig } from './backtestStore.ts';
 import { checkpointCandleArchive, getCandleArchiveStorageUsage, getCandleArchiveSummary } from './candleArchive.ts';
 import {
@@ -283,6 +284,14 @@ export const executeAutoResearchCampaign=async(campaignId:string)=>{
         const metrics=summarizeRun(result.id);
         completeAutoResearchTrial(trial.id,result.id,metrics);
         addAutoResearchEvent(campaignId,'trial_complete',`TRIAL COMPLETE · ${trial.config.label} · ${metrics.official.sampleTrades} trades · expectancy ${metrics.official.expectancyR?.toFixed(3)??'n/a'}R · drawdown ${metrics.official.maxDrawdownR.toFixed(2)}R.`,trial.id,metrics);
+        try{
+          const promotion=await autoPromoteResearchLeaderToPi();
+          if(promotion.status==='activated')addAutoResearchEvent(campaignId,'leader_auto_activated',`AUTO PROMOTION · ${promotion.runUid} is now active on the Pi demo workers.`,trial.id,promotion);
+          else if(promotion.status==='deferred-open-trade')addAutoResearchEvent(campaignId,'leader_auto_deferred','AUTO PROMOTION DEFERRED · an open Pi trade must close before workers can load the new leader.',trial.id,promotion);
+          else if(!['no-eligible-leader','already-active'].includes(promotion.status))addAutoResearchEvent(campaignId,'leader_auto_skipped',`AUTO PROMOTION SKIPPED · ${promotion.status}.`,trial.id,promotion);
+        }catch(promotionError){
+          addAutoResearchEvent(campaignId,'leader_auto_failed',`AUTO PROMOTION FAILED · ${promotionError instanceof Error?promotionError.message:String(promotionError)}`,trial.id);
+        }
       }catch(error){
         const message=error instanceof Error?error.message:String(error);
         failAutoResearchTrial(trial.id,message,backtestRunId);

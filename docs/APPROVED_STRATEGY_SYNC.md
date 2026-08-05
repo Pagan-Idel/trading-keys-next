@@ -1,10 +1,12 @@
 # Approved strategy synchronization
 
-The Windows application is authoritative. Research writes sealed winners locally, but
-ranking never changes automation. A user must select **Switch to latest** while
-automation is stopped and no trade is open. That action creates a new immutable active
-row in `automation_strategy_versions`; only that row is exported by
-`GET /api/automation/approved-strategy`.
+The Windows application is authoritative. Continuous research currently auto-promotes
+each new eligible #1 to the Pi demo lifecycle. With no open trade, Windows creates a
+new immutable active row in `automation_strategy_versions`, forces a Pi sync, stops the
+demo workers, starts them across the staged activation boundary, and verifies the exact
+run ID. An open trade defers the restart. `runner/autoPromoteResearchLeaders.ts` keeps
+checking every 30 seconds, and the research worker also checks after each completed
+trial. Only the active row is exported by `GET /api/automation/approved-strategy`.
 
 The Raspberry Pi control service polls that single endpoint. It cannot provide a
 strategy ID. It validates schema, immutable ID, timestamps, compatibility, and SHA-256,

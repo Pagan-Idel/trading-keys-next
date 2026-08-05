@@ -44,3 +44,10 @@ Start-Process -FilePath (Join-Path $repository 'node_modules\.bin\tsx.cmd') `
   -WindowStyle Hidden `
   -RedirectStandardOutput (Join-Path $logDirectory 'local-research.log') `
   -RedirectStandardError (Join-Path $logDirectory 'local-research.error.log')
+
+Start-Process -FilePath (Join-Path $repository 'node_modules\.bin\tsx.cmd') `
+  -ArgumentList 'runner/autoPromoteResearchLeaders.ts' `
+  -WorkingDirectory $repository `
+  -WindowStyle Hidden `
+  -RedirectStandardOutput (Join-Path $logDirectory 'local-research-promotion.log') `
+  -RedirectStandardError (Join-Path $logDirectory 'local-research-promotion.error.log')

@@ -110,10 +110,8 @@ export const getGoldilocksStructureBreakingLegDirection = (
   left: string,
   right: string,
 ): SwingLeg["direction"] | null => {
-  // Only the external reversal leg owns an executable base. Internal
-  // continuation legs are still part of that same move.
-  if (left === "LL" && right === "HH") return "bullish";
-  if (left === "HH" && right === "LL") return "bearish";
+  if (["LL", "HL", "L"].includes(left) && right === "HH") return "bullish";
+  if (["HH", "LH", "H"].includes(left) && right === "LL") return "bearish";
   return null;
 };
 

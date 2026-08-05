@@ -158,10 +158,10 @@ import { normalizeBacktestConfig } from "../utils/backtestRunner";
 import { researchConfigHash } from "../utils/autoResearchStore";
 import { buildGoldilocksResearchManifest } from "../utils/goldilocksResearchManifest";
 
-test("creates executable swing legs only for external structure reversals", () => {
+test("creates swing legs only when the destination breaks structure", () => {
   assert.equal(
     getGoldilocksStructureBreakingLegDirection("HL", "HH"),
-    null,
+    "bullish",
   );
   assert.equal(
     getGoldilocksStructureBreakingLegDirection("LL", "HH"),
@@ -169,7 +169,7 @@ test("creates executable swing legs only for external structure reversals", () =
   );
   assert.equal(
     getGoldilocksStructureBreakingLegDirection("LH", "LL"),
-    null,
+    "bearish",
   );
   assert.equal(
     getGoldilocksStructureBreakingLegDirection("HH", "LL"),

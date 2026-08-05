@@ -29,6 +29,21 @@ if ([string]::IsNullOrWhiteSpace($env:OANDA_DEMO_ACCOUNT_ID) -or [string]::IsNul
 }
 
 Set-Location -LiteralPath $repository
+$dashboardListener = Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction SilentlyContinue
+if ($dashboardListener) {
+  $buildId = (Get-Content -Raw -LiteralPath (Join-Path $repository '.next\BUILD_ID')).Trim()
+  try {
+    Invoke-WebRequest -Uri "http://localhost:4000/_next/static/$buildId/_buildManifest.js" -UseBasicParsing -TimeoutSec 5 | Out-Null
+  } catch {
+    $dashboardPid = $dashboardListener.OwningProcess
+    $dashboardProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$dashboardPid"
+    if ($dashboardProcess.CommandLine -like "*$repository*next*start*-p*4000*") {
+      Stop-Process -Id $dashboardPid -Force
+    } else {
+      throw "Port 4000 is occupied by an unexpected process; refusing to stop PID $dashboardPid."
+    }
+  }
+}
 if (-not (Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction SilentlyContinue)) {
   Start-Process -FilePath (Join-Path $repository 'node_modules\.bin\next.cmd') `
     -ArgumentList 'start','-p','4000' `

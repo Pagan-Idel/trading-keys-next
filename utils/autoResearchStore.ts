@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import type { BacktestRunConfig } from './backtestStore.ts';
+import {rankAutoResearchResults} from './autoResearchRanking.ts';
 
 export type AutoResearchStatus='queued'|'preparing'|'running'|'waiting'|'paused'|'completed'|'cancelled'|'failed';
 export type AutoResearchTrialStatus='queued'|'running'|'completed'|'failed';
@@ -170,13 +171,11 @@ export const getTopAutoResearchResults=(limit=3)=>{
   const rows=database().prepare(`SELECT config_json AS configJson,metrics_json AS metricsJson
     ,id,backtest_run_id AS backtestRunId,completed_at AS completedAt
     FROM research_trials WHERE status='completed' AND metrics_json IS NOT NULL`).all() as Array<{id:string;backtestRunId:string;completedAt:string;configJson:string;metricsJson:string}>;
-  return rows.map(row=>({
+  return rankAutoResearchResults(rows.map(row=>({
     id:row.id,backtestRunId:row.backtestRunId,completedAt:row.completedAt,
     config:JSON.parse(row.configJson) as BacktestRunConfig,
-    metrics:JSON.parse(row.metricsJson) as {official?:{sampleTrades?:number;expectancyR?:number|null;maxDrawdownR?:number}},
-  })).filter(row=>Number(row.metrics.official?.sampleTrades??0)>=100)
-    .sort((left,right)=>Number(right.metrics.official?.expectancyR??Number.NEGATIVE_INFINITY)-Number(left.metrics.official?.expectancyR??Number.NEGATIVE_INFINITY)
-      ||Number(left.metrics.official?.maxDrawdownR??Number.POSITIVE_INFINITY)-Number(right.metrics.official?.maxDrawdownR??Number.POSITIVE_INFINITY))
+    metrics:JSON.parse(row.metricsJson) as {official?:{sampleTrades?:number;expectancyR?:number|null;netR?:number;maxDrawdownR?:number}},
+  })).filter(row=>Number(row.metrics.official?.sampleTrades??0)>=100))
     .slice(0,Math.max(0,limit));
 };
 

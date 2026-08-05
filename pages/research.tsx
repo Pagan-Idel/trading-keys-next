@@ -132,7 +132,6 @@ type ResearchData={
 const formatR=(value:number|null|undefined,signed=false)=>value==null?'—':`${signed&&value>0?'+':''}${value.toFixed(3)}R`;
 const formatFactor=(value:number|null|undefined)=>value==null?'—':Number.isFinite(value)?value.toFixed(2):'∞';
 const formatTime=(value?:string)=>value?new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'}).format(new Date(value)):'—';
-const formatBytes=(value:number)=>`${(value/1024/1024/1024).toFixed(2)} GiB`;
 const statusTone=(status?:string):'good'|'warn'|'bad'|'idle'=>status==='running'?'good':status==='preparing'||status==='waiting'||status==='queued'||status==='paused'?'warn':status==='failed'||status==='cancelled'?'bad':'idle';
 
 export default function ResearchStatus(){
@@ -165,8 +164,9 @@ export default function ResearchStatus(){
     Number(right.metrics?.official?.expectancyR??Number.NEGATIVE_INFINITY)-Number(left.metrics?.official?.expectancyR??Number.NEGATIVE_INFINITY)
     || Number(left.metrics?.official?.maxDrawdownR??Number.POSITIVE_INFINITY)-Number(right.metrics?.official?.maxDrawdownR??Number.POSITIVE_INFINITY)
   ),[data?.trials]);
-  const appliedConfig=data?.appliedStrategy?.config;
-  const appliedManager=GOLDILOCKS_BACKTEST_MANAGERS.find(manager=>manager.id===appliedConfig?.tradeManager)?.label.replace(' (default)','')??appliedConfig?.tradeManager??'Loading';
+  const currentConfig=currentTrial?.config;
+  const currentManager=GOLDILOCKS_BACKTEST_MANAGERS.find(manager=>manager.id===currentConfig?.tradeManager)?.label.replace(' (default)','')??currentConfig?.tradeManager??'Loading';
+  const currentTarget=currentConfig?.setAndForgetTargetMode==='opposing-base'?'Opposing base':currentConfig?.setAndForgetTargetR?`${currentConfig.setAndForgetTargetR}R`:'Manager target';
   const active=data?.activeBacktest;
   const activeProgress=Math.max(0,Math.min(100,Number(active?.progressPercent??0)));
   const queuedTrials=(data?.trials??[]).filter(trial=>trial.status==='queued');
@@ -241,12 +241,12 @@ export default function ResearchStatus(){
     </Grid>
 
     <ActivePanel>
-      <ActiveIntro><h2>Current Pi strategy &amp; research run</h2><Small style={{marginTop:0}}>Approved run {data?.appliedStrategy?.sourceRunUid??'loading'}. Research may compare new configurations, but only explicit approval changes the Pi.</Small></ActiveIntro>
-      <ActiveFact><span>Pi strategy</span><strong>{appliedConfig?getGoldilocksTimeframeProfile(appliedConfig.timeframeProfile).label:'Loading'} · {appliedConfig?.minimumScore??'—'}/20</strong></ActiveFact>
-      <ActiveFact><span>Management</span><strong>{appliedManager} · {appliedConfig?.setAndForgetTargetMode==='opposing-base'?'Opposing base':appliedConfig?.setAndForgetTargetR?`${appliedConfig.setAndForgetTargetR}R`:'Manager target'}</strong></ActiveFact>
-      <ActiveFact><span>Running now</span><strong>{active?`${active.label??active.id} · ${activeProgress.toFixed(1)}%`:(campaign?.status==='preparing'?'Sealing dataset':'Waiting for next trial')}</strong></ActiveFact>
+      <ActiveIntro><h2>Current campaign trial</h2><Small style={{marginTop:0}}>{currentTrial?`Trial ${currentTrial.id.slice(0,8)} is the configuration being measured now.`:campaign?.status==='preparing'?'The next one-year snapshot is being sealed.':'The worker is waiting to claim the next configuration.'}</Small></ActiveIntro>
+      <ActiveFact><span>Strategy / score</span><strong>{currentConfig?getGoldilocksTimeframeProfile(currentConfig.timeframeProfile).label:'Waiting'} · {currentConfig?.minimumScore??'—'}/20</strong></ActiveFact>
+      <ActiveFact><span>Manager / target</span><strong>{currentManager} · {currentTarget}</strong></ActiveFact>
+      <ActiveFact><span>Trial tune</span><strong>{currentConfig?.confirmationMode==='touch-entry'?'Immediate touch':'Touch + engulf'} · {Number(currentConfig?.strategyTweaks?.maximumPriorTouches??3)} touches · {Number(currentConfig?.strategyTweaks?.maxEntryDistanceZoneFraction??0.5)} distance</strong></ActiveFact>
+      <ActiveFact><span>Progress</span><strong>{active?`${activeProgress.toFixed(1)}% · ${active.progressDone??0}/${active.progressTotal??0} · ${active.totalTrades??0} trades`:(campaign?.status==='preparing'?'Sealing dataset':'Waiting')}</strong></ActiveFact>
       <ActiveFact><span>Pair / stage</span><strong>{active?`${active.progressPair??'Preparing'} · ${active.progressStage??active.latestEvent?.message??'Loading'}`:activity}</strong></ActiveFact>
-      <ActiveFact><span>Archive / heartbeat</span><strong>{data?`${formatBytes(data.archive.usedBytes)} · ${active?formatTime(active.heartbeatAt):'idle'}`:'Loading'}</strong></ActiveFact>
     </ActivePanel>
 
     <Section>
@@ -271,7 +271,7 @@ export default function ResearchStatus(){
     </Section>
 
     <Section>
-      <SectionHead><div><h2>All-time top 3 records</h2><p>Global records across every campaign, each backed by at least 100 trades. Net result is the full result for that configuration; expectancy determines rank and drawdown breaks ties.</p></div><div style={{color:'#718093',fontSize:11}}>Showing {(data?.allTimeRecords??[]).length} record{(data?.allTimeRecords??[]).length===1?'':'s'}</div></SectionHead>
+      <SectionHead><div><h2>All-time top 3 records</h2><p>Global records with at least 100 trades. Net R leads; when two results are within 3R, a configuration with more than 5% lower max drawdown ranks higher.</p></div><div style={{color:'#718093',fontSize:11}}>Showing {(data?.allTimeRecords??[]).length} record{(data?.allTimeRecords??[]).length===1?'':'s'}</div></SectionHead>
       {data?.allTimeRecords?.length?<TableWrap><table><thead><tr><th>Rank / ID</th><th>Stack</th><th>Score</th><th>Manager</th><th>Target</th><th>Tune</th><th>Trades</th><th>Net result</th><th>Profit factor</th><th>Max DD</th><th>Pi status</th></tr></thead><tbody>
         {data.allTimeRecords.slice(0,3).map((record,index)=>{const metric=record.metrics?.official;const synced=Boolean(record.runUid&&data.appliedStrategy?.sourceRunUid===record.runUid);const manager=GOLDILOCKS_BACKTEST_MANAGERS.find(item=>item.id===record.config.tradeManager)?.label.replace(' (default)','')??record.config.tradeManager??'—';const tweaks=record.config.strategyTweaks??{};const gates=record.config.gateSettings??{};const target=record.config.setAndForgetTargetMode==='opposing-base'?'Opp. base':record.config.setAndForgetTargetR?`${record.config.setAndForgetTargetR}R`:'—';return <tr key={record.id} style={{background:synced?'#123b3126':'transparent'}}>
           <td><Link href={`/research/trials/${record.id}`} title={record.id} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>#{index+1} · {record.id.slice(0,8)}</Link></td><td>{getGoldilocksTimeframeProfile(record.config.timeframeProfile).label}</td><td>{record.config.minimumScore}/20</td><td>{manager}</td><td>{target}</td><td><details><summary style={{cursor:'pointer',color:'#8beeff'}}>Tune</summary><div style={{display:'grid',gap:5,minWidth:150,paddingTop:7,color:'#9eabba'}}><span>{record.config.confirmationMode==='touch-entry'?'Immediate touch':'Touch + engulf'}</span><span>Touches: {Number(tweaks.maximumPriorTouches??3)}</span><span>Distance: {Number(tweaks.maxEntryDistanceZoneFraction??0.5)}</span><span>Proximity: {gates.entryProximity===false?'off':'on'}</span><span>Risk: {String(record.config.riskProfile??'default')}</span></div></details></td><td>{metric?.sampleTrades??0}</td>

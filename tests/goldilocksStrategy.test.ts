@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { calculateScoreRisk } from "../utils/dynamicRisk.ts";
+import {rankAutoResearchResults} from "../utils/autoResearchRanking.ts";
 import {
   effectiveOandaLeverage,
   simulateBacktestPortfolio,
@@ -811,6 +812,15 @@ test("builds a deterministic overnight matrix without varying account risk", () 
     researchConfigHash(configurations[0]),
     researchConfigHash({ ...configurations[0] }),
   );
+});
+
+test("research ranking trades up to 3R for more than five percent lower drawdown",()=>{
+  const row=(id:string,netR:number,maxDrawdownR:number)=>({id,metrics:{official:{netR,maxDrawdownR}}});
+  assert.deepEqual(
+    rankAutoResearchResults([row('net-leader',100,20),row('safer-close',98,18.9),row('too-far',96,5)]).map(item=>item.id),
+    ['safer-close','net-leader','too-far'],
+  );
+  assert.equal(rankAutoResearchResults([row('net-leader',100,20),row('exactly-five',98,19)])[0].id,'net-leader');
 });
 
 test("aligns continuous research to a closed five-minute sealed snapshot", () => {

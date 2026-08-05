@@ -252,6 +252,12 @@ manager records 0R when break-even occurs before its 2R target. Pair and
 tweak comparisons under 50 realized-R trades are marked early; prefer 100+ before
 drawing an initial conclusion and still require chronological out-of-sample validation.
 
+The continuous Research Status all-time table uses a promotion rule for configurations
+with at least 100 trades: net R leads, except that a result within 3R of the current
+net-R leader ranks ahead when its maximum drawdown is more than 5% lower. This rule
+also selects the baseline used by the next continuous comparison cycle. It does not
+activate a Pi strategy automatically.
+
 A strategy with a higher win rate can still be worse if losses, drawdown, or execution
 costs increase. Require adequate sample sizes before accepting a tweak.
 

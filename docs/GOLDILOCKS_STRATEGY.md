@@ -219,12 +219,11 @@ LL to HH or from HH to LL rather than merely continuing the existing structure.
 
 ### Base zone
 
-Only a completed structure-breaking leg can create a base. A bullish demand leg must
-terminate at an `HH`; this permits `HL -> HH` continuation and `LL -> HH` reversal
-legs but rejects an `LL -> LH` bearish retracement. A bearish supply leg must terminate
-at an `LL`; this permits `LH -> LL` continuation and `HH -> LL` reversal legs but
-rejects an `HH -> HL` bullish retracement. Initial unlabeled `L -> H` or `H -> L`
-moves do not prove a structure break and cannot create zones. For a qualifying leg,
+Only a completed external reversal leg can create an executable base. Bullish demand
+requires `LL -> HH`; bearish supply requires `HH -> LL`. Internal `HL -> HH` and
+`LH -> LL` continuation sub-legs remain part of the existing external move and cannot
+create progressively higher or lower executable bases. Initial unlabeled `L -> H` or
+`H -> L` moves do not prove a structure break and cannot create zones. For a qualifying leg,
 search backward from the leg start for the nearest candle opposite the leg direction.
 If consecutive opposite-direction candles have overlapping bodies, form a base cluster
 and select the largest opposite candle.

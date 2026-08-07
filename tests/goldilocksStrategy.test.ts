@@ -61,7 +61,7 @@ import {
   getProtectedStructureTrend,
   zoneUsableAt,
 } from "../utils/goldilocksScanner";
-import type { Candle, SwingResult } from "../utils/swingLabeler";
+import { isPullback, type Candle, type SwingResult } from "../utils/swingLabeler";
 import { isTradeSessionOpen } from "../utils/sessionUtils";
 import { zonedWallClockToEpoch } from "../utils/newsGuard";
 import { scoreGoldilocksSetup } from "../utils/goldilocksScoring";
@@ -206,6 +206,18 @@ test("creates swing legs only when the destination breaks structure", () => {
   assert.equal(getGoldilocksStructureBreakingLegDirection("LL", "LH"), null);
   assert.equal(getGoldilocksStructureBreakingLegDirection("HH", "HL"), null);
   assert.equal(getGoldilocksStructureBreakingLegDirection("L", "H"), null);
+});
+
+test("confirms a bearish-leg retracement when a contained candle still advances upward", () => {
+  const candles:Candle[] = [
+    {time:"2026-06-23T00:25:00.000Z",candleIndex:0,open:0.69840,high:0.69860,low:0.69828,close:0.69860},
+    {time:"2026-06-23T00:30:00.000Z",candleIndex:1,open:0.69860,high:0.69902,low:0.69859,close:0.69880},
+    {time:"2026-06-23T00:35:00.000Z",candleIndex:2,open:0.69880,high:0.69900,low:0.69865,close:0.69898},
+    {time:"2026-06-23T00:40:00.000Z",candleIndex:3,open:0.69897,high:0.69919,low:0.69882,close:0.69919},
+    {time:"2026-06-23T00:45:00.000Z",candleIndex:4,open:0.69919,high:0.69936,low:0.69910,close:0.69915},
+  ];
+  const priorHigh:SwingResult={time:"2026-06-22T23:00:00.000Z",candleIndex:-1,swing:"HH",price:0.70050};
+  assert.equal(isPullback(candles,"LL",candles,priorHigh),true);
 });
 
 test("stored replay compatibility preserves numeric and exact research stacks", () => {

@@ -279,10 +279,14 @@ export function isPullback(
 
         sidewaysMovement = false;
 
-        const isSideways =
+        const progressesPullback = direction === "LL"
+            ? curr.close > prev.close
+            : curr.close < prev.close;
+        const isSideways = !progressesPullback && (
             (curr.high === prev.high && curr.low === prev.low) ||
             (curr.high <= prev.high && curr.low >= prev.low) ||
-            (prev.high <= curr.high && prev.low >= curr.low);
+            (prev.high <= curr.high && prev.low >= curr.low)
+        );
 
         if (isSideways) {
             sidewaysMovement = true;

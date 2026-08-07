@@ -220,6 +220,9 @@ pagination pages merge structure points by candle time so previously loaded labe
 remain attached to their candles while chart history expands. A
 reversal-strength condition is recorded when a leg changes from
 LL to HH or from HH to LL rather than merely continuing the existing structure.
+Pullback confirmation may combine genuinely sideways containing candles, but a contained
+candle whose close advances in the pullback direction remains directional evidence. It
+must not be collapsed out of an otherwise confirmed LH or HL retracement.
 
 ## Zone construction
 

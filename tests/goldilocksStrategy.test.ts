@@ -57,6 +57,7 @@ import {
   findFreshGoldilocksStreamTouches,
   getGoldilocksConfirmationHistoryStart,
   getGoldilocksStructureBreakingLegDirection,
+  getGoldilocksTrend,
   getProtectedStructureTrend,
   zoneUsableAt,
 } from "../utils/goldilocksScanner";
@@ -381,6 +382,26 @@ test("protected H1 structure reverses bullish only after the external protected 
     { candleIndex: 7, swing: "HH", price: 121 },
   ];
   assert.equal(getProtectedStructureTrend(candles, swings), "bullish");
+});
+
+test("trend detection reindexes a bounded archive tail before finding swings", () => {
+  const candles: Candle[] = Array.from({ length: 120 }, (_, candleIndex) => {
+    const center = 100 + Math.sin(candleIndex / 3) * 5 + candleIndex * 0.02;
+    return {
+      candleIndex,
+      time: new Date(candleIndex * 3_600_000).toISOString(),
+      open: center - 0.15,
+      high: center + 0.8,
+      low: center - 0.8,
+      close: center + 0.15,
+    };
+  });
+  const offsetTail = candles.map((candle) => ({
+    ...candle,
+    candleIndex: candle.candleIndex + 10_000,
+  }));
+
+  assert.equal(getGoldilocksTrend(offsetTail), getGoldilocksTrend(candles));
 });
 
 test("detects all four adaptive imbalance-balance-imbalance patterns", () => {

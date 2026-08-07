@@ -83,7 +83,12 @@ export const getProtectedStructureTrend = (candles:Candle[], swings:SwingResult[
 };
 
 export const getGoldilocksTrend = (candles: Candle[], atTime = Number.POSITIVE_INFINITY): GoldilocksTrend => {
-  const available = candles.filter(candle => new Date(candle.time).getTime() / 1000 <= atTime);
+  // Archive rows retain their database-relative candleIndex when a worker takes a
+  // bounded tail. Swing detection indexes into the supplied array, so normalize
+  // that positional field at this boundary before analyzing any sliced history.
+  const available = candles
+    .filter(candle => new Date(candle.time).getTime() / 1000 <= atTime)
+    .map((candle,candleIndex)=>({...candle,candleIndex}));
   return getProtectedStructureTrend(available,determineSwingPoints(available));
 };
 

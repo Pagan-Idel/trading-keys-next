@@ -78,6 +78,8 @@ backtest runs created by Research campaigns. Its campaign search resolves public
 IDs, internal backtest IDs, Research trial IDs, and parent Research campaign IDs; the
 parent view preserves the complete contained-run list. A running Research trial is
 linked to its backtest row as soon as that row is created, not only after completion.
+The Backtester starts and cancels only manual campaigns. Research-owned runs remain
+viewable there, but their pause and stop controls stay on the Research page.
 Automatic research is continuous by default, but its market-data window never rolls.
 Every manual and Research campaign uses candle-open timestamps from
 `2025-01-01T00:00:00Z` inclusive through `2026-01-01T00:00:00Z` exclusive. Once the

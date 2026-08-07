@@ -126,6 +126,7 @@ import {
 } from "../utils/strategyReplay";
 import { evaluateHistoricalNewsGate } from "../utils/historicalNewsStore";
 import {
+  getBacktestRunOrigin,
   selectTopBacktestLeaderboardRecords,
   stableBacktestRunUid,
   stableBacktestTradeId,
@@ -890,6 +891,15 @@ test("seals every Backtester timeframe for the fixed comparison archive",()=>{
     buildAutoResearchDatasetTasks(configurations).map(task=>task.timeframe).sort(),
     ['D','H1','H4','M1','M15','M5'],
   );
+});
+
+test("distinguishes manual Backtester runs from Research-owned runs",()=>{
+  assert.equal(getBacktestRunOrigin(JSON.stringify({pairs:["EUR/USD"]})),"manual");
+  assert.equal(
+    getBacktestRunOrigin(JSON.stringify({researchManifest:{schemaVersion:1}})),
+    "research",
+  );
+  assert.equal(getBacktestRunOrigin("not-json"),"manual");
 });
 
 test("research ranking trades up to 3R for more than five percent lower drawdown",()=>{

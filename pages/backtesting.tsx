@@ -230,6 +230,12 @@ const Controls = styled.div`
     grid-template-columns: 1fr 1fr;
   }
 `;
+const ControlNotice = styled.div`
+  grid-column: 1 / -1;
+  color: #f2c879;
+  font-size: 0.72rem;
+  line-height: 1.45;
+`;
 const Field = styled.label`
   display: grid;
   gap: 6px;
@@ -675,6 +681,7 @@ type RunConfig = {
 };
 type Run = {
   id: string;
+  origin?: "manual" | "research";
   runUid?: string;
   status: string;
   label: string;
@@ -1102,6 +1109,17 @@ export default function Backtesting() {
     data?.runs.some(
       (run) => run.status === "running" || run.status === "queued",
     ) ?? false;
+  const researchActive =
+    data?.runs.some(
+      (run) =>
+        run.origin === "research" &&
+        (run.status === "running" || run.status === "queued"),
+    ) ?? false;
+  const activeManualRun = data?.runs.find(
+    (run) =>
+      run.origin !== "research" &&
+      (run.status === "running" || run.status === "queued"),
+  );
   const lastRouteQuery=useRef('');
   useEffect(() => {
     if(!router.isReady)return;
@@ -1181,6 +1199,7 @@ export default function Backtesting() {
         if (!currentData) return currentData;
         const optimisticRun: Run = {
           id: body.id,
+          origin: "manual",
           runUid:body.runUid,
           status: body.status,
           label: body.config.label,
@@ -1278,15 +1297,15 @@ export default function Backtesting() {
     setTradeSortDirection("desc");
   };
   const cancel = async () => {
-    if (!current) return;
+    if (!activeManualRun) return;
     setBusy(true);
     try {
-      const r = await fetch(`/api/backtests?runId=${current.id}`, {
+      const r = await fetch(`/api/backtests?runId=${activeManualRun.id}`, {
         method: "DELETE",
       });
       const body = await r.json();
       if (!r.ok) throw new Error(body.error);
-      await load(current.id);
+      await load(activeManualRun.id);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1342,7 +1361,7 @@ export default function Backtesting() {
       setClearingAll(false);
     }
   };
-  const running = current?.status === "running" || current?.status === "queued";
+  const running = Boolean(activeManualRun);
   const progress = Math.max(
     0,
     Math.min(100, Number(current?.progressPercent ?? 0)),
@@ -1556,10 +1575,9 @@ export default function Backtesting() {
         <Kicker>Campaign builder + evidence viewer</Kicker>
         <Title>Campaign Backtester</Title>
         <Sub>
-          Run H1 trend → M15 zones → M5 departure, touch, and later
-          close-through confirmation. M1 is retained only for post-entry stop,
-          +1R, and target ordering. Every campaign run stores one final realized-R result
-          and a permanent version snapshot against the same fixed 2025 UTC candles.
+          Build and inspect historical strategy campaigns. Choose a timeframe stack and
+          rules, compare realized-R results on the same fixed 2025 candles, and open any
+          recorded trade on its chart.
         </Sub>
         <Controls>
           <Field>
@@ -1698,12 +1716,26 @@ export default function Backtesting() {
           </Field>
           {running ? (
             <CancelButton disabled={busy} onClick={cancel}>
-              {busy ? "Stopping..." : "Cancel campaign"}
+              {busy ? "Stopping..." : "Cancel manual campaign"}
             </CancelButton>
           ) : (
-            <Button disabled={busy || !selected.length || active} onClick={run}>
-              {busy ? "Launching..." : "Run campaign"}
+            <Button
+              disabled={busy || !selected.length || active}
+              onClick={run}
+              title={
+                researchActive
+                  ? "Research is using the backtest engine. Pause or stop it from the Research page before starting a manual campaign."
+                  : undefined
+              }
+            >
+              {busy ? "Launching..." : "Run manual campaign"}
             </Button>
+          )}
+          {researchActive && !running && (
+            <ControlNotice>
+              Research is running separately. Manage it from the Research page; pause
+              it there before starting a manual campaign.
+            </ControlNotice>
           )}
         </Controls>
         <RuleDisclosure>

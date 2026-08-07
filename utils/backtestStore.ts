@@ -303,6 +303,14 @@ const summaryConfig = (value: unknown) => {
   delete config.researchManifest;
   return config;
 };
+export const getBacktestRunOrigin = (value: unknown) => {
+  try {
+    const config = JSON.parse(String(value)) as BacktestRunConfig;
+    return config.researchManifest ? "research" : "manual";
+  } catch {
+    return "manual";
+  }
+};
 
 export const createBacktestRun = (id: string, config: BacktestRunConfig) => {
   const createdAt = new Date().toISOString();
@@ -932,6 +940,7 @@ export const getBacktestDashboard = (runId?: string) => {
       .sort((left, right) => right.count - left.count);
     return {
       ...run,
+      origin: getBacktestRunOrigin(run.configJson),
       config,
       configJson: undefined,
       ...performance,
@@ -1031,6 +1040,7 @@ export const getBacktestDashboard = (runId?: string) => {
   return {
     runs: runs.map((run) => ({
       ...run,
+      origin: getBacktestRunOrigin(run.configJson),
       config: summaryConfig(run.configJson),
       configJson: undefined,
     })),

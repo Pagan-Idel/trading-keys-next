@@ -872,6 +872,12 @@ through the authenticated SSH/Tailscale connection. `/pi-zones` performs all cha
 rendering, timeframe switching, sweep/fast-attack labels, and drawing interaction on
 the PC, so the Pi remains the authoritative
 scanner without running the Next.js chart application.
+The PC chart may page older or newer completed candles from its read-only local SQLite
+archive without asking the Pi or OANDA for more data. Pages merge by candle time and
+preserve the visible viewport; panning away from the newest candle exposes a `Jump to
+live` control. Annotation scope can show either the focused base's causal evidence or
+the evidence for every active base. These controls are visualization-only and cannot
+change Pi zone state, touch counts, confirmation, scoring, or execution.
 
 The demo worker accepts an approved set-and-forget manager. It submits the selected
 fixed-R or causally selected opposing-base target with the original stop and performs no

@@ -148,6 +148,21 @@ const HistoryButton = styled.button<{ side: "older" | "newer" }>`
     opacity: 0.6;
   }
 `;
+const JumpLiveButton = styled.button`
+  position: absolute;
+  right: 76px;
+  top: 14px;
+  z-index: 8;
+  border: 1px solid #34784c;
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: rgba(22, 83, 45, 0.92);
+  color: #8ff0ad;
+  font: 800 10px/1 system-ui;
+  cursor: pointer;
+  &:hover { background: rgba(31, 111, 59, 0.98); }
+  &:focus-visible { outline: 2px solid #55e991; outline-offset: 2px; }
+`;
 const TradeIdBadge = styled.button`
   position: absolute;
   right: 76px;
@@ -420,6 +435,7 @@ export default function StrategyLabChart({
   availableTimeframes,
   hasOlder = false,
   hasNewer = false,
+  enableJumpToLive = false,
   onTimeframeChange,
   onLoadOlder,
   onLoadNewer,
@@ -436,6 +452,7 @@ export default function StrategyLabChart({
   availableTimeframes?: ChartTimeframe[];
   hasOlder?: boolean;
   hasNewer?: boolean;
+  enableJumpToLive?: boolean;
   onTimeframeChange?: (timeframe: ChartTimeframe) => void;
   onLoadOlder?: () => void | Promise<void>;
   onLoadNewer?: () => void | Promise<void>;
@@ -481,6 +498,7 @@ export default function StrategyLabChart({
   const [lightMagnet, setLightMagnet] = useState(true);
   const [showLoadOlder, setShowLoadOlder] = useState(false);
   const [showLoadNewer, setShowLoadNewer] = useState(false);
+  const [showJumpToLive, setShowJumpToLive] = useState(false);
   const [loadingHistorySide, setLoadingHistorySide] = useState<
     "older" | "newer" | null
   >(null);
@@ -1765,6 +1783,7 @@ export default function StrategyLabChart({
       setShowLoadNewer(
         Boolean(hasNewer && range && range.to >= candles.length - 3),
       );
+      setShowJumpToLive(Boolean(enableJumpToLive && range && range.to < candles.length - 5));
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(updateHistoryButtons);
     updateHistoryButtons(chart.timeScale().getVisibleLogicalRange());
@@ -1799,6 +1818,7 @@ export default function StrategyLabChart({
     drawingMode,
     drawings,
     drilldownTimeframe,
+    enableJumpToLive,
     entryTime,
     hasNewer,
     hasOlder,
@@ -1846,6 +1866,17 @@ export default function StrategyLabChart({
         >
           {loadingHistorySide === "newer" ? "Loading…" : "Load newer candles →"}
         </HistoryButton>
+      )}
+      {showJumpToLive && (
+        <JumpLiveButton
+          type="button"
+          onClick={() => {
+            chartRef.current?.timeScale().scrollToRealTime();
+            setShowJumpToLive(false);
+          }}
+        >
+          Jump to live
+        </JumpLiveButton>
       )}
       {resolvedTradeId && (
         <TradeIdBadge

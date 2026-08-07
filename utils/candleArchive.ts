@@ -107,6 +107,27 @@ export const getArchivedCandleBounds=(key:CandleArchiveKey)=>{
   return {startTime:row.startTime,endTime:row.endTime,candleCount:Number(row.candleCount)};
 };
 
+export const readArchivedCandlePage=(
+  key:CandleArchiveKey,
+  options:{before?:number;after?:number;limit?:number}={},
+):Candle[]=>{
+  const identity=normalized(key);
+  const limit=Math.max(1,Math.min(2_000,Math.floor(options.limit??1_000)));
+  const before=Number(options.before),after=Number(options.after);
+  const rows=Number.isFinite(before)
+    ? database().prepare(`SELECT time_text AS time,open,high,low,close FROM historical_candles
+        WHERE mode=@mode AND pair=@pair AND timeframe=@timeframe AND time<@before
+        ORDER BY time DESC LIMIT @limit`).all({...identity,before:Math.floor(before),limit})
+    : Number.isFinite(after)
+      ? database().prepare(`SELECT time_text AS time,open,high,low,close FROM historical_candles
+          WHERE mode=@mode AND pair=@pair AND timeframe=@timeframe AND time>@after
+          ORDER BY time ASC LIMIT @limit`).all({...identity,after:Math.floor(after),limit})
+      : [];
+  const candles=(rows as Omit<Candle,'candleIndex'>[]);
+  if(Number.isFinite(before))candles.reverse();
+  return candles.map((candle,candleIndex)=>({...candle,candleIndex}));
+};
+
 export const upsertArchivedCandles=(key:CandleArchiveKey,candles:Candle[],source='OANDA_MID')=>{
   if(!candles.length)return 0;
   const storage=getCandleArchiveStorageUsage();

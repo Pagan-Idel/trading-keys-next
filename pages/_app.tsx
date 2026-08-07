@@ -55,20 +55,6 @@ const MyApp = ({ Component, pageProps }: AppProps) => {
             }}
           >
             <Link
-              href="/"
-              style={{
-                color: "#b8c0cc",
-                textDecoration: "none",
-                border: "1px solid #2d323c",
-                background: "#15181e",
-                borderRadius: 10,
-                padding: "8px 12px",
-                fontSize: 13,
-              }}
-            >
-              Keyboard
-            </Link>
-            <Link
               href="/automation"
               prefetch={false}
               style={{
@@ -84,21 +70,6 @@ const MyApp = ({ Component, pageProps }: AppProps) => {
               Automation
             </Link>
             <Link
-              href="/backtesting"
-              prefetch={false}
-              style={{
-                color: "#ffb6f7",
-                textDecoration: "none",
-                border: "1px solid #743865",
-                background: "#301526",
-                borderRadius: 10,
-                padding: "8px 12px",
-                fontSize: 13,
-              }}
-            >
-              Backtesting
-            </Link>
-            <Link
               href="/research"
               prefetch={false}
               style={{
@@ -112,6 +83,35 @@ const MyApp = ({ Component, pageProps }: AppProps) => {
               }}
             >
               Research
+            </Link>
+            <Link
+              href="/backtesting"
+              prefetch={false}
+              style={{
+                color: "#ffb6f7",
+                textDecoration: "none",
+                border: "1px solid #743865",
+                background: "#301526",
+                borderRadius: 10,
+                padding: "8px 12px",
+                fontSize: 13,
+              }}
+            >
+              Backtester
+            </Link>
+            <Link
+              href="/"
+              style={{
+                color: "#b8c0cc",
+                textDecoration: "none",
+                border: "1px solid #2d323c",
+                background: "#15181e",
+                borderRadius: 10,
+                padding: "8px 12px",
+                fontSize: 13,
+              }}
+            >
+              Keyboard
             </Link>
           </nav>
         </div>

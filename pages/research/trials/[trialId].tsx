@@ -36,9 +36,9 @@ export default function ResearchTrialDetail(){
   const count=Number(official.sampleTrades??0);const quality=sampleLabel(count);const score=manifest.score??{};
   return <Page>
     <Head><title>{config.label??'Research trial'} · Trading Keys</title></Head>
-    <Hero><Kicker>Frozen Goldilocks trial audit</Kicker><Title>{config.label??'Research configuration'}</Title>
+    <Hero><Kicker>Frozen Goldilocks campaign-run audit</Kicker><Title>{config.label??'Research campaign configuration'}</Title>
       <Muted>Research engine <strong>{manifest.versions?.researchEngine??'legacy'}</strong> · strategy <strong>{config.strategyVersion??manifest.versions?.strategy??'unknown'}</strong> · code <strong>{manifest.versions?.codeRevision?`${String(manifest.versions.codeRevision).slice(0,8)} (${manifest.versions?.sourceState??'state unknown'})`:'not recorded (historical)'}</strong> · dataset <strong>{trial.datasetKey}</strong>. This page is the stored snapshot for this trial, not today&apos;s mutable defaults.</Muted>
-      <div style={{display:'flex',gap:14,flexWrap:'wrap'}}><Link href="/research" style={{color:'#8beeff'}}>← Research status</Link>{trial.backtestRunId&&<Link href={`/backtesting?runId=${encodeURIComponent(trial.backtestRunId)}`} style={{color:'#dcb4ff'}}>Open recorded backtest</Link>}</div>
+      <div style={{display:'flex',gap:14,flexWrap:'wrap'}}><Link href="/research" style={{color:'#8beeff'}}>← Research campaigns</Link>{trial.backtestRunId&&<Link href={`/backtesting?campaignId=${encodeURIComponent(trial.id)}`} style={{color:'#dcb4ff'}}>Open in Campaign Backtester</Link>}</div>
     </Hero>
     <Grid>
       <Card><Label>Sample quality</Label><Metric style={{color:quality==='ELIGIBLE'?'#67efb2':quality==='PROVISIONAL'?'#ffdc8b':'#ff9daa'}}>{quality}</Metric><Muted>{count} realized-R trades</Muted></Card>
@@ -46,7 +46,7 @@ export default function ResearchTrialDetail(){
       <Card><Label>Maximum drawdown</Label><Metric>{fmtR(official.maxDrawdownR)}</Metric><Muted>Longest losing streak {official.longestLosingStreak??'—'}</Muted></Card>
       <Card><Label>Sealed data</Label><Metric style={{fontSize:'1rem'}}>{config.archiveOnly?'SQLITE ONLY':'LEGACY / NETWORK'}</Metric><Muted>Cutoff {config.datasetEndTime?new Date(config.datasetEndTime*1000).toLocaleString():'—'}</Muted></Card>
     </Grid>
-    <Section><h2>Trial inputs</h2><Muted>Every top-level input passed to the deterministic runner.</Muted>
+    <Section><h2>Campaign inputs</h2><Muted>Every top-level input passed to this deterministic campaign run.</Muted>
       <Table><table><tbody>
         <tr><th>Pairs</th><td>{pairs(config.pairs)}</td><th>Lookback</th><td>{config.lookbackDays} days</td></tr>
         <tr><th>Profile</th><td>{config.timeframeProfile}</td><th>Minimum score</th><td>{config.minimumScore}/20</td></tr>

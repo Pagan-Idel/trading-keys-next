@@ -1,8 +1,9 @@
 import type { NextApiRequest,NextApiResponse } from 'next';
-import { clearAllBacktestData,deleteBacktestRun,getBacktestDashboard,getBacktestTradeById,getBacktestTrainingData } from '../../../utils/backtestStore';
+import { clearAllBacktestData,deleteBacktestRun,getBacktestDashboard,getBacktestRunUid,getBacktestTradeById,getBacktestTrainingData,resolveBacktestRunId } from '../../../utils/backtestStore';
 import { cancelBacktest, startBacktest } from '../../../utils/backtestRunner';
-import {getBestAutoResearchConfiguration} from '../../../utils/autoResearchStore.ts';
+import {findAutoResearchCampaignSearch,getBestAutoResearchConfiguration} from '../../../utils/autoResearchStore.ts';
 import {manualBacktestDefaultsFromLeader} from '../../../utils/backtestDefaults.ts';
+import {selectCampaignRun} from '../../../utils/campaignSearch.ts';
 
 export default function handler(req:NextApiRequest,res:NextApiResponse){
   try{
@@ -14,6 +15,21 @@ export default function handler(req:NextApiRequest,res:NextApiResponse){
         return res.status(200).json({trade});
       }
       const leader=getBestAutoResearchConfiguration();
+      if(typeof req.query.campaignId==='string'){
+        const query=req.query.campaignId.trim();
+        const resolvedRunId=resolveBacktestRunId(query);
+        const research=findAutoResearchCampaignSearch(query,resolvedRunId);
+        if(research){
+          const campaignRuns=research.runs.map(run=>({...run,runUid:run.backtestRunId?getBacktestRunUid(run.backtestRunId)??null:null}));
+          const matched=selectCampaignRun(campaignRuns,research.matchedTrialId);
+          const dashboard=getBacktestDashboard(matched?.backtestRunId??'__campaign_without_run__');
+          return res.status(200).json({...dashboard,defaultConfig:leader?manualBacktestDefaultsFromLeader(leader):null,campaignSearch:{...research,runs:campaignRuns}});
+        }
+        if(!resolvedRunId)return res.status(404).json({error:`Campaign ${query} was not found.`});
+        const dashboard=getBacktestDashboard(resolvedRunId);
+        const selected=(dashboard.runResults as Array<any>).find(run=>run.id===dashboard.selectedRunId);
+        return res.status(200).json({...dashboard,defaultConfig:leader?manualBacktestDefaultsFromLeader(leader):null,campaignSearch:{kind:'manual-campaign',id:getBacktestRunUid(resolvedRunId)??resolvedRunId,label:selected?.label??'Manual campaign',status:selected?.status??'unknown',runs:[{backtestRunId:resolvedRunId,runUid:getBacktestRunUid(resolvedRunId)??null,label:selected?.label??'Manual campaign',status:selected?.status??'unknown'}]}});
+      }
       return res.status(200).json({...getBacktestDashboard(typeof req.query.runId==='string'?req.query.runId:undefined),defaultConfig:leader?manualBacktestDefaultsFromLeader(leader):null});
     }
     if(req.method==='POST')return res.status(202).json(startBacktest({...manualBacktestDefaultsFromLeader(getBestAutoResearchConfiguration()),...(req.body??{})}));

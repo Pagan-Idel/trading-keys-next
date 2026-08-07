@@ -7,6 +7,7 @@ import {
   addBacktestEvent,
   createBacktestRun,
   getActiveBacktestRun,
+  getBacktestRunUid,
   getBacktestRuntime,
   replaceBacktestTrades,
   recordBacktestLeaderboardCandidate,
@@ -450,14 +451,16 @@ export const normalizeBacktestConfig = (
 
 export const executeBacktestInline = async (
   input: Partial<BacktestRunConfig>,
+  onCreated?: (id:string)=>void,
 ) => {
   const active = getActiveBacktestRun();
   if (active) throw new Error(`Backtest ${active.id} is already running.`);
   const config = normalizeBacktestConfig(input);
   const id = randomUUID();
   createBacktestRun(id, config);
+  onCreated?.(id);
   await executeBacktestRun(id, config);
-  return { id, status: getBacktestRuntime(id)?.status ?? "failed", config };
+  return { id, runUid:getBacktestRunUid(id), status: getBacktestRuntime(id)?.status ?? "failed", config };
 };
 
 export const startBacktest = (input: Partial<BacktestRunConfig>) => {
@@ -483,7 +486,7 @@ export const startBacktest = (input: Partial<BacktestRunConfig>) => {
     progressStage: "queued",
   });
   child.unref();
-  return { id, status: "queued" as const, config };
+  return { id, runUid:getBacktestRunUid(id), status: "queued" as const, config };
 };
 
 export const cancelBacktest = (id: string) => {

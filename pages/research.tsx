@@ -186,7 +186,7 @@ export default function ResearchStatus(){
     :campaign?.status==='running'
     ?`Evaluating ${currentTrial?.config.label??'the current configuration'}`
     :campaign?.status==='waiting'&&active
-      ?`Waiting for backtest ${active.id.slice(0,8)} to release the shared research lock`
+      ?`Waiting for campaign run ${active.id.slice(0,8)} to release the shared research lock`
       :campaign?.status==='waiting'
         ?'Waiting to seal the next historical snapshot comparison cycle'
         :campaign?.status==='paused'?'Paused after the current deterministic operation':campaign?.status??'Not started';
@@ -223,11 +223,11 @@ export default function ResearchStatus(){
   };
 
   return <Page>
-    <Head><title>Research Status · Trading Keys</title></Head>
+    <Head><title>Research Campaigns · Trading Keys</title></Head>
     <Hero>
       <Kicker>Goldilocks overnight discovery</Kicker>
-      <Title>Research Status</Title>
-      <Sub>Continuous one-year strategy research. The worker compares the active leader with focused adjustments and an occasional wildcard on sealed candle snapshots, then keeps the strongest eligible records without changing the Pi strategy automatically.</Sub>
+      <Title>Research Campaigns</Title>
+      <Sub>Continuous one-year campaign research. Each campaign contains searchable backtest runs on sealed candle snapshots, and the strongest eligible records remain advisory until explicitly approved.</Sub>
       <StatusRow>
         <Badge $tone={statusTone(campaign?.status)}><Dot/>{campaign?.status?.toUpperCase()??'NOT STARTED'}</Badge>
         <Badge $tone={data?.workerAlive?'good':'bad'}><Dot/>{data?.workerAlive?'WORKER ONLINE':'WORKER OFFLINE'}</Badge>
@@ -239,27 +239,27 @@ export default function ResearchStatus(){
         {!inactive&&campaign?.status==='paused'&&<Button disabled={busy} onClick={()=>void action('resume')}>Resume</Button>}
         {!inactive&&campaign?.status!=='paused'&&<Button disabled={busy} onClick={()=>void action('pause')}>Pause</Button>}
         {!inactive&&<StopButton disabled={busy} onClick={()=>void action('stop')}>Stop</StopButton>}
-        <Link href="/backtesting" style={{color:'#a7dce3',fontSize:12}}>Open full Backtesting Lab</Link>
+        <Link href={campaign?`/backtesting?campaignId=${encodeURIComponent(campaign.id)}`:'/backtesting'} style={{color:'#a7dce3',fontSize:12}}>Open Campaign Backtester</Link>
       </StatusRow>
       {error&&<ErrorBox>{error}</ErrorBox>}
     </Hero>
 
     <Grid>
       <Card><Label>{campaign?.status==='preparing'?'Dataset acquisition':'Campaign progress'}</Label><Metric>{campaign?.status==='preparing'?`${campaign.preparationDone??0} / ${campaign.preparationTotal??0}`:`${finished} / ${total}`}</Metric><Small>{campaign?.status==='preparing'?'Unique pair/timeframe histories cached once':`${counts.running??0} running - ${counts.queued??0} queued - ${counts.failed??0} failed`}</Small></Card>
-      <Card><Label>Trial trade observations</Label><Metric>{completedTrials.reduce((sum,trial)=>sum+Number(trial.metrics?.official?.sampleTrades??0),0)}</Metric><Small>Current campaign observations only; these do not define the all-time records below</Small></Card>
+      <Card><Label>Campaign trade observations</Label><Metric>{completedTrials.reduce((sum,trial)=>sum+Number(trial.metrics?.official?.sampleTrades??0),0)}</Metric><Small>Current campaign observations only; these do not define the all-time records below</Small></Card>
     </Grid>
 
     <ActivePanel>
-      <ActiveIntro><h2>Current campaign trial</h2><Small style={{marginTop:0}}>{currentTrial?`Trial ${currentTrial.id.slice(0,8)} is the configuration being measured now.`:campaign?.status==='preparing'?'The next one-year snapshot is being sealed.':'The worker is waiting to claim the next configuration.'}</Small></ActiveIntro>
+      <ActiveIntro><h2>Current campaign run</h2><Small style={{marginTop:0}}>{currentTrial?`Campaign run ${currentTrial.id.slice(0,8)} is the configuration being measured now.`:campaign?.status==='preparing'?'The next one-year snapshot is being sealed.':'The worker is waiting to claim the next configuration.'}</Small></ActiveIntro>
       <ActiveFact><span>Strategy / score</span><strong>{currentConfig?getGoldilocksTimeframeProfile(currentConfig.timeframeProfile).label:'Waiting'} · {currentConfig?.minimumScore??'—'}/20</strong></ActiveFact>
       <ActiveFact><span>Manager / target</span><strong>{currentManager} · {currentTarget}</strong></ActiveFact>
-      <ActiveFact><span>Trial tune</span><strong>{currentConfig?.confirmationMode==='touch-entry'?'Immediate touch':'Touch + engulf'} · {Number(currentConfig?.strategyTweaks?.maximumPriorTouches??3)} touches · {Number(currentConfig?.strategyTweaks?.maxEntryDistanceZoneFraction??0.5)} distance</strong></ActiveFact>
+      <ActiveFact><span>Campaign tune</span><strong>{currentConfig?.confirmationMode==='touch-entry'?'Immediate touch':'Touch + engulf'} · {Number(currentConfig?.strategyTweaks?.maximumPriorTouches??3)} touches · {Number(currentConfig?.strategyTweaks?.maxEntryDistanceZoneFraction??0.5)} distance</strong></ActiveFact>
       <ActiveFact><span>Progress</span><strong>{active?`${activeProgress.toFixed(1)}% · ${active.progressDone??0}/${active.progressTotal??0} · ${active.totalTrades??0} trades`:(campaign?.status==='preparing'?'Sealing dataset':'Waiting')}</strong></ActiveFact>
       <ActiveFact><span>Pair / stage</span><strong>{active?`${active.progressPair??'Preparing'} · ${active.progressStage??active.latestEvent?.message??'Loading'}`:activity}</strong></ActiveFact>
     </ActivePanel>
 
     <Section>
-      <SectionHead><div><h2>Campaign queue</h2><p>{campaign?.label??'No campaign yet'} · {campaign?.id??'—'}</p></div><div style={{color:'#718093',fontSize:11}}>Started {formatTime(campaign?.startedAt)}</div></SectionHead>
+      <SectionHead><div><h2>Campaign queue</h2><p>{campaign?.label??'No campaign yet'} · {campaign?<Link href={`/backtesting?campaignId=${encodeURIComponent(campaign.id)}`} title="Open this campaign in the Backtester" style={{color:'#8beeff'}}>{campaign.id}</Link>:'—'}</p></div><div style={{color:'#718093',fontSize:11}}>Started {formatTime(campaign?.startedAt)}</div></SectionHead>
       <Meter><span style={{width:`${campaign?.status==='preparing'?(campaign.preparationTotal?100*Number(campaign.preparationDone??0)/campaign.preparationTotal:0):campaignProgress}%`}}/></Meter>
       <Small>{campaign?.status==='preparing'?`${campaign.preparationStage??'Preparing'} - dataset ${campaign.datasetKey??'not sealed yet'}`:`${campaignProgress.toFixed(1)}% complete - research engine ${data?.researchVersion??'unknown'} - worker PID ${campaign?.workerPid??'offline'}`}</Small>
       <QueueRibbon><span>⚡ <strong>{currentTrial?'1 active':'Waiting'}</strong></span><span>◆ <strong>{queuedTrials.length}</strong> queued</span><span>◉ <strong>{finished}</strong> finished</span><span>✦ Wildcard = <strong>one broader automatic test</strong></span><span>Dataset <strong>{campaign?.datasetKey?.slice(0,18)??'sealing'}</strong></span>{active&&<span>Progress <strong>{activeProgress.toFixed(1)}%</strong></span>}</QueueRibbon>
@@ -280,7 +280,7 @@ export default function ResearchStatus(){
     </Section>
 
     <Section>
-      <SectionHead><div><h2>All-time top 3 records</h2><p>Global records with at least 100 trades. Net R leads; when two results are within 3R, a configuration with more than 5% lower max drawdown ranks higher.</p></div><div style={{color:'#718093',fontSize:11}}>Showing {(data?.allTimeRecords??[]).length} record{(data?.allTimeRecords??[]).length===1?'':'s'}</div></SectionHead>
+      <SectionHead><div><h2>All-time top 3 campaign runs</h2><p>Global campaign runs with at least 100 trades. Net R leads; when two results are within 3R, a configuration with more than 5% lower max drawdown ranks higher.</p></div><div style={{color:'#718093',fontSize:11}}>Showing {(data?.allTimeRecords??[]).length} record{(data?.allTimeRecords??[]).length===1?'':'s'}</div></SectionHead>
       {data?.allTimeRecords?.length?<TableWrap><table><thead><tr><th>Rank / ID</th><th>Stack</th><th>Score</th><th>Manager</th><th>Target</th><th>Tune</th><th>Difference / provenance</th><th>Trades</th><th>Net result</th><th>Profit factor</th><th>Max DD</th><th>Pi status</th></tr></thead><tbody>
         {data.allTimeRecords.slice(0,3).map((record,index)=>{const metric=record.metrics?.official;const synced=Boolean(record.runUid&&data.appliedStrategy?.sourceRunUid===record.runUid);const manager=GOLDILOCKS_BACKTEST_MANAGERS.find(item=>item.id===record.config.tradeManager)?.label.replace(' (default)','')??record.config.tradeManager??'—';const tweaks=record.config.strategyTweaks??{};const gates=record.config.gateSettings??{};const target=record.config.setAndForgetTargetMode==='opposing-base'?'Opp. base':record.config.setAndForgetTargetR?`${record.config.setAndForgetTargetR}R`:'—';const reference=data.allTimeRecords[0];const comparison=compareResearchRecords(reference,record);const source=record.config.researchManifest?.versions;const provenanceHeadline=index===0?'Reference record':`${comparison.settingsMatch?'Same settings':`${comparison.changedSettings.length} setting change${comparison.changedSettings.length===1?'':'s'}`} · ${comparison.datasetChanged?`data ${formatDelta(comparison.cutoffDeltaSeconds)}`:'same data'}`;return <tr key={record.id} style={{background:synced?'#123b3126':'transparent'}}>
           <td><Link href={`/research/trials/${record.id}`} title={record.id} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>#{index+1} · {record.id.slice(0,8)}</Link></td><td>{getGoldilocksTimeframeProfile(record.config.timeframeProfile).label}</td><td>{record.config.minimumScore}/20</td><td>{manager}</td><td>{target}</td><td><details><summary style={{cursor:'pointer',color:'#8beeff'}}>Tune</summary><div style={{display:'grid',gap:5,minWidth:150,paddingTop:7,color:'#9eabba'}}><span>{record.config.confirmationMode==='touch-entry'?'Immediate touch':'Touch + engulf'}</span><span>Touches: {Number(tweaks.maximumPriorTouches??3)}</span><span>Distance: {Number(tweaks.maxEntryDistanceZoneFraction??0.5)}</span><span>Proximity: {gates.entryProximity===false?'off':'on'}</span><span>Risk: {String(record.config.riskProfile??'default')}</span></div></details></td><td><strong style={{display:'block',color:index===0?'#dce8f4':comparison.settingsMatch?'#67efb2':'#ffdc8b',whiteSpace:'nowrap'}}>{provenanceHeadline}</strong><details><summary style={{cursor:'pointer',color:'#8beeff',marginTop:5}}>Run identity</summary><div style={{display:'grid',gap:4,minWidth:230,paddingTop:7,color:'#9eabba'}}><span>Cutoff: {formatCutoff(record.config.datasetEndTime)}</span><span title={record.datasetKey??record.config.datasetKey}>Data: {(record.datasetKey??record.config.datasetKey??'not recorded').slice(0,28)}</span><span>Strategy: {record.config.strategyVersion??'not recorded'}</span><span title={source?.codeRevision}>{source?.codeRevision&&source.codeRevision!=='unknown'?`Code: ${source.codeRevision.slice(0,8)} · ${source.sourceState??'state unknown'}`:'Code: not recorded (historical)'}</span><span title={record.configHash}>Trial hash: {record.configHash?.slice(0,10)??'not recorded'}</span>{comparison.changedSettings.length>0&&<span title={comparison.changedSettings.join(', ')}>Changed: {comparison.changedSettings.slice(0,3).join(', ')}{comparison.changedSettings.length>3?'…':''}</span>}</div></details></td><td>{metric?.sampleTrades??0}</td>

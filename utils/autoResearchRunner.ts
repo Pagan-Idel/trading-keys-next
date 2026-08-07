@@ -24,7 +24,7 @@ import { fetchCandleHistory } from './oanda/api/fetchCandleHistory.ts';
 import {
   addAutoResearchEvent, cancelAutoResearchCampaign, claimNextAutoResearchTrial, completeAutoResearchTrial,
   createAutoResearchCampaign, enqueueAutoResearchCycle, failAutoResearchTrial, getAutoResearchCampaignRuntime,getAutoResearchDashboard,
-  getBestAutoResearchConfiguration, resetInterruptedAutoResearchTrials, updateAutoResearchCampaign, type AutoResearchCampaignConfig,
+  getBestAutoResearchConfiguration, linkAutoResearchTrialBacktest, resetInterruptedAutoResearchTrials, updateAutoResearchCampaign, type AutoResearchCampaignConfig,
 } from './autoResearchStore.ts';
 
 export interface StartAutoResearchInput {
@@ -279,7 +279,11 @@ export const executeAutoResearchCampaign=async(campaignId:string)=>{
       addAutoResearchEvent(campaignId,'trial_started',`TRIAL STARTED · ${trial.config.label}.`,trial.id,{datasetKey:trial.datasetKey,config:trial.config});
       let backtestRunId:string|undefined;
       try{
-        const result=await executeBacktestInline(trial.config);
+        const result=await executeBacktestInline(trial.config,id=>{
+          backtestRunId=id;
+          linkAutoResearchTrialBacktest(trial.id,id);
+          addAutoResearchEvent(campaignId,'trial_backtest_linked',`CAMPAIGN RUN READY · ${trial.config.label} · ${id}.`,trial.id,{backtestRunId:id});
+        });
         backtestRunId=result.id;
         if(result.status!=='completed')throw new Error(`Backtest ${result.id} ended with status ${result.status}.`);
         const metrics=summarizeRun(result.id);

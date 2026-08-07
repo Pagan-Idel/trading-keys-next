@@ -7,6 +7,7 @@ import {
   type FormEvent,
 } from "react";
 import Link from "next/link";
+import {useRouter} from 'next/router';
 import styled from "styled-components";
 import { forexPairs } from "../utils/constants";
 import { RISK_PROFILES, type RiskProfile } from "../utils/dynamicRisk";
@@ -472,6 +473,12 @@ const TradeSearchResult = styled.div`
     font-weight: 900;
   }
 `;
+const CampaignSearchResult=styled(TradeSearchResult)`
+  display:grid;gap:9px;
+  .campaign-runs{display:flex;gap:7px;flex-wrap:wrap;}
+  button{border:1px solid #48788a;background:#112735;color:#a8ecff;border-radius:8px;padding:7px 9px;font-weight:850;cursor:pointer;}
+  button:disabled{opacity:.5;cursor:not-allowed;}
+`;
 const TradeId = styled.code`
   color: #7dffd4;
   font-size: 0.68rem;
@@ -758,6 +765,12 @@ type Dashboard = {
       endingBalance: number;
     };
   }>;
+  campaignSearch?:CampaignSearch;
+};
+type CampaignSearch={
+  kind:'manual-campaign'|'research-campaign'|'research-trial'|'research-run';
+  id:string;label:string;status:string;matchedTrialId?:string;
+  runs:Array<{trialId?:string;backtestRunId:string|null;runUid?:string|null;label:string;status:string}>;
 };
 type SortDirection = "asc" | "desc";
 type ScoreComponent = { name: string; points: number; detail: string };
@@ -887,8 +900,8 @@ const scoreWeightFields: Array<{
   },
 ];
 const runSortOptions = [
-  ["createdAt", "Run date"],
-  ["label", "Run label"],
+  ["createdAt", "Campaign date"],
+  ["label", "Campaign label"],
   ["minimumScore", "Minimum score"],
   ["totalTrades", "Signals"],
   ["acceptedTrades", "Portfolio admitted"],
@@ -932,6 +945,7 @@ const formatPayoff = (value: number | null) =>
   value == null ? "N/A" : `${formatFactor(value)}:1`;
 
 export default function Backtesting() {
+  const router=useRouter();
   const dashboardRequestInFlight = useRef(false);
   const leaderDefaultsApplied = useRef(false);
   const [data, setData] = useState<Dashboard | null>(null),
@@ -983,6 +997,7 @@ export default function Backtesting() {
   const [tradeSortDirection, setTradeSortDirection] =
     useState<SortDirection>("desc");
   const [runUidQuery, setRunUidQuery] = useState("");
+  const [campaignSearchResult,setCampaignSearchResult]=useState<CampaignSearch|null>(null);
   const load = useCallback(async (runId?: string) => {
     if (dashboardRequestInFlight.current) return;
     dashboardRequestInFlight.current = true;
@@ -1060,34 +1075,40 @@ export default function Backtesting() {
     setTradeSearchResult(null);
     setError("");
   };
-  const searchRunUid = async (event: FormEvent) => {
-    event.preventDefault();
-    const query = runUidQuery.trim().toUpperCase();
+  const searchCampaign = useCallback(async (queryInput?:string) => {
+    const query=(queryInput??runUidQuery).trim();
     if (!query) return;
     try {
       const response = await fetch(
-        `/api/backtests?runId=${encodeURIComponent(query)}`,
+        `/api/backtests?campaignId=${encodeURIComponent(query)}`,
         { cache: "no-store" },
       );
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
-      const matched = body.runs?.find(
-        (run: Run) => run.runUid?.toUpperCase() === query,
-      );
-      if (!matched) throw new Error(`Backtest run ${query} was not found.`);
+      setCampaignSearchResult(body.campaignSearch??null);
       setData(body);
       setError("");
     } catch (searchError) {
+      setCampaignSearchResult(null);
       setError((searchError as Error).message);
     }
-  };
+  },[runUidQuery]);
+  const searchCampaignSubmit=(event:FormEvent)=>{event.preventDefault();void searchCampaign()};
   const active =
     data?.runs.some(
       (run) => run.status === "running" || run.status === "queued",
     ) ?? false;
+  const lastRouteQuery=useRef('');
   useEffect(() => {
-    void load();
-  }, [load]);
+    if(!router.isReady)return;
+    const campaignId=typeof router.query.campaignId==='string'?router.query.campaignId:'';
+    const runId=typeof router.query.runId==='string'?router.query.runId:'';
+    const routeQuery=campaignId?`campaign:${campaignId}`:runId?`run:${runId}`:'dashboard';
+    if(lastRouteQuery.current===routeQuery)return;
+    lastRouteQuery.current=routeQuery;
+    if(campaignId){setRunUidQuery(campaignId);void searchCampaign(campaignId);return;}
+    void load(runId||undefined);
+  }, [load,router.isReady,router.query.campaignId,router.query.runId,searchCampaign]);
   useEffect(()=>{
     const config=data?.defaultConfig;
     if(!config||leaderDefaultsApplied.current)return;
@@ -1158,6 +1179,7 @@ export default function Backtesting() {
         if (!currentData) return currentData;
         const optimisticRun: Run = {
           id: body.id,
+          runUid:body.runUid,
           status: body.status,
           label: body.config.label,
           createdAt: new Date().toISOString(),
@@ -1297,7 +1319,7 @@ export default function Backtesting() {
   const clearAllBacktests = async () => {
     if (
       !window.confirm(
-        "Permanently clear every backtest run, trade, and event? Historical news coverage will be preserved. This cannot be undone.",
+        "Permanently clear every campaign run, trade, and event? Historical news coverage will be preserved. This cannot be undone.",
       )
     )
       return;
@@ -1527,17 +1549,17 @@ export default function Backtesting() {
   return (
     <Page>
       <Hero>
-        <Kicker>Goldilocks research arcade</Kicker>
-        <Title>Backtest Candy Lab</Title>
+        <Kicker>Campaign builder + evidence viewer</Kicker>
+        <Title>Campaign Backtester</Title>
         <Sub>
           Run H1 trend → M15 zones → M5 departure, touch, and later
           close-through confirmation. M1 is retained only for post-entry stop,
-          +1R, and target ordering. Every run stores one final realized-R result
+          +1R, and target ordering. Every campaign run stores one final realized-R result
           and a permanent version snapshot.
         </Sub>
         <Controls>
           <Field>
-            Run label
+            Campaign label
             <input
               value={label}
               placeholder={getGoldilocksBacktestRunLabel(timeframeProfile)}
@@ -1684,11 +1706,11 @@ export default function Backtesting() {
           </Field>
           {running ? (
             <CancelButton disabled={busy} onClick={cancel}>
-              {busy ? "Stopping..." : "Cancel run"}
+              {busy ? "Stopping..." : "Cancel campaign"}
             </CancelButton>
           ) : (
             <Button disabled={busy || !selected.length || active} onClick={run}>
-              {busy ? "Launching..." : "Run backtest"}
+              {busy ? "Launching..." : "Run campaign"}
             </Button>
           )}
         </Controls>
@@ -1700,7 +1722,7 @@ export default function Backtesting() {
           </summary>
           <div className="rule-body">
             <Sub style={{ fontSize: ".72rem", marginTop: 12 }}>
-              These settings are saved with the run and affect only backtests.
+              These settings are saved with the campaign run and affect only historical simulation.
             </Sub>
             <ConfigCategory>
               <h3>1. Hard gates</h3>
@@ -2167,7 +2189,7 @@ export default function Backtesting() {
             <span className="muted">
               {tradeSearchResult
                 ? "Showing only the matching trade"
-                : `Trades from the selected backtest run${current ? ` · ${current.label}` : ""}`}
+                : `Trades from the selected campaign run${current ? ` · ${current.label}` : ""}`}
             </span>
           </div>
           <TradeHeadActions>
@@ -2372,7 +2394,7 @@ export default function Backtesting() {
           <div>
             <h2>🏆 Permanent Top 3</h2>
             <span className="muted">
-              Highest net realized-R backtests · saved independently from run
+              Highest net realized-R campaigns · saved independently from campaign
               history · automatically replaces only the lowest record
             </span>
           </div>
@@ -2382,8 +2404,8 @@ export default function Backtesting() {
             <thead>
               <tr>
                 <th>Rank</th>
-                <th>Run ID</th>
-                <th>Run</th>
+                <th>Campaign ID</th>
+                <th>Campaign</th>
                 <th>Manager / target</th>
                 <th>Score</th>
                 <th>Signals / admitted</th>
@@ -2463,7 +2485,7 @@ export default function Backtesting() {
               {!data?.leaderboard?.length && (
                 <tr>
                   <td colSpan={10} className="muted">
-                    Complete a backtest to establish the first permanent record.
+                    Complete a campaign to establish the first permanent record.
                   </td>
                 </tr>
               )}
@@ -2474,24 +2496,24 @@ export default function Backtesting() {
       <Section>
         <Head>
           <div>
-            <h2>Backtest runs</h2>
+            <h2>Campaign runs</h2>
             <span className="muted">
-              One row per saved run · click a row to load its settings, account
+              One row per saved campaign run · click a row to load its settings, account
               results, trades, chart links, and event log
             </span>
           </div>
           <SortControls>
-            <TradeSearch onSubmit={searchRunUid}>
+            <TradeSearch onSubmit={searchCampaignSubmit}>
               <input
-                aria-label="Search backtest run ID"
-                placeholder="GLR-20260727…"
+                aria-label="Search campaign ID"
+                placeholder="Campaign, trial, UUID, or GLR-…"
                 value={runUidQuery}
                 onChange={(event) => setRunUidQuery(event.target.value)}
               />
-              <button type="submit">Find run</button>
+              <button type="submit">Find campaign</button>
             </TradeSearch>
             <select
-              aria-label="Sort backtest runs by"
+              aria-label="Sort campaign runs by"
               value={runSortKey}
               onChange={(event) => setRunSortKey(event.target.value)}
             >
@@ -2502,7 +2524,7 @@ export default function Backtesting() {
               ))}
             </select>
             <select
-              aria-label="Backtest run sort direction"
+              aria-label="Campaign run sort direction"
               value={runSortDirection}
               onChange={(event) =>
                 setRunSortDirection(event.target.value as SortDirection)
@@ -2516,20 +2538,24 @@ export default function Backtesting() {
               title={
                 active
                   ? "Cancel the active backtest first"
-                  : "Delete all backtest runs, trades, and events"
+                  : "Delete all campaign runs, trades, and events"
               }
               onClick={() => void clearAllBacktests()}
             >
-              {clearingAll ? "Clearing…" : "Clear all backtest data"}
+              {clearingAll ? "Clearing…" : "Clear all campaign data"}
             </ClearAllButton>
           </SortControls>
         </Head>
+        {campaignSearchResult&&<CampaignSearchResult>
+          <div>Found {campaignSearchResult.kind==='manual-campaign'?'manual':'research'} campaign <code>{campaignSearchResult.id}</code> · {campaignSearchResult.status.toUpperCase()} · {campaignSearchResult.runs.length} campaign run{campaignSearchResult.runs.length===1?'':'s'}</div>
+          <div className="campaign-runs">{campaignSearchResult.runs.map((item,index)=><button key={item.trialId??item.backtestRunId??index} type="button" disabled={!item.backtestRunId} onClick={()=>item.backtestRunId&&void load(item.backtestRunId)} title={`${item.trialId?`Research trial ${item.trialId}. `:''}${item.backtestRunId?`Backtester run ${item.backtestRunId}. Load its trades and chart links.`:'This campaign run has not created its Backtester record yet.'}`}>{item.runUid??item.trialId?.slice(0,8)??`Run ${index+1}`} · {item.status}</button>)}</div>
+        </CampaignSearchResult>}
         <LeaderboardTable>
           <table>
             <thead>
               <tr>
                 <th>Delete</th>
-                <th>Run</th>
+                <th>Campaign</th>
                 <th>Score</th>
                 <th>Signals / admitted</th>
                 <th>Expectancy</th>
@@ -2552,12 +2578,12 @@ export default function Backtesting() {
                       background:
                         row.id === data?.selectedRunId ? "#152c29" : "",
                     }}
-                    title={`Load complete run: ${row.label}`}
+                    title={`Load complete campaign run: ${row.label}`}
                   >
                     <td>
                       <DeleteButton
                         disabled={deletingId === row.id}
-                        title="Delete this entire run and all of its trades"
+                        title="Delete this entire campaign run and all of its trades"
                         onClick={(event) => {
                           event.stopPropagation();
                           void removeRun(row.id, row.label);
@@ -2569,7 +2595,7 @@ export default function Backtesting() {
                     <td>
                       <strong>{row.label}</strong>
                       <div style={{ marginTop: 5 }}>
-                        <TradeId>{row.runUid ?? "Assigning run ID…"}</TradeId>
+                        <TradeId>{row.runUid ?? "Assigning campaign ID…"}</TradeId>
                       </div>
                       <div
                         style={{
@@ -2659,15 +2685,15 @@ export default function Backtesting() {
         <Section>
           <Head>
             <div>
-              <h2>Selected run configuration</h2>
+              <h2>Selected campaign configuration</h2>
               <span className="muted">
-                Click any backtest-run row above to populate this card ·
+                Click any campaign-run row above to populate this card ·
                 currently showing “{current.label}”
               </span>
             </div>
           </Head>
           <RunConfigGrid>
-            <RunConfigItem>Run ID: {current.id}</RunConfigItem>
+            <RunConfigItem>Campaign ID: {current.runUid??current.id}</RunConfigItem>
             <RunConfigItem>Saved label: {current.label}</RunConfigItem>
             {tweakSummary(current).map((detail) => (
               <RunConfigItem key={detail}>{detail}</RunConfigItem>
@@ -2677,7 +2703,7 @@ export default function Backtesting() {
       )}
       <Section>
         <Head>
-          <h2>Backtest candylog</h2>
+          <h2>Campaign candylog</h2>
           <span className="muted">Newest steps first</span>
         </Head>
         <Feed>

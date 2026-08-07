@@ -599,10 +599,17 @@ Pair/tweak rows rank by realized-R expectancy rather than win rate and flag samp
 below 50 trades as early evidence; 100 or more is the preferred initial review size.
 Every stored trade also receives a deterministic `GL-PAIR-YYYYMMDD-HHMM-HASH` ID that
 survives progress rewrites and can be searched globally from the dashboard.
-Every saved run independently receives a deterministic
-`GLR-YYYYMMDDHHMM-HASH` ID. Existing runs are backfilled on database startup, new
-runs store it at creation, and the Backtest runs search accepts the public run ID
-without exposing or replacing the internal database UUID.
+Every saved campaign run independently receives a deterministic
+`GLR-YYYYMMDDHHMM-HASH` campaign ID. Existing runs are backfilled on database startup,
+and manual and Research-created runs store it at creation. The Campaign Backtester
+search accepts that public ID, an internal backtest UUID, a Research trial UUID, or a
+parent Research campaign UUID. A parent campaign search lists all of its contained
+runs and loads the specifically matched, running, or first available run without
+silently hiding the others. A searched older run is inserted into the bounded history
+view even when it is outside the latest 30 rows. Research trials persist their
+backtest-run link immediately after creation, so a running campaign can be inspected
+before it completes. Loading any linked run restores its recorded trades and existing
+`View chart` replay links.
 The Backtesting dashboard also maintains a permanent three-slot Hall of Fame ranked by
 official net realized R after chronological portfolio admission. Each record snapshots
 the public run ID, configuration, completion time, signal/admission counts, expectancy,

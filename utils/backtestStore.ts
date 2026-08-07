@@ -28,6 +28,7 @@ import {
   type GoldilocksBacktestManagerId,
   type GoldilocksScaleOut,
 } from "./goldilocksTradeManagement.ts";
+import {includeRequestedCampaignRun} from './campaignSearch.ts';
 
 export type BacktestStatus =
   "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -816,26 +817,34 @@ export const getBacktestRunUid = (runId: string) => {
     .get(runId, runId) as { runUid?: string } | undefined;
   return row?.runUid;
 };
+export const resolveBacktestRunId = (identifier: string) => {
+  const row = database()
+    .prepare(
+      "SELECT id FROM backtest_runs WHERE id=? OR UPPER(run_uid)=UPPER(?) LIMIT 1",
+    )
+    .get(identifier, identifier) as { id?: string } | undefined;
+  return row?.id;
+};
+type BacktestDashboardRunRow = Record<string, unknown> & {
+  id: string;
+  configJson: string;
+};
 export const getBacktestDashboard = (runId?: string) => {
   const d = database();
-  const runs = d
+  const recentRuns = d
     .prepare(
       `SELECT id,run_uid AS runUid,status,label,config_json AS configJson,created_at AS createdAt,started_at AS startedAt,
     completed_at AS completedAt,progress_pair AS progressPair,progress_done AS progressDone,progress_total AS progressTotal,
     progress_stage AS progressStage,progress_percent AS progressPercent,heartbeat_at AS heartbeatAt,
     total_trades AS totalTrades,wins,losses,error FROM backtest_runs ORDER BY created_at DESC LIMIT 30`,
     )
-    .all() as Array<Record<string, unknown>>;
-  const selected =
-    (runId
-      ? String(
-          (
-            d.prepare(
-              "SELECT id FROM backtest_runs WHERE id=? OR UPPER(run_uid)=UPPER(?) LIMIT 1",
-            ).get(runId, runId) as { id?: string } | undefined
-          )?.id ?? "",
-        )
-      : String(runs[0]?.id ?? "")) || String(runs[0]?.id ?? "");
+    .all() as BacktestDashboardRunRow[];
+  const requestedRun=runId?d.prepare(`SELECT id,run_uid AS runUid,status,label,config_json AS configJson,created_at AS createdAt,started_at AS startedAt,
+    completed_at AS completedAt,progress_pair AS progressPair,progress_done AS progressDone,progress_total AS progressTotal,
+    progress_stage AS progressStage,progress_percent AS progressPercent,heartbeat_at AS heartbeatAt,
+    total_trades AS totalTrades,wins,losses,error FROM backtest_runs WHERE id=? OR UPPER(run_uid)=UPPER(?) LIMIT 1`).get(runId,runId) as BacktestDashboardRunRow|undefined:undefined;
+  const runs=includeRequestedCampaignRun(recentRuns,requestedRun,30);
+  const selected=runId?String(requestedRun?.id??''):String(runs[0]?.id??'');
   const trades = selected
     ? d
         .prepare(
@@ -1002,13 +1011,11 @@ export const getBacktestDashboard = (runId?: string) => {
         .all(selected)
     : [];
   return {
-    runs: selected
-      ? runs.map((run) => ({
-          ...run,
-          config: summaryConfig(run.configJson),
-          configJson: undefined,
-        }))
-      : runs,
+    runs: runs.map((run) => ({
+      ...run,
+      config: summaryConfig(run.configJson),
+      configJson: undefined,
+    })),
     runResults,
     selectedRunId: selected,
     trades,

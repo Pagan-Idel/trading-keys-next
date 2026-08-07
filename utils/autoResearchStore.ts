@@ -141,6 +141,12 @@ export const claimNextAutoResearchTrial=(campaignId:string)=>{
 export const completeAutoResearchTrial=(id:string,backtestRunId:string,metrics:unknown)=>database().prepare(`UPDATE research_trials
   SET status='completed',backtest_run_id=?,metrics_json=?,completed_at=? WHERE id=?`).run(backtestRunId,json(metrics),now(),id);
 
+export const linkAutoResearchTrialBacktest=(id:string,backtestRunId:string)=>{
+  const result=database().prepare(`UPDATE research_trials SET backtest_run_id=? WHERE id=? AND status='running'`).run(backtestRunId,id);
+  if(!result.changes)throw new Error('Only a running research campaign trial can be linked to a backtest campaign run.');
+  return {id,backtestRunId};
+};
+
 export const failAutoResearchTrial=(id:string,error:string,backtestRunId?:string)=>database().prepare(`UPDATE research_trials
   SET status='failed',backtest_run_id=?,error=?,completed_at=? WHERE id=?`).run(backtestRunId??null,error,now(),id);
 
@@ -218,6 +224,29 @@ export type AutoResearchTrialDetail={
   id:string;campaignId:string;campaignLabel:string;datasetKey:string;status:string;
   backtestRunId?:string|null;config:any;metrics:any;error?:string|null;
   createdAt:string;startedAt?:string|null;completedAt?:string|null;
+};
+
+export type AutoResearchCampaignSearch={
+  kind:'research-campaign'|'research-trial'|'research-run';
+  id:string;label:string;status:string;matchedTrialId?:string;
+  runs:Array<{trialId:string;status:string;backtestRunId:string|null;label:string}>;
+};
+
+export const findAutoResearchCampaignSearch=(identifier:string,resolvedBacktestRunId?:string):AutoResearchCampaignSearch|undefined=>{
+  const db=database(),query=identifier.trim();
+  if(!query)return undefined;
+  const directCampaign=db.prepare(`SELECT id,label,status FROM research_campaigns WHERE LOWER(id)=LOWER(?) LIMIT 1`).get(query) as {id:string;label:string;status:string}|undefined;
+  const matchedTrial=directCampaign?undefined:db.prepare(`SELECT id,campaign_id AS campaignId FROM research_trials
+    WHERE LOWER(id)=LOWER(?) OR backtest_run_id=? OR backtest_run_id=? LIMIT 1`).get(query,query,resolvedBacktestRunId??'') as {id:string;campaignId:string}|undefined;
+  const campaign=directCampaign??(matchedTrial?db.prepare(`SELECT id,label,status FROM research_campaigns WHERE id=?`).get(matchedTrial.campaignId) as {id:string;label:string;status:string}|undefined:undefined);
+  if(!campaign)return undefined;
+  const rows=db.prepare(`SELECT id,status,backtest_run_id AS backtestRunId,config_json AS configJson FROM research_trials
+    WHERE campaign_id=? ORDER BY queue_position,created_at,id`).all(campaign.id) as Array<{id:string;status:string;backtestRunId:string|null;configJson:string}>;
+  const kind=directCampaign?'research-campaign':matchedTrial?.id.toLowerCase()===query.toLowerCase()?'research-trial':'research-run';
+  return {
+    kind,id:campaign.id,label:campaign.label,status:campaign.status,matchedTrialId:matchedTrial?.id,
+    runs:rows.map(row=>({trialId:row.id,status:row.status,backtestRunId:row.backtestRunId,label:String((JSON.parse(row.configJson) as BacktestRunConfig).label??'Research campaign run')})),
+  };
 };
 
 export const getAutoResearchTrial=(trialId:string):AutoResearchTrialDetail|undefined=>{

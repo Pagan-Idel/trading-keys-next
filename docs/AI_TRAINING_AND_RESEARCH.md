@@ -73,6 +73,11 @@ key, backtest run ID, official realized-R metrics, per-pair metrics, and every
 versioned management-policy summary remain attached to each trial. The default
 archive ceiling is 5 GiB including the candle SQLite WAL/SHM and retained legacy gzip
 sources; acquisition pauses at the high-water mark instead of silently deleting data.
+The Campaign Backtester is the shared viewer for manual campaign runs and the
+backtest runs created by Research campaigns. Its campaign search resolves public GLR
+IDs, internal backtest IDs, Research trial IDs, and parent Research campaign IDs; the
+parent view preserves the complete contained-run list. A running Research trial is
+linked to its backtest row as soon as that row is created, not only after completion.
 Automatic research is continuous by default. After all configurations finish on one
 sealed snapshot, the worker waits for a later five-minute dataset boundary, acquires
 and seals that bounded snapshot, and queues the same comparison matrix again. Each

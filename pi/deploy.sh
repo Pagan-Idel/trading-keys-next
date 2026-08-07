@@ -73,6 +73,16 @@ mv -Tf "$UNIT_TARGET.next" "$UNIT_TARGET"
 "$SYSTEMCTL" daemon-reload
 "$SYSTEMCTL" enable "$SERVICE"
 "$SYSTEMCTL" restart "$SERVICE"
+if [[ -f "$DATA/automation-desired-state.json" ]] &&
+  grep -Eq '"desiredState"[[:space:]]*:[[:space:]]*"running"' "$DATA/automation-desired-state.json"; then
+  for _ in {1..30}; do
+    curl -fsS http://127.0.0.1:4080/api/status >/dev/null 2>&1 && break
+    sleep 1
+  done
+  CONTROL_TOKEN="$(sed -n 's/^PULSE_CONTROL_TOKEN=//p' /etc/trading-keys/automation.env)"
+  curl -fsS -X POST -H "Authorization: Bearer $CONTROL_TOKEN" \
+    http://127.0.0.1:4080/api/start >/dev/null 2>&1 || true
+fi
 if ! bash "$RELEASE/pi/verify-deployment.sh" "$COMMIT"; then
   echo "Verification failed; rolling back to $PREVIOUS"
   if [[ -f "$UNIT_BACKUP" ]]; then

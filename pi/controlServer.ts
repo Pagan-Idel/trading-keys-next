@@ -127,10 +127,8 @@ const server=http.createServer(async(request, response) => {
     }
     if (url.pathname === "/api/start" && request.method === "POST") {
       const currentRuntime=getAutomationRuntime();
-      if(!currentRuntime.running){
-        activateStagedApprovedStrategy();
-        validateAutomationRecoveryPreflight();
-      }
+      activateStagedApprovedStrategy();
+      if(!currentRuntime.running)validateAutomationRecoveryPreflight();
       send(response, 200, await startDemoAutomation());
       return;
     }

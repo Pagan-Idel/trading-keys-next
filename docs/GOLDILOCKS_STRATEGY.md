@@ -810,6 +810,12 @@ trial to the queue, retires the stale queued/running backtest row owned by the d
 campaign worker, and launches a new bounded batch when no active campaign exists. It
 does not retire an active manual backtest owned by a different process.
 Ranked leaders remain advisory and cannot change live/demo risk or strategy settings.
+The all-time table exposes each record's sealed dataset cutoff and key, trial hash,
+strategy contract, and captured Git revision/source state. It also summarizes every
+row's settings and dataset differences relative to the current first-place record, so
+two visually identical tunes cannot conceal a different candle snapshot or source
+revision. Historical records created before source capture explicitly say that their
+code revision was not recorded; the dashboard never guesses or backfills one.
 Historical scans pre-index each zone's first completed outside candle once and then
 advance causally through confirmation candles. They must not rescan the complete zone
 timeframe archive for every active-zone/confirmation-candle combination.

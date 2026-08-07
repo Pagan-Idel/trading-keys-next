@@ -168,11 +168,11 @@ export const getAutoResearchDashboard=(campaignId?:string)=>{
 };
 
 export const getTopAutoResearchResults=(limit=3)=>{
-  const rows=database().prepare(`SELECT config_json AS configJson,metrics_json AS metricsJson
-    ,id,backtest_run_id AS backtestRunId,completed_at AS completedAt
-    FROM research_trials WHERE status='completed' AND metrics_json IS NOT NULL`).all() as Array<{id:string;backtestRunId:string;completedAt:string;configJson:string;metricsJson:string}>;
+  const rows=database().prepare(`SELECT config_json AS configJson,metrics_json AS metricsJson,
+    id,backtest_run_id AS backtestRunId,completed_at AS completedAt,dataset_key AS datasetKey,config_hash AS configHash
+    FROM research_trials WHERE status='completed' AND metrics_json IS NOT NULL`).all() as Array<{id:string;backtestRunId:string;completedAt:string;datasetKey:string;configHash:string;configJson:string;metricsJson:string}>;
   return rankAutoResearchResults(rows.map(row=>({
-    id:row.id,backtestRunId:row.backtestRunId,completedAt:row.completedAt,
+    id:row.id,backtestRunId:row.backtestRunId,completedAt:row.completedAt,datasetKey:row.datasetKey,configHash:row.configHash,
     config:JSON.parse(row.configJson) as BacktestRunConfig,
     metrics:JSON.parse(row.metricsJson) as {official?:{sampleTrades?:number;expectancyR?:number|null;netR?:number;maxDrawdownR?:number}},
   })).filter(row=>Number(row.metrics.official?.sampleTrades??0)>=100))

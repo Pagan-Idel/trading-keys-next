@@ -19,6 +19,7 @@ import {
   FOREX_WEEKLY_CLOSE_HOUR,
   FOREX_WEEKLY_OPEN_HOUR,
 } from "./forexMarketHours.ts";
+import {getResearchSourceIdentity} from './researchSourceIdentity.ts';
 
 export const GOLDILOCKS_RESEARCH_MANIFEST_VERSION =
   "goldilocks-configuration-manifest-v1";
@@ -57,6 +58,7 @@ export const buildGoldilocksResearchManifest = (
   minimumScore: number,
 ): GoldilocksResearchManifest => {
   const profile = getGoldilocksTimeframeProfile(timeframeProfile);
+  const sourceIdentity=getResearchSourceIdentity();
   return {
     manifestVersion: GOLDILOCKS_RESEARCH_MANIFEST_VERSION,
     capturedAt: new Date().toISOString(),
@@ -64,6 +66,8 @@ export const buildGoldilocksResearchManifest = (
       researchEngine: GOLDILOCKS_RESEARCH_VERSION,
       strategy: profile.strategyVersion,
       trainingSchema: GOLDILOCKS_RESEARCH_SCHEMA_VERSION,
+      codeRevision:sourceIdentity.codeRevision,
+      sourceState:sourceIdentity.sourceState,
     },
     timeframeContract: {
       profileId: profile.id,

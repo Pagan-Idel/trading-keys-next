@@ -4,6 +4,7 @@ import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import styled from 'styled-components';
 import {getGoldilocksTimeframeProfile,type GoldilocksTimeframeProfileId} from '../utils/goldilocksConfig';
 import {GOLDILOCKS_BACKTEST_MANAGERS,GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID} from '../utils/goldilocksTradeManagement';
+import {compareResearchRecords} from '../utils/researchRecordComparison';
 
 const Page=styled.div`
   width:min(1380px,calc(100% - 30px));margin:0 auto 80px;color:#edf5ff;
@@ -106,6 +107,8 @@ type TrialConfig={
   strategyVersion?:string;riskProfile?:string;confirmationMode?:string;tradeManager?:string;
   setAndForgetTargetMode?:'fixed-r'|'opposing-base';setAndForgetTargetR?:number;
   strategyTweaks?:{maximumPriorTouches?:number;maxEntryDistanceZoneFraction?:number;[key:string]:unknown};
+  datasetKey?:string;datasetEndTime?:number;
+  researchManifest?:{capturedAt?:string;versions?:Record<string,string>;[key:string]:unknown};
   gateSettings?:Record<string,boolean>;[key:string]:unknown;
 };
 type Trial={
@@ -124,7 +127,7 @@ type ResearchData={
   activeBacktest:ActiveBacktest|null;researchVersion:string;
   archive:{usedBytes:number;maxBytes:number;remainingBytes:number;percent:number};
   globalLeader:null|{id:string;backtestRunId:string;runUid:string|null;config:TrialConfig;metrics:{official?:Performance};compatibility:{compatible:boolean;blockers:string[]}};
-  allTimeRecords:Array<{id:string;backtestRunId:string;runUid:string|null;config:TrialConfig;metrics:{official?:Performance};compatibility:{compatible:boolean;blockers:string[]}}>;
+  allTimeRecords:Array<{id:string;backtestRunId:string;runUid:string|null;datasetKey:string;configHash:string;completedAt:string;config:TrialConfig;metrics:{official?:Performance};compatibility:{compatible:boolean;blockers:string[]}}>;
   appliedStrategy:{sourceRunUid:string;appliedAt:string;config:TrialConfig};
   coverage:Array<{pair:string;timeframe:string;startTime:number;endTime:number;candleCount:number}>;
 };
@@ -132,6 +135,12 @@ type ResearchData={
 const formatR=(value:number|null|undefined,signed=false)=>value==null?'—':`${signed&&value>0?'+':''}${value.toFixed(3)}R`;
 const formatFactor=(value:number|null|undefined)=>value==null?'—':Number.isFinite(value)?value.toFixed(2):'∞';
 const formatTime=(value?:string)=>value?new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit'}).format(new Date(value)):'—';
+const formatCutoff=(value?:number)=>Number.isFinite(Number(value))?new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(new Date(Number(value)*1000)):'Not recorded';
+const formatDelta=(seconds:number|null)=>{
+  if(seconds==null)return 'different cutoff';
+  const sign=seconds>=0?'+':'-',absolute=Math.abs(seconds),hours=Math.floor(absolute/3600),minutes=Math.floor(absolute%3600/60);
+  return `${sign}${hours?`${hours}h `:''}${minutes}m`;
+};
 const statusTone=(status?:string):'good'|'warn'|'bad'|'idle'=>status==='running'?'good':status==='preparing'||status==='waiting'||status==='queued'||status==='paused'?'warn':status==='failed'||status==='cancelled'?'bad':'idle';
 
 export default function ResearchStatus(){
@@ -272,9 +281,9 @@ export default function ResearchStatus(){
 
     <Section>
       <SectionHead><div><h2>All-time top 3 records</h2><p>Global records with at least 100 trades. Net R leads; when two results are within 3R, a configuration with more than 5% lower max drawdown ranks higher.</p></div><div style={{color:'#718093',fontSize:11}}>Showing {(data?.allTimeRecords??[]).length} record{(data?.allTimeRecords??[]).length===1?'':'s'}</div></SectionHead>
-      {data?.allTimeRecords?.length?<TableWrap><table><thead><tr><th>Rank / ID</th><th>Stack</th><th>Score</th><th>Manager</th><th>Target</th><th>Tune</th><th>Trades</th><th>Net result</th><th>Profit factor</th><th>Max DD</th><th>Pi status</th></tr></thead><tbody>
-        {data.allTimeRecords.slice(0,3).map((record,index)=>{const metric=record.metrics?.official;const synced=Boolean(record.runUid&&data.appliedStrategy?.sourceRunUid===record.runUid);const manager=GOLDILOCKS_BACKTEST_MANAGERS.find(item=>item.id===record.config.tradeManager)?.label.replace(' (default)','')??record.config.tradeManager??'—';const tweaks=record.config.strategyTweaks??{};const gates=record.config.gateSettings??{};const target=record.config.setAndForgetTargetMode==='opposing-base'?'Opp. base':record.config.setAndForgetTargetR?`${record.config.setAndForgetTargetR}R`:'—';return <tr key={record.id} style={{background:synced?'#123b3126':'transparent'}}>
-          <td><Link href={`/research/trials/${record.id}`} title={record.id} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>#{index+1} · {record.id.slice(0,8)}</Link></td><td>{getGoldilocksTimeframeProfile(record.config.timeframeProfile).label}</td><td>{record.config.minimumScore}/20</td><td>{manager}</td><td>{target}</td><td><details><summary style={{cursor:'pointer',color:'#8beeff'}}>Tune</summary><div style={{display:'grid',gap:5,minWidth:150,paddingTop:7,color:'#9eabba'}}><span>{record.config.confirmationMode==='touch-entry'?'Immediate touch':'Touch + engulf'}</span><span>Touches: {Number(tweaks.maximumPriorTouches??3)}</span><span>Distance: {Number(tweaks.maxEntryDistanceZoneFraction??0.5)}</span><span>Proximity: {gates.entryProximity===false?'off':'on'}</span><span>Risk: {String(record.config.riskProfile??'default')}</span></div></details></td><td>{metric?.sampleTrades??0}</td>
+      {data?.allTimeRecords?.length?<TableWrap><table><thead><tr><th>Rank / ID</th><th>Stack</th><th>Score</th><th>Manager</th><th>Target</th><th>Tune</th><th>Difference / provenance</th><th>Trades</th><th>Net result</th><th>Profit factor</th><th>Max DD</th><th>Pi status</th></tr></thead><tbody>
+        {data.allTimeRecords.slice(0,3).map((record,index)=>{const metric=record.metrics?.official;const synced=Boolean(record.runUid&&data.appliedStrategy?.sourceRunUid===record.runUid);const manager=GOLDILOCKS_BACKTEST_MANAGERS.find(item=>item.id===record.config.tradeManager)?.label.replace(' (default)','')??record.config.tradeManager??'—';const tweaks=record.config.strategyTweaks??{};const gates=record.config.gateSettings??{};const target=record.config.setAndForgetTargetMode==='opposing-base'?'Opp. base':record.config.setAndForgetTargetR?`${record.config.setAndForgetTargetR}R`:'—';const reference=data.allTimeRecords[0];const comparison=compareResearchRecords(reference,record);const source=record.config.researchManifest?.versions;const provenanceHeadline=index===0?'Reference record':`${comparison.settingsMatch?'Same settings':`${comparison.changedSettings.length} setting change${comparison.changedSettings.length===1?'':'s'}`} · ${comparison.datasetChanged?`data ${formatDelta(comparison.cutoffDeltaSeconds)}`:'same data'}`;return <tr key={record.id} style={{background:synced?'#123b3126':'transparent'}}>
+          <td><Link href={`/research/trials/${record.id}`} title={record.id} style={{color:'#8beeff',fontWeight:900,textDecoration:'none'}}>#{index+1} · {record.id.slice(0,8)}</Link></td><td>{getGoldilocksTimeframeProfile(record.config.timeframeProfile).label}</td><td>{record.config.minimumScore}/20</td><td>{manager}</td><td>{target}</td><td><details><summary style={{cursor:'pointer',color:'#8beeff'}}>Tune</summary><div style={{display:'grid',gap:5,minWidth:150,paddingTop:7,color:'#9eabba'}}><span>{record.config.confirmationMode==='touch-entry'?'Immediate touch':'Touch + engulf'}</span><span>Touches: {Number(tweaks.maximumPriorTouches??3)}</span><span>Distance: {Number(tweaks.maxEntryDistanceZoneFraction??0.5)}</span><span>Proximity: {gates.entryProximity===false?'off':'on'}</span><span>Risk: {String(record.config.riskProfile??'default')}</span></div></details></td><td><strong style={{display:'block',color:index===0?'#dce8f4':comparison.settingsMatch?'#67efb2':'#ffdc8b',whiteSpace:'nowrap'}}>{provenanceHeadline}</strong><details><summary style={{cursor:'pointer',color:'#8beeff',marginTop:5}}>Run identity</summary><div style={{display:'grid',gap:4,minWidth:230,paddingTop:7,color:'#9eabba'}}><span>Cutoff: {formatCutoff(record.config.datasetEndTime)}</span><span title={record.datasetKey??record.config.datasetKey}>Data: {(record.datasetKey??record.config.datasetKey??'not recorded').slice(0,28)}</span><span>Strategy: {record.config.strategyVersion??'not recorded'}</span><span title={source?.codeRevision}>{source?.codeRevision&&source.codeRevision!=='unknown'?`Code: ${source.codeRevision.slice(0,8)} · ${source.sourceState??'state unknown'}`:'Code: not recorded (historical)'}</span><span title={record.configHash}>Trial hash: {record.configHash?.slice(0,10)??'not recorded'}</span>{comparison.changedSettings.length>0&&<span title={comparison.changedSettings.join(', ')}>Changed: {comparison.changedSettings.slice(0,3).join(', ')}{comparison.changedSettings.length>3?'…':''}</span>}</div></details></td><td>{metric?.sampleTrades??0}</td>
           <td className={Number(metric?.netR??0)>=0?'good':'bad'}>{formatR(metric?.netR,true)}</td><td>{formatFactor(metric?.profitFactor)}</td><td>{formatR(metric?.maxDrawdownR)}</td><td>{index===0?<Button title={!record.compatibility.compatible?record.compatibility.blockers.join(' '):synced?'This record is already the approved Pi configuration.':'Approval requires stopped automation and no open trade.'} disabled={sendingLeader||synced||!record.compatibility.compatible} onClick={()=>void sendGlobalLeaderToPi()}>{synced?'Active on Pi':sendingLeader?'Sending…':'Send #1 to Pi'}</Button>:synced?<QueueStatus $tone="live">Active on Pi</QueueStatus>:'—'}</td>
         </tr>})}
       </tbody></table></TableWrap>:<Empty>The all-time table will populate after a configuration completes at least 100 trades.</Empty>}

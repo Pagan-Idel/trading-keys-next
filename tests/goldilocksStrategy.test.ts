@@ -914,6 +914,8 @@ test("aligns continuous research to a closed five-minute sealed snapshot", () =>
 
 test("freezes every gate, score component, diagnostic, risk profile, and manager in a research manifest", () => {
   const manifest = buildGoldilocksResearchManifest("intraday", 14);
+  assert.match(manifest.versions.codeRevision,/^(?:unknown|[0-9a-f]{40})$/);
+  assert.match(manifest.versions.sourceState,/^(?:clean|dirty|unknown)$/);
   assert.equal(manifest.timeframeContract.trend, "H1");
   assert.equal(manifest.timeframeContract.zone, "M15");
   assert.equal(manifest.timeframeContract.firstTouch, "M5");

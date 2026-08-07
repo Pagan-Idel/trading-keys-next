@@ -37,7 +37,7 @@ export default function ResearchTrialDetail(){
   return <Page>
     <Head><title>{config.label??'Research trial'} · Trading Keys</title></Head>
     <Hero><Kicker>Frozen Goldilocks trial audit</Kicker><Title>{config.label??'Research configuration'}</Title>
-      <Muted>Research engine <strong>{manifest.versions?.researchEngine??'legacy'}</strong> · strategy <strong>{config.strategyVersion??manifest.versions?.strategy??'unknown'}</strong> · dataset <strong>{trial.datasetKey}</strong>. This page is the stored snapshot for this trial, not today&apos;s mutable defaults.</Muted>
+      <Muted>Research engine <strong>{manifest.versions?.researchEngine??'legacy'}</strong> · strategy <strong>{config.strategyVersion??manifest.versions?.strategy??'unknown'}</strong> · code <strong>{manifest.versions?.codeRevision?`${String(manifest.versions.codeRevision).slice(0,8)} (${manifest.versions?.sourceState??'state unknown'})`:'not recorded (historical)'}</strong> · dataset <strong>{trial.datasetKey}</strong>. This page is the stored snapshot for this trial, not today&apos;s mutable defaults.</Muted>
       <div style={{display:'flex',gap:14,flexWrap:'wrap'}}><Link href="/research" style={{color:'#8beeff'}}>← Research status</Link>{trial.backtestRunId&&<Link href={`/backtesting?runId=${encodeURIComponent(trial.backtestRunId)}`} style={{color:'#dcb4ff'}}>Open recorded backtest</Link>}</div>
     </Hero>
     <Grid>

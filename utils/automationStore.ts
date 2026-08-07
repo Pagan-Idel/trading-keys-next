@@ -9,6 +9,7 @@ import { GOLDILOCKS_STRATEGY_VERSION } from './goldilocksConfig';
 import { GOLDILOCKS_DEFAULT_MANAGEMENT } from './goldilocksTradeManagement';
 import { shouldPersistWorkerStatus,type WorkerStatusSnapshot } from './workerRuntime';
 import type { ZoneLifecycleRecord } from './zoneLifecycle.ts';
+import type { AutomationChartSource, AutomationSwingMarker } from './automationChartContract.ts';
 
 export type AutomationLevel = 'debug' | 'info' | 'warn' | 'error';
 export type WorkerState = 'starting' | 'scanning' | 'waiting' | 'in_trade' | 'paused' | 'stopped' | 'error';
@@ -72,10 +73,13 @@ export interface AppliedAutomationStrategy {
 }
 
 export interface AutomationZoneSnapshot {
+  chartSource:AutomationChartSource;
   pair:string;mode:'live'|'demo';scannedAt:string;trend:'bullish'|'bearish'|'unknown';
   zoneTimeframe:string;confirmationTimeframe:string;
   confirmationMode?:'close-through'|'touch-entry';minimumScore?:number;
-  zones:unknown[];zoneEvidence?:unknown[];candles:Record<string,unknown[]>;confirmationCount:number;setups?:unknown[];activeTrade?:ActiveTradeInput;
+  zones:unknown[];zoneEvidence:unknown[];candles:Record<string,unknown[]>;
+  swingsByTimeframe:Record<string,AutomationSwingMarker[]>;
+  confirmationCount:number;setups:unknown[];activeTrade?:ActiveTradeInput;
 }
 
 const DATA_DIRECTORY = path.resolve(process.env.TRADING_KEYS_DATA_DIRECTORY??path.join(process.cwd(), 'data'));

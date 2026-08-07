@@ -35,6 +35,7 @@ import {
   getGoldilocksAtrTrailingStop,
   getGoldilocksPartialClosePlan,
 } from '../utils/goldilocksTradeManagement.ts';
+import { buildAutomationChartSource, buildAutomationSwingMarkers } from '../utils/automationChartBuilder.ts';
 
 const appliedStrategy=getAppliedAutomationStrategy();
 const TIMEFRAMES=getGoldilocksTimeframeProfile(appliedStrategy.config.timeframeProfile);
@@ -675,7 +676,11 @@ const scan = async () => {
     const touchIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.touchCandle.time);
     const confirmationIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.confirmationCandle.time);
     return {zone:confirmation.zone,touchCandle:confirmation.touchCandle,confirmationCandle:confirmation.confirmationCandle,
-      approachPressure:touchIndex>=0&&confirmationIndex>touchIndex?measureGoldilocksApproachPressure(confirmation.zone,confirmationCandles,touchIndex,confirmationIndex,{firstOutsideTime:confirmation.firstOutsideTime}):undefined};
+      approachPressure:touchIndex>=0&&confirmationIndex>touchIndex?measureGoldilocksApproachPressure(confirmation.zone,confirmationCandles,touchIndex,confirmationIndex,{firstOutsideTime:confirmation.firstOutsideTime}):undefined,
+      runway:validateTwoToOneRunway(confirmation.zone,zoneHistory.activeZones,confirmation.confirmationCandle.close,{
+        targetRewardRatio:setAndForget?appliedStrategy.config.setAndForgetTargetR:2,
+        targetOpposingBase:setAndForget&&appliedStrategy.config.setAndForgetTargetMode==='opposing-base',
+      })};
   });
   const trendCandles=readWorkingCandles(TREND_TIMEFRAME);
   const executionCandles=readWorkingCandles(TIMEFRAMES.execution,500);
@@ -700,14 +705,22 @@ const scan = async () => {
   });
   const snapshotSetups=setups.length?setups:getActiveTrade(pair)
     ?((getAutomationZoneSnapshot(pair)?.setups??[]) as typeof setups):[];
+  const snapshotCandles={
+    [ZONE_TIMEFRAME]:snapshot.candles.filter(candle=>candle.time>=displayStart),
+    [CONFIRMATION_TIMEFRAME]:confirmationCandles.filter(candle=>candle.time>=displayStart),
+    [TREND_TIMEFRAME]:toStrategyCandles(trendCandles).slice(-400),
+    [TIMEFRAMES.execution]:toStrategyCandles(executionCandles).slice(-500),
+  };
   saveAutomationZoneSnapshot({
+    chartSource:buildAutomationChartSource(appliedStrategy.sourceRunUid),
     pair,mode,scannedAt:new Date().toISOString(),trend:getGoldilocksTrend(trendCandles.slice(-5_000)),
     zoneTimeframe:ZONE_TIMEFRAME,confirmationTimeframe:CONFIRMATION_TIMEFRAME,
     confirmationMode,minimumScore,
     zones:zoneHistory.activeZones.filter(zone=>zone.kind==='base'),
     zoneEvidence,
-    candles:{[ZONE_TIMEFRAME]:snapshot.candles.filter(candle=>candle.time>=displayStart),[CONFIRMATION_TIMEFRAME]:confirmationCandles.filter(candle=>candle.time>=displayStart),
-      [TREND_TIMEFRAME]:toStrategyCandles(trendCandles).slice(-400),[TIMEFRAMES.execution]:toStrategyCandles(executionCandles).slice(-500)},
+    candles:snapshotCandles,
+    swingsByTimeframe:Object.fromEntries(Object.entries(snapshotCandles).map(([timeframe,candles])=>
+      [timeframe,buildAutomationSwingMarkers(candles)])),
     confirmationCount:confirmations.length,setups:snapshotSetups,
   });
   const blocked = await safetyBlockReason();

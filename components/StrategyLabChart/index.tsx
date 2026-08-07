@@ -605,6 +605,19 @@ export default function StrategyLabChart({
       low: Number(candle.low),
       close: Number(candle.close),
     }));
+    if (scenario?.isLiveAutomation) {
+      const prices = strategyCandles.flatMap((candle) => [candle.low, candle.high]);
+      const legLow = prices.length ? Math.min(...prices) : 0;
+      const legHigh = prices.length ? Math.max(...prices) : 0;
+      return {
+        leg: scenario.leg,
+        legLow,
+        legHigh,
+        midpoint: (legLow + legHigh) / 2,
+        zones: scenario.zones ?? [],
+        rejected: [],
+      };
+    }
     return (
       scenario?.detection ??
       detectGoldilocksZones(
@@ -634,7 +647,7 @@ export default function StrategyLabChart({
   );
   const liveConfirmation = useMemo(
     () =>
-      scenario
+      scenario && !scenario.isLiveAutomation
         ? findFullCandleEngulfing(
             strategyCandles,
             direction,
@@ -694,7 +707,7 @@ export default function StrategyLabChart({
     : engulfClose;
   const calculatedRunway = useMemo(
     () =>
-      entryZone && engulfClose !== undefined && actualEntryPrice !== undefined
+      !scenario && entryZone && engulfClose !== undefined && actualEntryPrice !== undefined
         ? validateFinalEntryAfterEngulf(
             entryZone,
             knownZones,
@@ -702,7 +715,7 @@ export default function StrategyLabChart({
             actualEntryPrice,
           )
         : undefined,
-    [actualEntryPrice, engulfClose, entryZone, knownZones],
+    [actualEntryPrice, engulfClose, entryZone, knownZones, scenario],
   );
   const runway = scenario ? scenario.tradeSetup?.runway : calculatedRunway;
   const displayedDetectionZones = useMemo(() => {
@@ -734,10 +747,9 @@ export default function StrategyLabChart({
       )
         return [];
       const historicalTradeZone = scenario?.tradeSetup?.zone.id === zone.id;
-      const visibleBreak = findGoldilocksZoneDistalBreakTime(
-        zone,
-        strategyCandles,
-      );
+      const visibleBreak = scenario?.isLiveAutomation
+        ? undefined
+        : findGoldilocksZoneDistalBreakTime(zone, strategyCandles);
       const lifecycleEnds = [zone.invalidatedAt, visibleBreak].filter(
         (time): time is number => Number.isFinite(time),
       );

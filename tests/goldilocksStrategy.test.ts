@@ -145,6 +145,11 @@ import {
 } from "../utils/zoneAge";
 import { calculateBacktestPerformance } from "../utils/backtestAnalytics";
 import { measureGoldilocksApproachPressure } from "../utils/approachPressure";
+import { buildAutomationChartSource, buildAutomationSwingMarkers } from "../utils/automationChartBuilder";
+import {
+  isAuthoritativeAutomationCandlePage,
+  isAuthoritativeAutomationChartSnapshot,
+} from "../utils/automationChartContract";
 import { GBPUSD_20260331_1210_REGRESSION } from "./fixtures/gbpusd-20260331-1210";
 import {
   evaluateGoldilocksManagementPolicies,
@@ -3478,6 +3483,55 @@ test("research, backtest, chart, local automation, and Pi use the shared causal 
   assert.match(source("pages/api/strategy-lab/zones.ts"), /goldilocksStrategy|goldilocksScanner/);
   assert.match(source("workers/goldilocksWorker.ts"), /goldilocksStrategy|goldilocksScanner/);
   assert.match(source("utils/strategyReplay.ts"), /goldilocksStrategy|goldilocksScanner/);
+});
+
+test("automation charts accept only versioned Pi-authoritative drawing payloads", () => {
+  const chartSource = buildAutomationChartSource("GLR-PI-AUTHORITY");
+  const candles: StrategyCandle[] = Array.from({ length: 12 }, (_, index) => ({
+    time: 1_700_000_000 + index * 300,
+    open: 100 + index * 0.1,
+    high: 100.4 + index * 0.1,
+    low: 99.7 + index * 0.1,
+    close: 100.2 + index * 0.1,
+  }));
+  const swings = buildAutomationSwingMarkers(candles);
+  const snapshot = {
+    chartSource,
+    pair: "EUR/USD",
+    scannedAt: "2026-08-07T00:00:00.000Z",
+    trend: "bullish",
+    zoneTimeframe: "M15",
+    confirmationTimeframe: "M5",
+    zones: [],
+    zoneEvidence: [],
+    candles: { M5: candles },
+    swingsByTimeframe: { M5: swings },
+    confirmationCount: 0,
+    setups: [],
+  };
+  assert.equal(isAuthoritativeAutomationChartSnapshot(snapshot), true);
+  assert.equal(isAuthoritativeAutomationChartSnapshot({ ...snapshot, chartSource: undefined }), false);
+  assert.equal(isAuthoritativeAutomationChartSnapshot({ ...snapshot, zoneEvidence: undefined }), false);
+  assert.equal(isAuthoritativeAutomationChartSnapshot({ ...snapshot, swingsByTimeframe: undefined }), false);
+  assert.equal(isAuthoritativeAutomationChartSnapshot({ ...snapshot, setups: [{ runway: undefined }] }), false);
+  assert.equal(isAuthoritativeAutomationCandlePage({
+    chartSource,pair:"EUR/USD",timeframe:"M5",candles,swings,
+    bounds:{startTime:candles[0].time,endTime:candles.at(-1)!.time,candleCount:candles.length},
+    hasOlder:false,hasNewer:false,
+  }),true);
+});
+
+test("automation chart UI contains no local strategy reconstruction fallback", () => {
+  const root = path.resolve(process.cwd());
+  const dashboard = fs.readFileSync(path.join(root, "components/PiZonesDashboard/index.tsx"), "utf8");
+  const chart = fs.readFileSync(path.join(root, "components/StrategyLabChart/index.tsx"), "utf8");
+  const candleBridge = fs.readFileSync(path.join(root, "pages/api/automation/pi-zone-candles.ts"), "utf8");
+  assert.doesNotMatch(dashboard, /determineSwingPoints|buildGoldilocksZoneChartEvidence|GOLDILOCKS_TIMEFRAME_SECONDS/);
+  assert.match(dashboard, /isAuthoritativeAutomationChartSnapshot/);
+  assert.match(chart, /scenario\?\.isLiveAutomation[\s\S]*zones: scenario\.zones \?\? \[\]/);
+  assert.match(chart, /scenario\?\.isLiveAutomation[\s\S]*findGoldilocksZoneDistalBreakTime/);
+  assert.doesNotMatch(candleBridge, /candleArchive|readArchivedCandlePage/);
+  assert.match(candleBridge, /\/api\/zone-candles/);
 });
 
 test("uses the first zone-timeframe close away even when its wick still overlaps the zone", () => {

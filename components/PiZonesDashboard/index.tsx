@@ -2,17 +2,19 @@ import {useEffect,useMemo,useRef,useState} from 'react';
 import {useRouter} from 'next/router';
 import StrategyLabChart from '../StrategyLabChart';
 import {forexPairs} from '../../utils/constants';
-import type {GoldilocksZone,StrategyCandle,SwingLeg} from '../../utils/goldilocksStrategy';
-import type {GoldilocksApproachPressure} from '../../utils/approachPressure';
-import {buildGoldilocksZoneChartEvidence,type GoldilocksZoneChartEvidence} from '../../utils/goldilocksScanner';
-import {GOLDILOCKS_TIMEFRAME_SECONDS} from '../../utils/goldilocksConfig';
-import {determineSwingPoints} from '../../utils/swingLabeler';
+import type {StrategyCandle,SwingLeg} from '../../utils/goldilocksStrategy';
+import {
+  isAuthoritativeAutomationChartSnapshot,
+  mergeAutomationSwingMarkers,
+  type AuthoritativeAutomationCandlePage,
+  type AuthoritativeAutomationChartSnapshot,
+  type AutomationSwingMarker,
+} from '../../utils/automationChartContract';
 
-type Setup={zone:GoldilocksZone;touchCandle:StrategyCandle;confirmationCandle:StrategyCandle;approachPressure?:GoldilocksApproachPressure};
 type ActiveTrade={tradeId:string;direction:'BUY'|'SELL';entry:number;stopLoss?:number;takeProfit?:number;openedAt?:string;score?:number;riskProfile?:string;riskPercentage?:number};
-type Snapshot={pair:string;scannedAt:string;trend:'bullish'|'bearish'|'unknown';zoneTimeframe?:string;confirmationTimeframe?:string;confirmationMode?:'close-through'|'touch-entry';minimumScore?:number;zones:GoldilocksZone[];zoneEvidence?:GoldilocksZoneChartEvidence[];candles:Record<string,StrategyCandle[]>;confirmationCount:number;setups?:Setup[];activeTrade?:ActiveTrade};
+type Snapshot=Omit<AuthoritativeAutomationChartSnapshot,'activeTrade'>&{activeTrade?:ActiveTrade};
 type ArchiveBounds={startTime:number|null;endTime:number|null;candleCount:number};
-type CandlePage={candles:StrategyCandle[];bounds:ArchiveBounds;hasOlder:boolean;hasNewer:boolean;error?:string};
+type CandlePage=AuthoritativeAutomationCandlePage&{error?:string};
 const mergeCandles=(...groups:StrategyCandle[][])=>Array.from(new Map(groups.flat().map(candle=>[candle.time,candle])).values()).sort((a,b)=>a.time-b.time);
 export default function PiZonesDashboard(){
   const router=useRouter();
@@ -20,14 +22,15 @@ export default function PiZonesDashboard(){
   const [snapshot,setSnapshot]=useState<Snapshot|null>(null),[error,setError]=useState('');
   const [scannedAt,setScannedAt]=useState('');
   const [historyCandles,setHistoryCandles]=useState<Record<string,StrategyCandle[]>>({});
+  const [historySwings,setHistorySwings]=useState<Record<string,AutomationSwingMarker[]>>({});
   const [archiveBounds,setArchiveBounds]=useState<Record<string,ArchiveBounds>>({});
   const [historyError,setHistoryError]=useState('');
   const [annotationScope,setAnnotationScope]=useState<'focus'|'all'>('focus');
   const chartSignatureRef=useRef('');
   useEffect(()=>{const params=new URLSearchParams(window.location.search);const requestedPair=typeof router.query.pair==='string'?router.query.pair:params.get('pair');const requestedTimeframe=typeof router.query.timeframe==='string'?router.query.timeframe:params.get('timeframe');if(requestedPair&&forexPairs.includes(requestedPair))setPair(requestedPair);if(['M1','M5','M15','H1'].includes(requestedTimeframe??'')&&snapshot?.candles[requestedTimeframe!]?.length)setTimeframe(requestedTimeframe as 'M1'|'M5'|'M15'|'H1')},[router.isReady,router.query.pair,router.query.timeframe,snapshot]);
   const preserveChartLocation=(nextPair=pair,nextTimeframe=timeframe)=>{void router.replace({pathname:'/automation',query:{...router.query,tab:'zones',pair:nextPair,timeframe:nextTimeframe}},undefined,{shallow:true,scroll:false})};
-  useEffect(()=>{setHistoryCandles({});setArchiveBounds({});setHistoryError('');setAnnotationScope('focus')},[pair]);
-  useEffect(()=>{let active=true;chartSignatureRef.current='';const load=async()=>{try{const r=await fetch(`/api/automation/pi-zones?pair=${encodeURIComponent(pair)}`,{cache:'no-store'});const p=await r.json() as Snapshot&{error?:string};if(!r.ok)throw new Error(p.error);if(active){const signature=JSON.stringify({pair:p.pair,trend:p.trend,zones:p.zones,zoneEvidence:p.zoneEvidence,candles:p.candles,setups:p.setups,activeTrade:p.activeTrade});if(signature!==chartSignatureRef.current){chartSignatureRef.current=signature;setSnapshot(p)}setScannedAt(p.scannedAt);setError('')}}catch(e){if(active)setError(e instanceof Error?e.message:String(e))}};void load();const timer=setInterval(load,3000);return()=>{active=false;clearInterval(timer)}},[pair]);
+  useEffect(()=>{setHistoryCandles({});setHistorySwings({});setArchiveBounds({});setHistoryError('');setAnnotationScope('focus')},[pair]);
+  useEffect(()=>{let active=true;chartSignatureRef.current='';const load=async()=>{try{const r=await fetch(`/api/automation/pi-zones?pair=${encodeURIComponent(pair)}`,{cache:'no-store'});const p=await r.json() as Snapshot&{error?:string};if(!r.ok)throw new Error(p.error);if(!isAuthoritativeAutomationChartSnapshot(p))throw new Error('Pi chart snapshot is not authoritative. Local strategy reconstruction is disabled.');if(active){const signature=JSON.stringify({chartSource:p.chartSource,pair:p.pair,trend:p.trend,zones:p.zones,zoneEvidence:p.zoneEvidence,candles:p.candles,swingsByTimeframe:p.swingsByTimeframe,setups:p.setups,activeTrade:p.activeTrade});if(signature!==chartSignatureRef.current){chartSignatureRef.current=signature;setSnapshot(p as Snapshot)}setScannedAt(p.scannedAt);setError('')}}catch(e){if(active)setError(e instanceof Error?e.message:String(e))}};void load();const timer=setInterval(load,3000);return()=>{active=false;clearInterval(timer)}},[pair]);
   const latestSnapshotCandleTime=snapshot?.candles[timeframe]?.at(-1)?.time;
   useEffect(()=>{let active=true;const loadBounds=async()=>{try{const response=await fetch(`/api/automation/pi-zone-candles?pair=${encodeURIComponent(pair)}&timeframe=${timeframe}`,{cache:'no-store'});const page=await response.json() as CandlePage;if(!response.ok)throw new Error(page.error);if(active)setArchiveBounds(items=>({...items,[timeframe]:page.bounds}))}catch(requestError){if(active)setHistoryError(requestError instanceof Error?requestError.message:String(requestError))}};void loadBounds();return()=>{active=false}},[latestSnapshotCandleTime,pair,timeframe]);
   const candles=useMemo(()=>mergeCandles(snapshot?.candles[timeframe]??[],historyCandles[timeframe]??[]),[historyCandles,snapshot,timeframe]);
@@ -43,62 +46,35 @@ export default function PiZonesDashboard(){
       const page=await response.json() as CandlePage;
       if(!response.ok)throw new Error(page.error);
       setHistoryCandles(items=>({...items,[timeframe]:mergeCandles(items[timeframe]??[],page.candles)}));
+      setHistorySwings(items=>({...items,[timeframe]:mergeAutomationSwingMarkers(items[timeframe]??[],page.swings)}));
       setArchiveBounds(items=>({...items,[timeframe]:page.bounds}));
     }catch(requestError){setHistoryError(requestError instanceof Error?requestError.message:String(requestError))}
   };
-  const swings=useMemo(()=>determineSwingPoints(candles.map((candle,candleIndex)=>({...candle,time:new Date(candle.time*1000).toISOString(),candleIndex})))
-    .filter(swing=>['HH','HL','LH','LL'].includes(swing.swing))
-    .map(swing=>({...swing,swing:swing.swing as 'HH'|'HL'|'LH'|'LL',time:candles[swing.candleIndex]?.time??0})),[candles]);
+  const swings=useMemo(()=>mergeAutomationSwingMarkers(snapshot?.swingsByTimeframe[timeframe]??[],historySwings[timeframe]??[]),[historySwings,snapshot,timeframe]);
   const leg=useMemo<SwingLeg>(()=>({direction:snapshot?.trend==='bearish'?'bearish':'bullish',startIndex:0,endIndex:Math.max(0,candles.length-1),startPrice:candles[0]?.close??0,endPrice:candles.at(-1)?.close??0,range:Math.abs((candles.at(-1)?.close??0)-(candles[0]?.close??0)),startSwing:'L',endSwing:'H'}),[candles,snapshot?.trend]);
-  const zoneEvidence=useMemo(()=>{
-    if(!snapshot)return [];
-    if(snapshot.zoneEvidence?.length)return snapshot.zoneEvidence;
-    const zoneTimeframe=snapshot.zoneTimeframe??'M15';
-    const confirmationTimeframe=snapshot.confirmationTimeframe??'M5';
-    const zoneCandles=snapshot.candles[zoneTimeframe]??[];
-    const confirmationCandles=snapshot.candles[confirmationTimeframe]??[];
-    return buildGoldilocksZoneChartEvidence({
-      history:{zones:snapshot.zones,activeZones:snapshot.zones,
-        activeDemand:snapshot.zones.filter(zone=>zone.side==='demand').at(-1),
-        activeSupply:snapshot.zones.filter(zone=>zone.side==='supply').at(-1)},
-      zoneCandles,zoneSeconds:GOLDILOCKS_TIMEFRAME_SECONDS[zoneTimeframe]??300,zoneTimeframe,
-      confirmationCandles,confirmationSeconds:GOLDILOCKS_TIMEFRAME_SECONDS[confirmationTimeframe]??60,confirmationTimeframe,
-      completedBefore:Number.POSITIVE_INFINITY,
-    });
-  },[snapshot]);
+  const zoneEvidence=useMemo(()=>snapshot?.zoneEvidence??[],[snapshot?.zoneEvidence]);
   const active=snapshot?.activeTrade;
   const tradeSetups=useMemo(()=>{
     const source=snapshot?.setups??[];
     return source.map((setup,index)=>{
       const focused=index===source.length-1;
-      const entry=focused&&active?.entry!==undefined?active.entry:setup.confirmationCandle.close;
-      const stop=focused&&active?.stopLoss!==undefined?active.stopLoss:(setup.zone.side==='demand'?setup.zone.low:setup.zone.high);
-      const risk=Math.abs(entry-stop);
+      const entry=focused&&active?.entry!==undefined?active.entry:setup.runway.entry;
+      const stop=focused&&active?.stopLoss!==undefined?active.stopLoss:setup.runway.stopLoss;
+      const target=focused&&active?.takeProfit!==undefined?active.takeProfit:setup.runway.takeProfit;
+      const risk=Math.abs(entry-stop),reward=Math.abs(target-entry);
       return {
         tradeId:focused?active?.tradeId:undefined,
         zone:setup.zone,
-        confirmationTimeframe:'M5' as const,
+        confirmationTimeframe:snapshot?.confirmationTimeframe??'',
         confirmationTime:setup.confirmationCandle.time,
         confirmationCandle:setup.confirmationCandle,
         touchCandle:setup.touchCandle,
         approachPressure:setup.approachPressure,
         outcome:'open' as const,
-        runway:{
-          allowed:true,
-          direction:setup.zone.side==='demand'?'buy' as const:'sell' as const,
-          entry,
-          stopLoss:stop,
-          takeProfit:focused&&active?.takeProfit!==undefined?active.takeProfit:(setup.zone.side==='demand'?entry+risk*2:entry-risk*2),
-          risk,
-          reward:risk*2,
-          availableReward:Number.POSITIVE_INFINITY,
-          availableRatio:Number.POSITIVE_INFINITY,
-          ratio:2,
-          reason:focused&&active?'Current broker trade geometry.':'Actionable Pi setup geometry.',
-        },
+        runway:focused&&active?{...setup.runway,entry,stopLoss:stop,takeProfit:target,risk,reward,ratio:risk>0?reward/risk:0,reason:'Current Pi broker-ledger geometry.'}:setup.runway,
       };
     });
-  },[active,snapshot?.setups]);
+  },[active,snapshot?.confirmationTimeframe,snapshot?.setups]);
   const tradeSetup=tradeSetups.at(-1)??null;
   const setup=snapshot?.setups?.at(-1);
   const focus=useMemo(()=>{
@@ -146,7 +122,7 @@ export default function PiZonesDashboard(){
           <button type="button" aria-pressed={annotationScope==='focus'} onClick={()=>setAnnotationScope('focus')} style={{border:0,borderRadius:999,padding:'4px 8px',background:annotationScope==='focus'?'#30405a':'transparent',color:annotationScope==='focus'?'#fff':'#8d98a8',fontSize:11,fontWeight:800,cursor:'pointer'}}>Focus evidence</button>
           <button type="button" aria-pressed={annotationScope==='all'} onClick={()=>setAnnotationScope('all')} style={{border:0,borderRadius:999,padding:'4px 8px',background:annotationScope==='all'?'#30405a':'transparent',color:annotationScope==='all'?'#fff':'#8d98a8',fontSize:11,fontWeight:800,cursor:'pointer'}}>All active evidence</button>
         </span>
-        <span style={{marginLeft:'auto',color:'#697587',fontSize:11}}>Pi scan {new Date(scannedAt||snapshot.scannedAt).toLocaleTimeString()}</span>
+        <span style={{marginLeft:'auto',color:'#697587',fontSize:11}}>Pi-authoritative v{snapshot.chartSource.schemaVersion} · scan {new Date(scannedAt||snapshot.scannedAt).toLocaleTimeString()}</span>
       </div>
       {historyError&&<p role="alert" style={{color:'#ff9aa4',fontSize:12,margin:'-4px 0 10px'}}>Chart history: {historyError}</p>}
       {focus&&<div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:1,overflow:'hidden',margin:'0 0 12px',border:'1px solid #303a47',borderRadius:12,background:'#303a47'}}>

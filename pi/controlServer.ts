@@ -14,6 +14,8 @@ import { activateStagedApprovedStrategy } from "../utils/approvedStrategyActivat
 import { readStagedApprovedStrategy } from "../utils/approvedStrategySync.ts";
 import { createApprovedStrategyPoller,type ApprovedStrategyPollEvent } from "../utils/approvedStrategyPoller.ts";
 import { handleOandaLogin } from "../utils/oanda/api/login.ts";
+import { getArchivedCandleBounds, readArchivedCandlePage } from "../utils/candleArchive.ts";
+import { buildAutomationSwingMarkers } from "../utils/automationChartBuilder.ts";
 
 const host = process.env.PULSE_HOST ?? "127.0.0.1";
 const port = Math.max(1024, Number(process.env.PULSE_PORT ?? 4080));
@@ -97,7 +99,7 @@ const server=http.createServer(async(request, response) => {
   }
   const remote=request.socket.remoteAddress??'';
   const loopback=remote==='127.0.0.1'||remote==='::1'||remote==='::ffff:127.0.0.1';
-  const localReadOnlyBridge=loopback&&request.method==='GET'&&['/api/zones','/api/status','/api/account'].includes(url.pathname);
+  const localReadOnlyBridge=loopback&&request.method==='GET'&&['/api/zones','/api/zone-candles','/api/status','/api/account'].includes(url.pathname);
   if (!localReadOnlyBridge&&!authorized(request)) {
     send(response, 401, { error: "Unauthorized" });
     return;
@@ -119,6 +121,34 @@ const server=http.createServer(async(request, response) => {
       const snapshot=getAutomationZoneSnapshot(pair);
       if(!snapshot){send(response,404,{error:`No automation zone snapshot is available for ${pair}.`});return}
       send(response,200,snapshot);return;
+    }
+    if(url.pathname==="/api/zone-candles"&&request.method==="GET"){
+      const pair=url.searchParams.get('pair')??'';
+      const timeframe=(url.searchParams.get('timeframe')??'').toUpperCase();
+      const snapshot=getAutomationZoneSnapshot(pair);
+      if(!snapshot){send(response,404,{error:`No automation zone snapshot is available for ${pair}.`});return}
+      if(!['M1','M5','M15','H1'].includes(timeframe)){send(response,400,{error:'Unsupported timeframe'});return}
+      const beforeValue=url.searchParams.get('before'),afterValue=url.searchParams.get('after');
+      const before=beforeValue===null?Number.NaN:Number(beforeValue),after=afterValue===null?Number.NaN:Number(afterValue);
+      if(Number.isFinite(before)&&Number.isFinite(after)){send(response,400,{error:'Choose before or after, not both'});return}
+      const key={mode:snapshot.mode,pair,timeframe};
+      const bounds=getArchivedCandleBounds(key);
+      const archived=readArchivedCandlePage(key,{
+        before:Number.isFinite(before)?before:undefined,
+        after:Number.isFinite(after)?after:undefined,
+        limit:Math.min(1_000,Math.max(1,Number(url.searchParams.get('limit'))||1_000)),
+      });
+      const candles=archived.map(candle=>({
+        time:Math.floor(Date.parse(String(candle.time))/1_000),
+        open:candle.open,high:candle.high,low:candle.low,close:candle.close,
+      }));
+      const first=candles[0]?.time,last=candles.at(-1)?.time;
+      send(response,200,{
+        chartSource:snapshot.chartSource,pair,timeframe,candles,
+        swings:buildAutomationSwingMarkers(candles),bounds,
+        hasOlder:bounds.startTime!==null&&(first??(Number.isFinite(before)?before:bounds.endTime??0))>bounds.startTime,
+        hasNewer:bounds.endTime!==null&&(last??(Number.isFinite(after)?after:bounds.startTime??0))<bounds.endTime,
+      });return;
     }
     if(url.pathname==="/api/config-sync"&&request.method==="POST"){
       if(!strategyPoller){send(response,409,{error:"Approved strategy synchronization is disabled."});return}

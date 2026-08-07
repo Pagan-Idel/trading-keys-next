@@ -20,6 +20,11 @@ import {
   FOREX_WEEKLY_OPEN_HOUR,
 } from "./forexMarketHours.ts";
 import {getResearchSourceIdentity} from './researchSourceIdentity.ts';
+import {
+  GOLDILOCKS_COMPARISON_END_TIME,
+  GOLDILOCKS_COMPARISON_LOOKBACK_DAYS,
+  GOLDILOCKS_COMPARISON_START_TIME,
+} from './comparisonDataset.ts';
 
 export const GOLDILOCKS_RESEARCH_MANIFEST_VERSION =
   "goldilocks-configuration-manifest-v1";
@@ -79,7 +84,9 @@ export const buildGoldilocksResearchManifest = (
       laterConfirmation: profile.confirmation,
       executionResolution: profile.execution,
       confluence: [...profile.confluence],
-      lookbackDays: profile.defaultLookbackDays,
+      lookbackDays: GOLDILOCKS_COMPARISON_LOOKBACK_DAYS,
+      datasetStartTime: GOLDILOCKS_COMPARISON_START_TIME,
+      datasetEndTimeExclusive: GOLDILOCKS_COMPARISON_END_TIME,
     },
     hardGates: [
       {

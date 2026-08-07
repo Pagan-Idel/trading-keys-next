@@ -29,6 +29,7 @@ import {
   type GoldilocksScaleOut,
 } from "./goldilocksTradeManagement.ts";
 import {includeRequestedCampaignRun} from './campaignSearch.ts';
+import {isGoldilocksComparisonDataset} from './comparisonDataset.ts';
 
 export type BacktestStatus =
   "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -51,6 +52,7 @@ export interface BacktestRunConfig {
   reverseFinalSignal?: boolean;
   protectedWinR?: number;
   archiveOnly?: boolean;
+  datasetStartTime?: number;
   datasetEndTime?: number;
   datasetKey?: string;
   researchManifest?: GoldilocksResearchManifest;
@@ -571,6 +573,15 @@ export const clearAllBacktestData = () => {
     return { cleared: true, runs, trades, events, managementResults };
   })();
 };
+export const clearBacktestLeaderboard = () => {
+  const d = database();
+  return d.transaction(() => ({
+    leaderboard: d.prepare("DELETE FROM backtest_leaderboard").run().changes,
+    considered: d
+      .prepare("DELETE FROM backtest_leaderboard_considered")
+      .run().changes,
+  }))();
+};
 export const updateBacktestRun = (
   id: string,
   fields: Record<string, unknown>,
@@ -698,6 +709,13 @@ export const recordBacktestLeaderboardCandidate = (runId: string) => {
     | undefined;
   if (!run || run.status !== "completed" || !run.completedAt) return false;
   const config = summaryConfig(run.configJson);
+  if (!isGoldilocksComparisonDataset(config)) {
+    d.prepare(
+      `INSERT INTO backtest_leaderboard_considered(run_uid,evaluated_at)
+      VALUES(?,?) ON CONFLICT(run_uid) DO UPDATE SET evaluated_at=excluded.evaluated_at`,
+    ).run(run.runUid, new Date().toISOString());
+    return false;
+  }
   const runTrades = d
     .prepare(
       `SELECT id,pair,confirmation_time AS confirmationTime,outcome_time AS outcomeTime,

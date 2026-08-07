@@ -1,5 +1,6 @@
 type ResearchConfig=Record<string,unknown>&{
   datasetKey?:string;
+  datasetStartTime?:number;
   datasetEndTime?:number;
   researchManifest?:{
     capturedAt?:string;
@@ -14,6 +15,7 @@ const comparableConfig=(config:ResearchConfig)=>{
   const copy=JSON.parse(JSON.stringify(config)) as ResearchConfig;
   delete copy.label;
   delete copy.datasetKey;
+  delete copy.datasetStartTime;
   delete copy.datasetEndTime;
   if(copy.researchManifest){
     delete copy.researchManifest.capturedAt;
@@ -51,10 +53,12 @@ export const compareResearchRecords=(reference:ResearchRecordForComparison,curre
       :'different';
   const referenceCutoff=Number(reference.config.datasetEndTime);
   const currentCutoff=Number(current.config.datasetEndTime);
+  const referenceStart=Number(reference.config.datasetStartTime);
+  const currentStart=Number(current.config.datasetStartTime);
   return {
     changedSettings,
     settingsMatch:changedSettings.length===0,
-    datasetChanged:reference.config.datasetKey!==current.config.datasetKey||referenceCutoff!==currentCutoff,
+    datasetChanged:reference.config.datasetKey!==current.config.datasetKey||referenceStart!==currentStart||referenceCutoff!==currentCutoff,
     cutoffDeltaSeconds:Number.isFinite(referenceCutoff)&&Number.isFinite(currentCutoff)?currentCutoff-referenceCutoff:null,
     codeComparison:codeComparison as 'same'|'different'|'unknown',
     referenceSource,

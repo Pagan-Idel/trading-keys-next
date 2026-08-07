@@ -3,6 +3,7 @@ import Link from 'next/link';
 import {useRouter} from 'next/router';
 import {useEffect,useState} from 'react';
 import styled from 'styled-components';
+import {GOLDILOCKS_COMPARISON_WINDOW_LABEL} from '../../../utils/comparisonDataset';
 
 const Page=styled.div`width:min(1380px,calc(100% - 30px));margin:0 auto 80px;color:#edf5ff;font-family:Inter,system-ui,sans-serif;`;
 const Hero=styled.section`padding:28px;border:1px solid #34515b;border-radius:22px;background:radial-gradient(circle at 90% 0,#174b55,transparent 35%),linear-gradient(145deg,#111922,#090d12);`;
@@ -44,11 +45,11 @@ export default function ResearchTrialDetail(){
       <Card><Label>Sample quality</Label><Metric style={{color:quality==='ELIGIBLE'?'#67efb2':quality==='PROVISIONAL'?'#ffdc8b':'#ff9daa'}}>{quality}</Metric><Muted>{count} realized-R trades</Muted></Card>
       <Card><Label>Official expectancy</Label><Metric>{fmtR(official.expectancyR)}</Metric><Muted>PF {factor(official.profitFactor)} · net {fmtR(official.netR)}</Muted></Card>
       <Card><Label>Maximum drawdown</Label><Metric>{fmtR(official.maxDrawdownR)}</Metric><Muted>Longest losing streak {official.longestLosingStreak??'—'}</Muted></Card>
-      <Card><Label>Sealed data</Label><Metric style={{fontSize:'1rem'}}>{config.archiveOnly?'SQLITE ONLY':'LEGACY / NETWORK'}</Metric><Muted>Cutoff {config.datasetEndTime?new Date(config.datasetEndTime*1000).toLocaleString():'—'}</Muted></Card>
+      <Card><Label>Sealed data</Label><Metric style={{fontSize:'1rem'}}>{config.archiveOnly?'SQLITE ONLY':'LEGACY / NETWORK'}</Metric><Muted>{config.datasetStartTime?GOLDILOCKS_COMPARISON_WINDOW_LABEL:`Legacy cutoff ${config.datasetEndTime?new Date(config.datasetEndTime*1000).toLocaleString():'—'}`}</Muted></Card>
     </Grid>
     <Section><h2>Campaign inputs</h2><Muted>Every top-level input passed to this deterministic campaign run.</Muted>
       <Table><table><tbody>
-        <tr><th>Pairs</th><td>{pairs(config.pairs)}</td><th>Lookback</th><td>{config.lookbackDays} days</td></tr>
+        <tr><th>Pairs</th><td>{pairs(config.pairs)}</td><th>Comparison data</th><td>{config.datasetStartTime?GOLDILOCKS_COMPARISON_WINDOW_LABEL:`Legacy · ${config.lookbackDays} days`}</td></tr>
         <tr><th>Profile</th><td>{config.timeframeProfile}</td><th>Minimum score</th><td>{config.minimumScore}/20</td></tr>
         <tr><th>Risk profile</th><td>{config.riskProfile}</td><th>Balance / leverage</th><td>${config.startingBalance} / {config.leverage}:1</td></tr>
         <tr><th>Dataset key</th><td colSpan={3}>{config.datasetKey??trial.datasetKey}</td></tr>

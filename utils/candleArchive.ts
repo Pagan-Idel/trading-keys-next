@@ -196,6 +196,16 @@ export const markLegacyCandleCacheImported=(filePath:string,candleCount:number)=
 
 export const getCandleArchiveSummary=()=>database().prepare(`SELECT mode,pair,timeframe,COUNT(*) AS candleCount,
   MIN(time) AS startTime,MAX(time) AS endTime FROM historical_candles GROUP BY mode,pair,timeframe ORDER BY pair,timeframe`).all();
+export const getCandleArchiveRangeSummary=(startTime:number,endTime:number)=>database().prepare(`SELECT mode,pair,timeframe,COUNT(*) AS candleCount,
+  MIN(time) AS startTime,MAX(time) AS endTime FROM historical_candles WHERE time>=? AND time<?
+  GROUP BY mode,pair,timeframe ORDER BY pair,timeframe`).all(Math.floor(startTime),Math.floor(endTime));
+export const getArchivedCandleRangeSummary=(key:CandleArchiveKey,startTime:number,endTime:number)=>{
+  const row=database().prepare(`SELECT COUNT(*) AS candleCount,MIN(time) AS startTime,MAX(time) AS endTime
+    FROM historical_candles WHERE mode=@mode AND pair=@pair AND timeframe=@timeframe AND time>=@startTime AND time<@endTime`).get({
+      ...normalized(key),startTime:Math.floor(startTime),endTime:Math.floor(endTime),
+    }) as {candleCount:number;startTime:number|null;endTime:number|null};
+  return {...normalized(key),candleCount:Number(row.candleCount),startTime:row.startTime,endTime:row.endTime};
+};
 export const recordCandleSyncGap=(key:CandleArchiveKey,startTime:number,endTime:number,error='missing_completed_interval')=>database().prepare(`
   INSERT INTO candle_sync_gaps(mode,pair,timeframe,start_time,end_time,attempts,last_error,updated_at)
   VALUES(@mode,@pair,@timeframe,@startTime,@endTime,1,@error,@updatedAt)

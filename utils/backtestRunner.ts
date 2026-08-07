@@ -34,6 +34,10 @@ import {
   GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
   normalizeGoldilocksBacktestManager,
 } from "./goldilocksTradeManagement.ts";
+import {
+  GOLDILOCKS_COMPARISON_WINDOW_LABEL,
+  goldilocksComparisonDatasetFields,
+} from "./comparisonDataset.ts";
 
 export const BACKTEST_CANDLE_LIMITS: Record<string, number> = {
   M1: 800_000,
@@ -63,7 +67,7 @@ export const executeBacktestRun = async (
     addBacktestEvent(
       id,
       "run_started",
-      `BACKTEST STARTED · ${config.label} · ${config.pairs.length} pair(s) · ${config.lookbackDays} days · minimum ${config.minimumScore}/20.`,
+      `BACKTEST STARTED · ${config.label} · ${config.pairs.length} pair(s) · ${GOLDILOCKS_COMPARISON_WINDOW_LABEL} · minimum ${config.minimumScore}/20.`,
     );
     const backfillPages = Math.max(
       0,
@@ -92,6 +96,7 @@ export const executeBacktestRun = async (
             backfillPages,
             maxCandles: BACKTEST_CANDLE_LIMITS[profile.trend],
             archiveOnly: config.archiveOnly,
+            startTime: config.datasetStartTime,
             endTime: config.datasetEndTime,
           }),
           fetchCandleHistory(pair, profile.zone, {
@@ -100,6 +105,7 @@ export const executeBacktestRun = async (
             backfillPages,
             maxCandles: BACKTEST_CANDLE_LIMITS[profile.zone],
             archiveOnly: config.archiveOnly,
+            startTime: config.datasetStartTime,
             endTime: config.datasetEndTime,
           }),
           fetchCandleHistory(pair, profile.confirmation, {
@@ -108,6 +114,7 @@ export const executeBacktestRun = async (
             backfillPages,
             maxCandles: BACKTEST_CANDLE_LIMITS[profile.confirmation],
             archiveOnly: config.archiveOnly,
+            startTime: config.datasetStartTime,
             endTime: config.datasetEndTime,
           }),
           fetchCandleHistory(pair, profile.execution, {
@@ -116,6 +123,7 @@ export const executeBacktestRun = async (
             backfillPages,
             maxCandles: BACKTEST_CANDLE_LIMITS[profile.execution],
             archiveOnly: config.archiveOnly,
+            startTime: config.datasetStartTime,
             endTime: config.datasetEndTime,
           }),
         ]);
@@ -383,13 +391,6 @@ export const normalizeBacktestConfig = (
       : normalizeGoldilocksBacktestManager(input.tradeManager);
   const config: BacktestRunConfig = {
     pairs: [...new Set(pairs)],
-    lookbackDays: Math.min(
-      profile.maximumLookbackDays,
-      Math.max(
-        30,
-        Math.floor(input.lookbackDays ?? profile.defaultLookbackDays),
-      ),
-    ),
     minimumScore: Math.min(
       20,
       Math.max(0, Math.floor(input.minimumScore ?? 14)),
@@ -436,15 +437,11 @@ export const normalizeBacktestConfig = (
           : undefined,
     closeTradesBeforeWeekend: input.closeTradesBeforeWeekend !== false,
     reverseFinalSignal: Boolean(input.reverseFinalSignal),
-    archiveOnly: Boolean(input.archiveOnly),
-    datasetEndTime: Number.isFinite(input.datasetEndTime)
-      ? Math.floor(Number(input.datasetEndTime))
-      : undefined,
-    datasetKey: input.datasetKey ? String(input.datasetKey) : undefined,
     researchManifest: input.researchManifest,
     strategyTweaks: normalizeGoldilocksBacktestTweaks(input.strategyTweaks),
     gateSettings: normalizeGoldilocksBacktestGates(input.gateSettings),
     scoreWeights: normalizeGoldilocksScoreWeights(input.scoreWeights),
+    ...goldilocksComparisonDatasetFields(input.datasetKey),
   };
   return config;
 };

@@ -546,9 +546,13 @@ differ.
 ## Backtesting contract
 
 The manual dashboard at `/backtesting` stores a label for every strategy tweak,
-minimum score, lookback, selected pairs, aggregate outcomes, per-pair results, trades,
+minimum score, selected pairs, aggregate outcomes, per-pair results, trades,
 and progress events. The detached worker publishes stage-level heartbeats and overall
 progress and can be cancelled from the dashboard without stopping live/demo workers.
+Every new manual or Research campaign is locked to candle-open timestamps from
+`2025-01-01T00:00:00Z` inclusive through `2026-01-01T00:00:00Z` exclusive. The
+window is not a user configuration: all runs use exactly 365 days from the archived
+2025 UTC candle set, and candles stamped in 2026 are excluded.
 Its Backtest rule controls are organized into three saved groups: enable/disable
 switches for historically simulated hard gates, editable score-component weights, and
 the active maximum-touch and entry-proximity thresholds. Retired adverse-approach and
@@ -572,7 +576,7 @@ automatically. The entire controls area is collapsed by default, and hovering or
 focusing any editable card exposes its plain-language explanation.
 Its history shows one clickable row per complete backtest run rather than duplicating a
 run into pair rows. Loading a row restores the saved account, leverage, risk, timeframe,
-score, lookback, and pair configuration together with that run's account projection,
+score, and pair configuration together with that run's account projection,
 trades, replay links, and event log. A dedicated run-configuration table and the history
 selected-run configuration card exposes the complete saved setup, gates, score weights,
 and active numeric thresholds for the selected run. The run-history table is intentionally
@@ -611,7 +615,9 @@ backtest-run link immediately after creation, so a running campaign can be inspe
 before it completes. Loading any linked run restores its recorded trades and existing
 `View chart` replay links.
 The Backtesting dashboard also maintains a permanent three-slot Hall of Fame ranked by
-official net realized R after chronological portfolio admission. Each record snapshots
+official net realized R after chronological portfolio admission. Only runs carrying the
+fixed-2025 dataset contract can enter or seed this ranking; older rolling-window runs
+remain auditable but are permanently ineligible. Each record snapshots
 the public run ID, configuration, completion time, signal/admission counts, expectancy,
 profit factor, net R, drawdown, and projected account result. It lives in a separate
 table without a cascading foreign key, so deleting one run or clearing ordinary
@@ -728,6 +734,8 @@ visual replay may not contain the older source zones needed to reconstruct that 
 
 Historical simulation currently:
 
+- Uses only candle-open timestamps inside the immutable 2025 UTC half-open interval
+  `[2025-01-01T00:00:00Z, 2026-01-01T00:00:00Z)` for every new campaign
 - Uses the selected profile's archived trend/zone/confirmation candles and its
   configured post-entry resolution; the M15/M5/M1 profile uses M1 for both
   confirmation and the lowest available outcome resolution
@@ -800,11 +808,13 @@ This produces 105 trials and records all 23 management-policy outcomes
 for every stored trade. Each unique configuration and dataset manifest is hashed, so
 an interrupted worker can resume without treating an identical trial as new evidence.
 
-Continuous mode waits for the candle-archive manifest to advance before enqueuing the
-same versioned matrix on new data. It never changes the Automation risk profile,
-strategy configuration, or live workers. Results rank realized-R expectancy before
-win rate and retain failed trials. Candle acquisition stops safely at the configured
-5 GiB archive ceiling without deleting older data.
+Continuous mode keeps generating distinct configurations against the same sealed 2025
+dataset; it never rolls the cutoff forward. Dataset identity is derived only from the
+2025 range summary, so later live/archive candles cannot change a comparison key. It
+never changes the Automation risk profile, strategy configuration, or live workers.
+Results rank realized-R expectancy before win rate and retain failed trials. Candle
+acquisition stops safely at the configured 5 GiB archive ceiling without deleting older
+data.
 
 The dedicated `/research` status page polls every five seconds and distinguishes the
 campaign queue from the currently active deterministic backtest. It reports worker

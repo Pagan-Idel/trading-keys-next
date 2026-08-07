@@ -17,6 +17,7 @@ export interface CandleHistoryOptions {
   maxCandles?: number;
   backfillPages?: number;
   archiveOnly?:boolean;
+  startTime?:number;
   endTime?:number;
   acquireFullRange?:boolean;
   signal?:AbortSignal;
@@ -56,7 +57,9 @@ export const fetchCandleHistory = async (
 ): Promise<Candle[]> => {
   const now = options.endTime&&Number.isFinite(options.endTime)?Math.floor(options.endTime*1000):Date.now()-10_000;
   const intervalMs = tfToSeconds(timeframe) * 1000;
-  const requestedStart = now - options.lookbackDays * 24 * 60 * 60 * 1000;
+  const requestedStart = options.startTime&&Number.isFinite(options.startTime)
+    ?Math.floor(options.startTime*1000)
+    :now-options.lookbackDays*24*60*60*1000;
   const filePath = cachePath(pair, timeframe, options.mode);
   const archiveKey={pair,timeframe,mode:options.mode};
   if(!options.archiveOnly&&legacyCandleCacheNeedsImport(filePath)){
@@ -79,7 +82,7 @@ export const fetchCandleHistory = async (
   if(options.archiveOnly){
     if(!byTime.size)throw new Error(`SEALED DATASET MISSING · ${pair} ${timeframe} has no archived candles.`);
     let archived=[...byTime.entries()]
-      .filter(([time])=>time>=requestedStart&&time<=now)
+      .filter(([time])=>time>=requestedStart&&time<now)
       .sort(([left],[right])=>left-right)
       .map(([,candle],index)=>({...candle,candleIndex:index}));
     const firstTime=archived.length?candleTime(archived[0]):Number.POSITIVE_INFINITY;

@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import type { BacktestRunConfig } from './backtestStore.ts';
 import {rankAutoResearchResults} from './autoResearchRanking.ts';
+import {isGoldilocksComparisonDataset} from './comparisonDataset.ts';
 
 export type AutoResearchStatus='queued'|'preparing'|'running'|'waiting'|'paused'|'completed'|'cancelled'|'failed';
 export type AutoResearchTrialStatus='queued'|'running'|'completed'|'failed';
@@ -181,7 +182,7 @@ export const getTopAutoResearchResults=(limit=3)=>{
     id:row.id,backtestRunId:row.backtestRunId,completedAt:row.completedAt,datasetKey:row.datasetKey,configHash:row.configHash,
     config:JSON.parse(row.configJson) as BacktestRunConfig,
     metrics:JSON.parse(row.metricsJson) as {official?:{sampleTrades?:number;expectancyR?:number|null;netR?:number;maxDrawdownR?:number}},
-  })).filter(row=>Number(row.metrics.official?.sampleTrades??0)>=100))
+  })).filter(row=>isGoldilocksComparisonDataset(row.config)&&Number(row.metrics.official?.sampleTrades??0)>=100))
     .slice(0,Math.max(0,limit));
 };
 

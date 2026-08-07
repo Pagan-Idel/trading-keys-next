@@ -1,5 +1,5 @@
 import type { NextApiRequest,NextApiResponse } from 'next';
-import { clearAllBacktestData,deleteBacktestRun,getBacktestDashboard,getBacktestRunUid,getBacktestTradeById,getBacktestTrainingData,resolveBacktestRunId } from '../../../utils/backtestStore';
+import { clearAllBacktestData,clearBacktestLeaderboard,deleteBacktestRun,getBacktestDashboard,getBacktestRunUid,getBacktestTradeById,getBacktestTrainingData,resolveBacktestRunId } from '../../../utils/backtestStore';
 import { cancelBacktest, startBacktest } from '../../../utils/backtestRunner';
 import {findAutoResearchCampaignSearch,getBestAutoResearchConfiguration} from '../../../utils/autoResearchStore.ts';
 import {manualBacktestDefaultsFromLeader} from '../../../utils/backtestDefaults.ts';
@@ -34,6 +34,7 @@ export default function handler(req:NextApiRequest,res:NextApiResponse){
     }
     if(req.method==='POST')return res.status(202).json(startBacktest({...manualBacktestDefaultsFromLeader(getBestAutoResearchConfiguration()),...(req.body??{})}));
     if(req.method==='DELETE'){
+      if(req.query.leaderboard==='true'&&req.query.permanent==='true')return res.status(200).json(clearBacktestLeaderboard());
       if(req.query.all==='true'&&req.query.permanent==='true')return res.status(200).json(clearAllBacktestData());
       const id=typeof req.query.runId==='string'?req.query.runId:String(req.body?.runId??'');
       if(!id)throw new Error('A backtest run ID is required.');

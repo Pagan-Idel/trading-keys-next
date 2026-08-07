@@ -78,18 +78,20 @@ backtest runs created by Research campaigns. Its campaign search resolves public
 IDs, internal backtest IDs, Research trial IDs, and parent Research campaign IDs; the
 parent view preserves the complete contained-run list. A running Research trial is
 linked to its backtest row as soon as that row is created, not only after completion.
-Automatic research is continuous by default. After all configurations finish on one
-sealed snapshot, the worker waits for a later five-minute dataset boundary, acquires
-and seals that bounded snapshot, and queues the same comparison matrix again. Each
-trial remains attached to its own immutable dataset key and end time. The campaign
-continues until a user explicitly pauses or stops it; live/demo strategy settings are
-never promoted automatically.
+Automatic research is continuous by default, but its market-data window never rolls.
+Every manual and Research campaign uses candle-open timestamps from
+`2025-01-01T00:00:00Z` inclusive through `2026-01-01T00:00:00Z` exclusive. Once the
+fixed archive is sealed, later cycles queue distinct configurations against those same
+2025 candles. Every trial retains the same window contract and a dataset key derived
+only from that bounded archive. The campaign continues until a user explicitly pauses
+or stops it; live/demo strategy settings are never promoted automatically.
 When workstation startup recovers an interrupted campaign, it also retires the
 queued/running backtest row owned by that dead campaign worker before returning the
 interrupted trial to the queue. Partial rows remain failed evidence, while the queued
 trial receives a clean deterministic rerun. An unrelated manual backtest is never
 retired by campaign recovery.
-Automatic comparison matrices use a fixed 365-day lookback for every strategy stack.
+Automatic comparison matrices use the fixed 365-day 2025 UTC calendar window for every
+strategy stack. Lookback and cutoff are not editable research or Backtester inputs.
 The queue editor identifies trials by their immutable primary key and exposes only
 research inputs; labels are generated from the trial ID, stack, and score threshold.
 Each continuous cycle contains five trials. The first four stay anchored to the best
@@ -285,7 +287,7 @@ manager records 0R when break-even occurs before its 2R target. Pair and
 tweak comparisons under 50 realized-R trades are marked early; prefer 100+ before
 drawing an initial conclusion and still require chronological out-of-sample validation.
 
-The continuous Research Status all-time table uses a promotion rule for configurations
+The continuous Research Status all-time table accepts only fixed-2025 configurations
 with at least 100 trades: net R leads, except that a result within 3R of the current
 net-R leader ranks ahead when its maximum drawdown is more than 5% lower. This rule
 also selects the baseline used by the next continuous comparison cycle. It does not

@@ -161,8 +161,15 @@ import {
 } from "../utils/goldilocksTradeManagement";
 import { measureZoneCorridor } from "../utils/zoneCorridor";
 import { mergeCandleCoverageRanges } from "../utils/candleArchive";
-import { buildAutoResearchConfigurations, getAutoResearchDatasetEndTime } from "../utils/autoResearchRunner";
+import { buildAutoResearchConfigurations, buildAutoResearchDatasetTasks, getAutoResearchDatasetEndTime } from "../utils/autoResearchRunner";
 import { normalizeBacktestConfig } from "../utils/backtestRunner";
+import {
+  GOLDILOCKS_COMPARISON_DATASET_PREFIX,
+  GOLDILOCKS_COMPARISON_END_TIME,
+  GOLDILOCKS_COMPARISON_START_TIME,
+  isGoldilocksComparisonCandleTime,
+  isGoldilocksComparisonDataset,
+} from "../utils/comparisonDataset";
 import type { BacktestRunConfig } from "../utils/backtestStore";
 import { researchConfigHash } from "../utils/autoResearchStore";
 import { buildGoldilocksResearchManifest } from "../utils/goldilocksResearchManifest";
@@ -877,6 +884,14 @@ test("builds a deterministic overnight matrix without varying account risk", () 
   );
 });
 
+test("seals every Backtester timeframe for the fixed comparison archive",()=>{
+  const configurations=buildAutoResearchConfigurations({pairs:['EUR/USD'],explorationSeed:4});
+  assert.deepEqual(
+    buildAutoResearchDatasetTasks(configurations).map(task=>task.timeframe).sort(),
+    ['D','H1','H4','M1','M15','M5'],
+  );
+});
+
 test("research ranking trades up to 3R for more than five percent lower drawdown",()=>{
   const row=(id:string,netR:number,maxDrawdownR:number)=>({id,metrics:{official:{netR,maxDrawdownR}}});
   assert.deepEqual(
@@ -886,7 +901,7 @@ test("research ranking trades up to 3R for more than five percent lower drawdown
   assert.equal(rankAutoResearchResults([row('net-leader',100,20),row('exactly-five',98,19)])[0].id,'net-leader');
 });
 
-test("manual backtests inherit the research leader without sealed-dataset fields",()=>{
+test("manual backtests inherit the research leader on the fixed 2025 dataset",()=>{
   const defaults=manualBacktestDefaultsFromLeader({
     pairs:['EUR/USD'],lookbackDays:365,minimumScore:12,label:'Leader +1 score',
     timeframeProfile:'lowerTimeframe',strategyVersion:'m15-m5-m1-research-v4',
@@ -897,19 +912,33 @@ test("manual backtests inherit the research leader without sealed-dataset fields
   assert.equal(defaults.minimumScore,12);
   assert.equal(defaults.timeframeProfile,'lowerTimeframe');
   assert.equal(defaults.riskProfile,'easy');
-  assert.equal(defaults.archiveOnly,false);
-  assert.equal(defaults.datasetEndTime,undefined);
-  assert.equal(defaults.datasetKey,undefined);
+  assert.equal(defaults.archiveOnly,true);
+  assert.equal(defaults.datasetStartTime,GOLDILOCKS_COMPARISON_START_TIME);
+  assert.equal(defaults.datasetEndTime,GOLDILOCKS_COMPARISON_END_TIME);
+  assert.equal(defaults.datasetKey,GOLDILOCKS_COMPARISON_DATASET_PREFIX);
   assert.equal(defaults.researchManifest,undefined);
   assert.equal(defaults.label,undefined);
 });
 
-test("aligns continuous research to a closed five-minute sealed snapshot", () => {
+test("locks every research cycle to the exclusive end of calendar year 2025", () => {
   const now = Date.UTC(2026, 7, 3, 20, 7, 42);
-  assert.equal(
-    getAutoResearchDatasetEndTime(now),
-    Date.UTC(2026, 7, 3, 20, 0, 0) / 1000,
-  );
+  assert.equal(getAutoResearchDatasetEndTime(now),GOLDILOCKS_COMPARISON_END_TIME);
+  assert.equal(isGoldilocksComparisonCandleTime(GOLDILOCKS_COMPARISON_START_TIME),true);
+  assert.equal(isGoldilocksComparisonCandleTime(GOLDILOCKS_COMPARISON_END_TIME-1),true);
+  assert.equal(isGoldilocksComparisonCandleTime(GOLDILOCKS_COMPARISON_END_TIME),false);
+});
+
+test("normalizes manual campaigns onto the immutable 2025 candle window",()=>{
+  const config=normalizeBacktestConfig({
+    pairs:['EUR/USD'],lookbackDays:30,minimumScore:14,label:'attempted rolling run',
+    archiveOnly:false,datasetStartTime:1,datasetEndTime:Date.UTC(2026,7,3)/1000,datasetKey:'rolling',
+  });
+  assert.equal(config.datasetStartTime,GOLDILOCKS_COMPARISON_START_TIME);
+  assert.equal(config.datasetEndTime,GOLDILOCKS_COMPARISON_END_TIME);
+  assert.equal(config.lookbackDays,365);
+  assert.equal(config.archiveOnly,true);
+  assert.equal(config.datasetKey,GOLDILOCKS_COMPARISON_DATASET_PREFIX);
+  assert.equal(isGoldilocksComparisonDataset(config),true);
 });
 
 test("freezes every gate, score component, diagnostic, risk profile, and manager in a research manifest", () => {

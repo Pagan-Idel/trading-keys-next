@@ -41,6 +41,11 @@ import {
   getGoldilocksBacktestManagerForRun,
   type GoldilocksBacktestManagerId,
 } from "../utils/goldilocksTradeManagement";
+import {
+  GOLDILOCKS_COMPARISON_START_TIME,
+  GOLDILOCKS_COMPARISON_END_TIME,
+  GOLDILOCKS_COMPARISON_WINDOW_LABEL,
+} from "../utils/comparisonDataset";
 
 const Page = styled.div`
   width: min(1380px, calc(100% - 30px));
@@ -665,6 +670,7 @@ type RunConfig = {
   backfillPages?: number;
   archiveOnly?: boolean;
   datasetEndTime?: number;
+  datasetStartTime?: number;
   datasetKey?: string;
 };
 type Run = {
@@ -956,7 +962,6 @@ export default function Backtesting() {
     [timeframeProfile, setTimeframeProfile] =
       useState<GoldilocksTimeframeProfileId>("intraday"),
     [minimumScore, setMinimumScore] = useState(14),
-    [lookbackDays, setLookbackDays] = useState(730),
     [tradeManager, setTradeManager] = useState<GoldilocksBacktestManagerId>(
       GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
     ),
@@ -1023,7 +1028,6 @@ export default function Backtesting() {
     setTradeSearchResult(null);
     setSelected(Array.isArray(config.pairs) ? [...config.pairs] : []);
     setMinimumScore(config.minimumScore);
-    setLookbackDays(config.lookbackDays);
     setTimeframeProfile(config.timeframeProfile ?? "intraday");
     setStartingBalance(config.startingBalance ?? 1000);
     setLeverage(config.leverage ?? 30);
@@ -1115,7 +1119,6 @@ export default function Backtesting() {
     leaderDefaultsApplied.current=true;
     setSelected(Array.isArray(config.pairs)?[...config.pairs]:[...forexPairs]);
     setMinimumScore(config.minimumScore);
-    setLookbackDays(365);
     setTimeframeProfile(config.timeframeProfile??'intraday');
     setStartingBalance(config.startingBalance??1000);
     setLeverage(config.leverage??30);
@@ -1151,7 +1154,6 @@ export default function Backtesting() {
           pairs: selected,
           label: label.trim() || undefined,
           minimumScore,
-          lookbackDays,
           startingBalance,
           leverage,
           riskProfile,
@@ -1494,7 +1496,9 @@ export default function Backtesting() {
       `Strategy: ${result.config.strategyVersion ?? result.label}`,
       `Timeframes: ${timeframeLabel(result.config)}`,
       `Minimum score: ${result.config.minimumScore}/20`,
-      `Lookback: ${result.config.lookbackDays} days`,
+      result.config.datasetStartTime===GOLDILOCKS_COMPARISON_START_TIME&&result.config.datasetEndTime===GOLDILOCKS_COMPARISON_END_TIME
+        ?`Comparison data: ${GOLDILOCKS_COMPARISON_WINDOW_LABEL}`
+        :`Legacy data window: ${result.config.lookbackDays} days ending ${result.config.datasetEndTime?new Date(result.config.datasetEndTime*1000).toISOString():'at its run time'}`,
       `Risk: ${riskLabel(result.config)}`,
       `Trade manager: ${managerForRunConfig(result.config).label}`,
       `YOLO reverse final signal: ${result.config.reverseFinalSignal ? "enabled" : "disabled"}`,
@@ -1555,7 +1559,7 @@ export default function Backtesting() {
           Run H1 trend → M15 zones → M5 departure, touch, and later
           close-through confirmation. M1 is retained only for post-entry stop,
           +1R, and target ordering. Every campaign run stores one final realized-R result
-          and a permanent version snapshot.
+          and a permanent version snapshot against the same fixed 2025 UTC candles.
         </Sub>
         <Controls>
           <Field>
@@ -1576,10 +1580,8 @@ export default function Backtesting() {
               value={timeframeProfile}
               onChange={(e) => {
                 const value = e.target.value as GoldilocksTimeframeProfileId;
-                const profile = getGoldilocksTimeframeProfile(value);
                 setTimeframeProfile(value);
                 setLabel(getGoldilocksBacktestRunLabel(value));
-                setLookbackDays(profile.defaultLookbackDays);
               }}
             >
               <option value="lowerTimeframe">M15 / M5 / M1</option>
@@ -1621,19 +1623,9 @@ export default function Backtesting() {
               <option value="touch-entry">Immediate first-touch entry</option>
             </select>
           </Field>
-          <Field>
-            Lookback
-            <select
-              value={lookbackDays}
-              onChange={(e) => setLookbackDays(Number(e.target.value))}
-            >
-              <option value={30}>30 days</option>
-              <option value={90}>90 days</option>
-              <option value={365}>1 year</option>
-              <option value={730}>2 years</option>
-              <option value={1825}>5 years</option>
-              <option value={3650}>10 years</option>
-            </select>
+          <Field title="Every new manual and Research campaign uses the identical immutable UTC candle window. This is not configurable.">
+            Comparison data
+            <input aria-label="Comparison data window" value="2025 UTC · fixed" readOnly />
           </Field>
           <Field title={getGoldilocksBacktestManager(tradeManager).description}>
             Trade manager
@@ -2394,8 +2386,8 @@ export default function Backtesting() {
           <div>
             <h2>🏆 Permanent Top 3</h2>
             <span className="muted">
-              Highest net realized-R campaigns · saved independently from campaign
-              history · automatically replaces only the lowest record
+              Highest net realized-R campaigns on the identical fixed 2025 UTC
+              candle set · automatically replaces only the lowest record
             </span>
           </div>
         </Head>

@@ -7,9 +7,10 @@ import { simulateBacktestPortfolio } from './backtestPortfolio.ts';
 import { BACKTEST_CANDLE_LIMITS, cancelBacktest, executeBacktestInline, normalizeBacktestConfig, recoverInterruptedBacktestForWorker } from './backtestRunner.ts';
 import {autoPromoteResearchLeaderToPi} from './autoResearchPiPromotion.ts';
 import { getActiveBacktestRun, getBacktestDashboard, getBacktestRuntime, getBacktestTrainingData, type BacktestRunConfig } from './backtestStore.ts';
-import { checkpointCandleArchive, getCandleArchiveStorageUsage, getCandleArchiveSummary } from './candleArchive.ts';
+import { checkpointCandleArchive, getArchivedCandleRangeSummary, getCandleArchiveStorageUsage } from './candleArchive.ts';
 import {
   GOLDILOCKS_RESEARCH_VERSION,
+  GOLDILOCKS_TIMEFRAME_PROFILES,
   GOLDILOCKS_TIMEFRAME_SECONDS,
   expandGoldilocksScoreCategoryWeights,
   getGoldilocksTimeframeProfile,
@@ -20,6 +21,13 @@ import {
 } from './goldilocksConfig.ts';
 import { buildGoldilocksResearchManifest } from './goldilocksResearchManifest.ts';
 import { GOLDILOCKS_DEFAULT_MANAGEMENT } from './goldilocksTradeManagement.ts';
+import {
+  GOLDILOCKS_COMPARISON_DATASET_PREFIX,
+  GOLDILOCKS_COMPARISON_END_TIME,
+  GOLDILOCKS_COMPARISON_LOOKBACK_DAYS,
+  GOLDILOCKS_COMPARISON_START_TIME,
+  GOLDILOCKS_COMPARISON_WINDOW_LABEL,
+} from './comparisonDataset.ts';
 import { fetchCandleHistory } from './oanda/api/fetchCandleHistory.ts';
 import {
   addAutoResearchEvent, cancelAutoResearchCampaign, claimNextAutoResearchTrial, completeAutoResearchTrial,
@@ -52,11 +60,13 @@ const launchResearchWorker=(campaignId:string)=>{
   return child.pid??null;
 };
 
-const archiveDatasetKey=(datasetEndTime?:number)=>{
-  const summary=getCandleArchiveSummary();
+const archiveDatasetKey=(configurations:BacktestRunConfig[],datasetEndTime?:number)=>{
+  const endTime=datasetEndTime??GOLDILOCKS_COMPARISON_END_TIME;
+  const summary=buildAutoResearchDatasetTasks(configurations).map(task=>getArchivedCandleRangeSummary(
+    {mode:'demo',pair:task.pair,timeframe:task.timeframe},GOLDILOCKS_COMPARISON_START_TIME,endTime,
+  ));
   const digest=createHash('sha256').update(JSON.stringify(summary)).digest('hex').slice(0,12);
-  const latest=datasetEndTime??Math.max(0,...summary.map((row:any)=>Number(row.endTime)||0));
-  return `${new Date(latest*1000).toISOString().replace(/[:.]/g,'-')}-${digest}`;
+  return `${GOLDILOCKS_COMPARISON_DATASET_PREFIX}-${digest}`;
 };
 
 interface AutoResearchStrategyFamily {
@@ -156,28 +166,34 @@ const summarizeRun=(runId:string)=>{
 };
 
 const delay=(milliseconds:number)=>new Promise(resolve=>setTimeout(resolve,milliseconds));
-const SEALED_SNAPSHOT_INTERVAL_SECONDS=5*60;
-
-export const getAutoResearchDatasetEndTime=(now=Date.now())=>
-  Math.floor((Math.floor(now/1000)-SEALED_SNAPSHOT_INTERVAL_SECONDS)/SEALED_SNAPSHOT_INTERVAL_SECONDS)*SEALED_SNAPSHOT_INTERVAL_SECONDS;
+export const getAutoResearchDatasetEndTime=(_now=Date.now())=>
+  GOLDILOCKS_COMPARISON_END_TIME;
 
 interface DatasetTask {pair:string;timeframe:string;lookbackDays:number;maxCandles:number;backfillPages:number}
 
-const buildDatasetTasks=(configurations:BacktestRunConfig[]):DatasetTask[]=>{
+export const buildAutoResearchDatasetTasks=(configurations:BacktestRunConfig[]):DatasetTask[]=>{
   const tasks=new Map<string,DatasetTask>();
+  const addTask=(pair:string,timeframe:string,lookbackDays:number)=>{
+    const key=`${pair}|${timeframe}`;
+    const resolvedLookback=Math.max(lookbackDays,tasks.get(key)?.lookbackDays??0);
+    const maxCandles=BACKTEST_CANDLE_LIMITS[timeframe];
+    const seconds=GOLDILOCKS_TIMEFRAME_SECONDS[timeframe];
+    const backfillPages=Math.min(maxCandles,Math.ceil(resolvedLookback*86400/seconds))/1000;
+    tasks.set(key,{pair,timeframe,lookbackDays:resolvedLookback,maxCandles,backfillPages:Math.ceil(backfillPages)+2});
+  };
   for(const config of configurations){
     const profile=getGoldilocksTimeframeProfile(config.timeframeProfile);
     for(const pair of config.pairs){
       for(const timeframe of new Set([profile.trend,profile.zone,profile.confirmation,profile.execution])){
-        const key=`${pair}|${timeframe}`;
-        const lookbackDays=Math.max(config.lookbackDays,tasks.get(key)?.lookbackDays??0);
-        const maxCandles=BACKTEST_CANDLE_LIMITS[timeframe];
-        const seconds=GOLDILOCKS_TIMEFRAME_SECONDS[timeframe];
-        const backfillPages=Math.min(maxCandles,Math.ceil(lookbackDays*86400/seconds))/1000;
-        tasks.set(key,{pair,timeframe,lookbackDays,maxCandles,backfillPages:Math.ceil(backfillPages)+2});
+        addTask(pair,timeframe,config.lookbackDays);
       }
     }
   }
+  const pairs=[...new Set(configurations.flatMap(config=>config.pairs))];
+  for(const pair of pairs)
+    for(const profile of Object.values(GOLDILOCKS_TIMEFRAME_PROFILES))
+      for(const timeframe of new Set([profile.trend,profile.zone,profile.confirmation,profile.execution]))
+        addTask(pair,timeframe,GOLDILOCKS_COMPARISON_LOOKBACK_DAYS);
   const order:Record<string,number>={D:0,H4:1,H1:2,M15:3,M5:4,M1:5};
   return [...tasks.values()].sort((left,right)=>(order[left.timeframe]??99)-(order[right.timeframe]??99)||left.pair.localeCompare(right.pair));
 };
@@ -196,9 +212,9 @@ const retry=async<T>(operation:()=>Promise<T>,onRetry:(attempt:number,error:Erro
 };
 
 const acquireSealedDataset=async(campaignId:string,configurations:BacktestRunConfig[],datasetEndTime:number)=>{
-  const tasks=buildDatasetTasks(configurations);
+  const tasks=buildAutoResearchDatasetTasks(configurations);
   updateAutoResearchCampaign(campaignId,{status:'preparing',preparationStage:'Starting sealed candle acquisition',preparationDone:0,preparationTotal:tasks.length});
-  addAutoResearchEvent(campaignId,'dataset_preparing',`DATASET PREPARING · ${tasks.length} pair/timeframe archives will be acquired once from OANDA, then every trial will be SQLite-only.`,undefined,{datasetEndTime,tasks:tasks.length});
+  addAutoResearchEvent(campaignId,'dataset_preparing',`DATASET PREPARING · ${GOLDILOCKS_COMPARISON_WINDOW_LABEL} · ${tasks.length} pair/timeframe archives will be acquired once from OANDA, then every trial will be SQLite-only.`,undefined,{datasetStartTime:GOLDILOCKS_COMPARISON_START_TIME,datasetEndTime,tasks:tasks.length});
   for(let index=0;index<tasks.length;index+=1){
     const task=tasks[index];
     const state=getAutoResearchCampaignRuntime(campaignId);
@@ -207,14 +223,14 @@ const acquireSealedDataset=async(campaignId:string,configurations:BacktestRunCon
     updateAutoResearchCampaign(campaignId,{status:'preparing',preparationStage:stage,preparationDone:index,preparationTotal:tasks.length});
     addAutoResearchEvent(campaignId,'dataset_task_started',`DATASET · ${stage}.`,undefined,task);
     const candles=await retry(
-      ()=>fetchCandleHistory(task.pair,task.timeframe,{lookbackDays:task.lookbackDays,mode:'demo',maxCandles:task.maxCandles,backfillPages:task.backfillPages,endTime:datasetEndTime,acquireFullRange:true}),
+      ()=>fetchCandleHistory(task.pair,task.timeframe,{lookbackDays:task.lookbackDays,mode:'demo',maxCandles:task.maxCandles,backfillPages:task.backfillPages,startTime:GOLDILOCKS_COMPARISON_START_TIME,endTime:datasetEndTime,acquireFullRange:true}),
       (attempt,error)=>addAutoResearchEvent(campaignId,'dataset_fetch_retry',`DATASET RETRY · ${task.pair} ${task.timeframe} · attempt ${attempt+1}/6 after ${error.message}.`,undefined,{...task,attempt,error:error.message}),
     );
     updateAutoResearchCampaign(campaignId,{preparationStage:stage,preparationDone:index+1,preparationTotal:tasks.length});
     addAutoResearchEvent(campaignId,'dataset_task_complete',`DATASET READY · ${task.pair} ${task.timeframe} · ${candles.length.toLocaleString()} candles stored locally.`,undefined,{...task,candles:candles.length});
   }
   checkpointCandleArchive();
-  const datasetKey=archiveDatasetKey(datasetEndTime);
+  const datasetKey=archiveDatasetKey(configurations,datasetEndTime);
   updateAutoResearchCampaign(campaignId,{datasetKey,preparationStage:'Sealed SQLite dataset ready',preparationDone:tasks.length,preparationTotal:tasks.length});
   addAutoResearchEvent(campaignId,'dataset_sealed',`DATASET SEALED · ${datasetKey} · OANDA access is disabled for all queued trials.`,undefined,{datasetKey,datasetEndTime,archive:getCandleArchiveStorageUsage()});
   return datasetKey;
@@ -232,7 +248,7 @@ export const executeAutoResearchCampaign=async(campaignId:string)=>{
     const prepareCycle=async(datasetEndTime:number)=>{
       const datasetKey=await acquireSealedDataset(campaignId,campaignConfig.configurations,datasetEndTime);
       const configurations=campaignConfig.configurations.map(config=>({
-        ...config,archiveOnly:true,backfillPages:0,datasetEndTime,datasetKey,
+        ...config,archiveOnly:true,backfillPages:0,datasetStartTime:GOLDILOCKS_COMPARISON_START_TIME,datasetEndTime,datasetKey,
         researchManifest:buildGoldilocksResearchManifest(config.timeframeProfile??'intraday',config.minimumScore),
       }));
       const queued=enqueueAutoResearchCycle(campaignId,datasetKey,configurations);
@@ -260,18 +276,24 @@ export const executeAutoResearchCampaign=async(campaignId:string)=>{
           addAutoResearchEvent(campaignId,'campaign_complete','AUTO RESEARCH COMPLETE · every configuration was evaluated on the same sealed local dataset.');
           break;
         }
-        const previousEndTime=Math.max(0,...getAutoResearchDashboard(campaignId).trials.map(item=>Number((item.config as BacktestRunConfig).datasetEndTime)||0));
-        let nextEndTime=getAutoResearchDatasetEndTime();
-        if(nextEndTime<=previousEndTime){
-          updateAutoResearchCampaign(campaignId,{status:'waiting',currentTrialId:null,preparationStage:'Waiting for the next sealed snapshot boundary'});
-          await delay(30_000);
-          continue;
+        const dashboard=getAutoResearchDashboard(campaignId);
+        const datasetKey=String(dashboard.campaigns.find(item=>item.id===campaignId)?.datasetKey??'');
+        let queued=0;
+        for(let attempt=0;attempt<24&&!queued;attempt+=1){
+          const explorationSeed=GOLDILOCKS_COMPARISON_END_TIME+dashboard.trials.length+attempt;
+          const variants=buildAutoResearchConfigurations({baselineConfig:getBestAutoResearchConfiguration(),explorationSeed});
+          const configurations=variants.map(config=>({
+            ...config,archiveOnly:true,backfillPages:0,datasetStartTime:GOLDILOCKS_COMPARISON_START_TIME,
+            datasetEndTime:GOLDILOCKS_COMPARISON_END_TIME,datasetKey,
+            researchManifest:buildGoldilocksResearchManifest(config.timeframeProfile??'intraday',config.minimumScore),
+          }));
+          queued=enqueueAutoResearchCycle(campaignId,datasetKey,configurations);
         }
-        addAutoResearchEvent(campaignId,'continuous_cycle_started',`CONTINUOUS RESEARCH · comparison queue exhausted; sealing the next historical snapshot ending ${new Date(nextEndTime*1000).toISOString()}.`,undefined,{previousEndTime,datasetEndTime:nextEndTime});
-        campaignConfig.configurations=buildAutoResearchConfigurations({baselineConfig:getBestAutoResearchConfiguration(),explorationSeed:nextEndTime});
-        const cycle=await prepareCycle(nextEndTime);
-        if(!cycle.queued){
-          updateAutoResearchCampaign(campaignId,{status:'waiting',currentTrialId:null,preparationStage:'Waiting for a distinct sealed snapshot'});
+        if(queued){
+          updateAutoResearchCampaign(campaignId,{status:'running',currentTrialId:null,preparationStage:'Fixed 2025 comparison dataset'});
+          addAutoResearchEvent(campaignId,'continuous_cycle_started',`CONTINUOUS RESEARCH · ${queued} new configuration(s) queued against the unchanged 2025 candle set.`,undefined,{datasetKey,queued,datasetStartTime:GOLDILOCKS_COMPARISON_START_TIME,datasetEndTime:GOLDILOCKS_COMPARISON_END_TIME});
+        }else{
+          updateAutoResearchCampaign(campaignId,{status:'waiting',currentTrialId:null,preparationStage:'Waiting for a distinct configuration on the fixed 2025 dataset'});
           await delay(30_000);
         }
         continue;
@@ -318,7 +340,7 @@ export const executeAutoResearchCampaign=async(campaignId:string)=>{
 export const startAutoResearch=(input:StartAutoResearchInput={})=>{
   const configurations=buildAutoResearchConfigurations({...input,baselineConfig:input.baselineConfig??getBestAutoResearchConfiguration()});
   const config:AutoResearchCampaignConfig={
-    label:String(input.label??`${GOLDILOCKS_RESEARCH_VERSION} | overnight discovery`).slice(0,120),
+    label:String(input.label??`${GOLDILOCKS_RESEARCH_VERSION} | fixed 2025 research`).slice(0,120),
     continuous:input.continuous??true,
     configurations,
     datasetEndTime:getAutoResearchDatasetEndTime(),

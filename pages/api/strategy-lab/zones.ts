@@ -2,13 +2,14 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { forexPairs } from "../../../utils/constants";
 import {
   annotateTimeframeConfluence,
-  createHistoricalZoneTouchState,
+  createGoldilocksSignalState,
   detectGoldilocksZoneHistory,
   detectGoldilocksZones,
   findCloseBeyondTouchedCandle,
   getDrawableGoldilocksZones,
   getGoldilocksZoneFormationWindow,
   measureGoldilocksIntrabarDepartureSpeed,
+  observeGoldilocksSignalCandle,
   summarizeZoneTimeframeTouches,
   summarizeConfirmationTimeframeTouches,
   validateFinalEntryAfterEngulf,
@@ -25,6 +26,7 @@ import { fetchCandleHistory } from "../../../utils/oanda/api/fetchCandleHistory"
 import { determineSwingPoints } from "../../../utils/swingLabeler";
 import {
   annotateConfluenceAt,
+  applyConfirmationTimeframeZoneLifecycle,
   buildGoldilocksHistoryChunked,
   buildGoldilocksLegs,
   getGoldilocksStructureBreakingLegDirection,
@@ -90,6 +92,16 @@ const firstCandleAfter = (candles: Array<{ time: number }>, time: number) => {
   while (low < high) {
     const middle = (low + high) >>> 1;
     if (candles[middle].time <= time) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+};
+
+const firstCandleAtOrAfter = (candles: Array<{ time: number }>, time: number) => {
+  let low = 0, high = candles.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (candles[middle].time < time) low = middle + 1;
     else high = middle;
   }
   return low;
@@ -359,7 +371,7 @@ export default async function handler(
     const detection = latestZoneLeg
       ? detectGoldilocksZones(deepZoneStrategy, latestZoneLeg)
       : detectGoldilocksZones(strategyCandles, leg);
-    const zoneHistory = deepZoneHistory;
+    let zoneHistory = deepZoneHistory;
     const replayDisplayTime = Number.isFinite(requestedTradeTime)
       ? (storedReplayForRequest?.confirmationTime ?? requestedTradeTime)
       : Number.isFinite(requestedZoneTime)
@@ -561,7 +573,7 @@ export default async function handler(
       ...displayZonesWithConfluence,
       ...researchDisplayZones,
     ];
-    const drawableZones = getDrawableGoldilocksZones(displayZonesWithResearch);
+    let drawableZones = getDrawableGoldilocksZones(displayZonesWithResearch);
     const drawableNearestZones = getDrawableGoldilocksZones(nearestZones);
     const deepConfirmationRaw =
       timeframe === strategyStack.confirmation
@@ -579,6 +591,19 @@ export default async function handler(
     const zoneTouchCandles = toStrategyCandles(deepZoneRaw);
     const confirmationCandleSeconds =
       GOLDILOCKS_TIMEFRAME_SECONDS[strategyStack.confirmation] ?? 300;
+    zoneHistory = applyConfirmationTimeframeZoneLifecycle(
+      deepZoneHistory,
+      historicalCandles,
+      confirmationCandleSeconds,
+      zoneTouchCandles,
+      zoneCandleSeconds,
+      replayDisplayTime ?? Number.POSITIVE_INFINITY,
+    );
+    const displayLifecycleTime =
+      replayDisplayTime ?? historicalCandles.at(-1)?.time ?? Number.POSITIVE_INFINITY;
+    drawableZones = drawableZones
+      .map((zone) => zoneHistory.zones.find((item) => item.id === zone.id) ?? zone)
+      .filter((zone) => zoneWasUsableAt(zone, displayLifecycleTime));
     const historicalConfluenceSources = confluenceSources;
     const currentTrend = getGoldilocksTrend(
       historicalConfluenceSources.find(
@@ -595,7 +620,7 @@ export default async function handler(
       maxTouchRangeZoneFraction: number;
       reason: string;
     }> = [];
-    const historicalEntrySetups = deepZoneHistory.zones.flatMap((zone) => {
+    const historicalEntrySetups = zoneHistory.zones.flatMap((zone) => {
       if (zone.kind !== "base") return [];
       const formationWindow = getGoldilocksZoneFormationWindow(
         zone,
@@ -607,10 +632,13 @@ export default async function handler(
         formationWindow.end,
       );
       if (!formationNewsGate.allowed) return [];
-      const touchState = createHistoricalZoneTouchState();
+      const signalState = createGoldilocksSignalState();
+      const arming = summarizeZoneTimeframeTouches(
+        zone,zoneTouchCandles,zoneCandleSeconds,
+      );
       const completedSetups: Array<Record<string, unknown>> = [];
       for (
-        let index = firstCandleAfter(
+        let index = firstCandleAtOrAfter(
           historicalCandles,
           zone.availableAt ?? zone.candleTime,
         );
@@ -620,40 +648,16 @@ export default async function handler(
         const candle = historicalCandles[index];
         if (candle.time > zoneExpiresAt(zone.candleTime)) break;
         if (zone.invalidatedAt && candle.time >= zone.invalidatedAt) break;
-        const broken =
-          zone.side === "demand"
-            ? candle.low < zone.low
-            : candle.high > zone.high;
-        if (broken) break;
+        const observation=observeGoldilocksSignalCandle({
+          zone,candles:historicalCandles,candleIndex:index,armedAt:arming.armedAt,
+          state:signalState,confirmationMode:'close-through',
+        });
+        if(observation.invalidated)break;
         const touchedCandle =
-          touchState.touchCandleIndex >= 0
-            ? historicalCandles[touchState.touchCandleIndex]
+          signalState.touchCandleIndex >= 0
+            ? historicalCandles[signalState.touchCandleIndex]
             : undefined;
-        const confirmed =
-          touchedCandle !== undefined &&
-          (zone.side === "demand"
-            ? candle.close > candle.open && candle.close > touchedCandle.high
-            : candle.close < candle.open && candle.close < touchedCandle.low);
-        if (!confirmed) {
-          if (touchState.touchCandleIndex < 0) {
-            const armed = summarizeZoneTimeframeTouches(
-              zone,
-              zoneTouchCandles,
-              zoneCandleSeconds,
-              candle.time,
-            );
-            if (armed.invalidated) break;
-            if (
-              armed.firstOutsideTime !== undefined &&
-              candle.time >= armed.firstOutsideTime &&
-              candle.high >= zone.low &&
-              candle.low <= zone.high
-            ) {
-              touchState.touchCandleIndex = index;
-            }
-          }
-          continue;
-        }
+        if (!observation.confirmed||!touchedCandle) continue;
         const purity = summarizeConfirmationTimeframeTouches(
           zone,
           historicalCandles,
@@ -668,8 +672,9 @@ export default async function handler(
           candle.close,
         );
         if (!proximity.allowed) break;
-        const knownAtConfirmation = deepZoneHistory.zones.filter((item) =>
-          zoneWasUsableAt(item, candle.time),
+        const confirmationCloseTime=candle.time+confirmationCandleSeconds;
+        const knownAtConfirmation = zoneHistory.zones.filter((item) =>
+          zoneWasUsableAt(item, confirmationCloseTime),
         );
         const check = validateTwoToOneRunway(
           zone,
@@ -685,19 +690,20 @@ export default async function handler(
               maxPenetration: 0,
             },
             strategyStack.zone,
-            candle.time,
+            confirmationCloseTime,
             historicalConfluenceSources,
           );
           const trendSource =
             historicalConfluenceSources.find(
               (source) => source.timeframe === strategyStack.trend,
             )?.candles ?? [];
-          const trend = getGoldilocksTrend(trendSource, candle.time);
+          const trend = getGoldilocksTrend(trendSource, confirmationCloseTime);
           const approachPressure = measureGoldilocksApproachPressure(
             confluenceZone,
             historicalCandles,
-            touchState.touchCandleIndex,
+            signalState.touchCandleIndex,
             index,
+            {firstOutsideTime:purity.firstOutsideTime},
           );
           const score = scoreGoldilocksSetup({
             zone: confluenceZone,
@@ -795,11 +801,8 @@ export default async function handler(
                 ? historicalCandles[outcomeIndex].time
                 : undefined,
           };
-          if (outcomeIndex < 0) return [setup];
-          completedSetups.push(setup);
-          index = outcomeIndex;
+          return [setup];
         }
-        touchState.touchCandleIndex = -1;
       }
       return completedSetups;
     }) as Array<{
@@ -884,14 +887,18 @@ export default async function handler(
           (candle) => candle.time === storedReplayForRequest!.confirmationTime,
         )
       : -1;
-    const storedTouchState = createHistoricalZoneTouchState();
-    if (storedReplayZone && storedConfirmationIndex > 0) {
+    const storedTouchState = createGoldilocksSignalState();
+    let storedSignalConfirmed=false;
+    if (storedReplayZone && storedConfirmationIndex >= 0) {
+      const storedArming=summarizeZoneTimeframeTouches(
+        storedReplayZone,zoneTouchCandles,zoneCandleSeconds,
+      );
       for (
-        let index = firstCandleAfter(
+        let index = firstCandleAtOrAfter(
           historicalCandles,
           storedReplayZone.availableAt ?? storedReplayZone.candleTime,
         );
-        index < storedConfirmationIndex;
+        index <= storedConfirmationIndex;
         index += 1
       ) {
         const candle = historicalCandles[index];
@@ -900,40 +907,21 @@ export default async function handler(
           candle.time >= storedReplayZone.invalidatedAt
         )
           break;
-        const broken =
-          storedReplayZone.side === "demand"
-            ? candle.low < storedReplayZone.low
-            : candle.high > storedReplayZone.high;
-        if (broken) break;
-        if (storedTouchState.touchCandleIndex < 0) {
-          const armed = summarizeZoneTimeframeTouches(
-            storedReplayZone,
-            zoneTouchCandles,
-            zoneCandleSeconds,
-            candle.time,
-          );
-          if (
-            armed.firstOutsideTime !== undefined &&
-            candle.time >= armed.firstOutsideTime &&
-            candle.high >= storedReplayZone.low &&
-            candle.low <= storedReplayZone.high
-          )
-            storedTouchState.touchCandleIndex = index;
-        }
+        const observation=observeGoldilocksSignalCandle({
+          zone:storedReplayZone,candles:historicalCandles,candleIndex:index,
+          armedAt:storedArming.armedAt,state:storedTouchState,
+          confirmationMode:storedReplayForRequest?.confirmationMode??'close-through',
+        });
+        if(observation.invalidated)break;
+        if(index===storedConfirmationIndex)storedSignalConfirmed=observation.confirmed;
       }
     }
     const storedConfirmationCandle =
       storedConfirmationIndex >= 0
         ? historicalCandles[storedConfirmationIndex]
         : undefined;
-    if (
-      storedReplayForRequest?.confirmationMode === "touch-entry" &&
-      storedConfirmationIndex >= 0
-    ) {
-      storedTouchState.touchCandleIndex = storedConfirmationIndex;
-    }
     const storedTouchCandle =
-      storedTouchState.touchCandleIndex >= 0
+      storedSignalConfirmed&&storedTouchState.touchCandleIndex >= 0
         ? historicalCandles[storedTouchState.touchCandleIndex]
         : undefined;
     const storedZoneAgeSeconds =
@@ -954,6 +942,7 @@ export default async function handler(
     const storedApproachPressure =
       storedZoneMeetsCurrentAgeRule &&
       storedReplayZone &&
+      storedSignalConfirmed &&
       storedTouchState.touchCandleIndex >= 0 &&
       storedConfirmationIndex >= storedTouchState.touchCandleIndex
         ? measureGoldilocksApproachPressure(
@@ -961,6 +950,7 @@ export default async function handler(
             historicalCandles,
             storedTouchState.touchCandleIndex,
             storedConfirmationIndex,
+            {firstOutsideTime:storedReplayForRequest?.firstOutsideTime},
           )
         : undefined;
     const storedPurity =

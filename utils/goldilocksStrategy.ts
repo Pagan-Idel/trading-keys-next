@@ -254,6 +254,19 @@ export interface GoldilocksZone {
 }
 export const stableZoneLegKey=(direction:string,startTime:number,endTime:number)=>`${direction}-${startTime}-${endTime}`;
 
+export const inferGoldilocksCandleSeconds = (
+  candles: Array<Pick<StrategyCandle, "time">>,
+  fallback = 1,
+) => {
+  const gaps = candles
+    .slice(1)
+    .map((candle, index) => candle.time - candles[index].time)
+    .filter((gap) => Number.isFinite(gap) && gap > 0)
+    .sort((left, right) => left - right);
+  if (!gaps.length) return Math.max(1, Math.floor(fallback));
+  return Math.max(1, Math.floor(gaps[Math.floor(gaps.length / 2)]));
+};
+
 export interface GoldilocksDepartureQuality {
   departureCandleTime: number;
   departureCandleIndex: number;
@@ -566,6 +579,105 @@ const atrAt = (candles: StrategyCandle[], candleIndex: number, period = 14) => {
     );
   }
   return total / period;
+};
+
+export interface GoldilocksDepartureQualification {
+  qualifies: boolean;
+  priorAtr14?: number;
+  bodySize: number;
+  candleRange: number;
+  bodyFraction?: number;
+  bodyAtrMultiple?: number;
+  closePenetration: number;
+  closePenetrationAtrMultiple?: number;
+  directional: boolean;
+  closedOutside: boolean;
+}
+
+const meetsGoldilocksMinimum = (value: number, minimum: number) =>
+  Number.isFinite(value) &&
+  (value >= minimum ||
+    Math.abs(value - minimum) <=
+      Number.EPSILON * Math.max(1, Math.abs(value), Math.abs(minimum)) * 128);
+
+/**
+ * Canonical causal departure qualification used by detection and lifecycle code.
+ * ATR(14) ends on the candle immediately before the candidate, so the candidate
+ * can never contribute to its own threshold or use a future candle.
+ */
+export const qualifyGoldilocksDepartureCandle = (
+  zone: Pick<GoldilocksZone, "side" | "low" | "high">,
+  candles: StrategyCandle[],
+  candleIndex: number,
+): GoldilocksDepartureQualification => {
+  const candle = candles[candleIndex];
+  const invalidResult: GoldilocksDepartureQualification = {
+    qualifies: false,
+    bodySize: Number.NaN,
+    candleRange: Number.NaN,
+    closePenetration: Number.NaN,
+    directional: false,
+    closedOutside: false,
+  };
+  if (
+    !candle ||
+    ![candle.open, candle.high, candle.low, candle.close].every(Number.isFinite)
+  )
+    return invalidResult;
+  const candleRange = candle.high - candle.low;
+  const bodySize = Math.abs(candle.close - candle.open);
+  const direction = zone.side === "demand" ? 1 : -1;
+  const proximalBoundary = zone.side === "demand" ? zone.high : zone.low;
+  const directionalMove = direction * (candle.close - candle.open);
+  const closePenetration = direction * (candle.close - proximalBoundary);
+  const directional = directionalMove > 0;
+  const closedOutside = closePenetration > 0;
+  const priorAtr14 = candleIndex > 0 ? atrAt(candles, candleIndex - 1) : undefined;
+  if (
+    !Number.isFinite(candleRange) ||
+    candleRange <= 0 ||
+    !Number.isFinite(priorAtr14) ||
+    priorAtr14! <= 0
+  )
+    return {
+      ...invalidResult,
+      priorAtr14,
+      bodySize,
+      candleRange,
+      closePenetration,
+      directional,
+      closedOutside,
+    };
+  const bodyFraction = bodySize / candleRange;
+  const bodyAtrMultiple = bodySize / priorAtr14!;
+  const closePenetrationAtrMultiple = closePenetration / priorAtr14!;
+  const qualifies =
+    closedOutside &&
+    directional &&
+    meetsGoldilocksMinimum(
+      bodyFraction,
+      GOLDILOCKS_DEPARTURE_QUALITY.minimumBodyFraction,
+    ) &&
+    meetsGoldilocksMinimum(
+      bodyAtrMultiple,
+      GOLDILOCKS_DEPARTURE_QUALITY.minimumBodyAtrMultiple,
+    ) &&
+    meetsGoldilocksMinimum(
+      closePenetrationAtrMultiple,
+      GOLDILOCKS_DEPARTURE_QUALITY.minimumClosePenetrationAtrMultiple,
+    );
+  return {
+    qualifies,
+    priorAtr14,
+    bodySize,
+    candleRange,
+    bodyFraction,
+    bodyAtrMultiple,
+    closePenetration,
+    closePenetrationAtrMultiple,
+    directional,
+    closedOutside,
+  };
 };
 
 const median = (values: number[]) => {
@@ -1200,9 +1312,7 @@ const evaluateZone = (
   const wickDepartureMultiple = wickDepartureDistance / width;
   const departureCandleIndex =
     futureIndices.find((index) =>
-      leg.direction === "bullish"
-        ? candles[index].close > bounds.high
-        : candles[index].close < bounds.low,
+      qualifyGoldilocksDepartureCandle(bounds, candles, index).qualifies,
     ) ?? -1;
   const departureCandle =
     departureCandleIndex >= 0 ? candles[departureCandleIndex] : candle;
@@ -1281,13 +1391,16 @@ const evaluateZone = (
       leg.direction === "bullish"
         ? current.high - bounds.high
         : bounds.low - current.low;
-    const outside =
-      leg.direction === "bullish"
-        ? current.low > bounds.high
-        : current.high < bounds.low;
-    if (outside) {
-      touchCountingStarted = true;
-      insideVisit = false;
+    const outside = qualifyGoldilocksDepartureCandle(
+      bounds,
+      candles,
+      index,
+    ).qualifies;
+    if (!touchCountingStarted) {
+      if (outside) {
+        touchCountingStarted = true;
+        insideVisit = false;
+      }
       if (!departureConfirmed && moveAway >= width * 2)
         departureConfirmed = true;
       continue;
@@ -1299,6 +1412,10 @@ const evaluateZone = (
       leg.direction === "bullish"
         ? current.low <= bounds.high
         : current.high >= bounds.low;
+    if (!touched) {
+      insideVisit = false;
+      continue;
+    }
     if (touched && touchCountingStarted && !insideVisit) {
       insideVisit = true;
       touches += 1;
@@ -1331,7 +1448,10 @@ const evaluateZone = (
     side: bounds.side,
     candleIndex,
     candleTime: candle.time,
-    availableAt: candles[leg.endIndex].time,
+    // OANDA candle timestamps are candle opens. Structure at the endpoint is
+    // knowable only after that candle completes, never at its opening tick.
+    availableAt:
+      candles[leg.endIndex].time + inferGoldilocksCandleSeconds(candles),
     low: bounds.low,
     high: bounds.high,
     width,
@@ -1535,10 +1655,12 @@ export const detectGoldilocksZoneHistory = (
       const relatedBase = baseByLeg.get(legKey);
       let touchCountingStarted = candles
         .slice(zone.candleIndex + 1, leg.endIndex + 1)
-        .some((candle) =>
-          zone.side === "demand"
-            ? candle.low > zone.high
-            : candle.high < zone.low,
+        .some((_, offset) =>
+          qualifyGoldilocksDepartureCandle(
+            zone,
+            candles,
+            zone.candleIndex + 1 + offset,
+          ).qualifies,
         );
       let insideVisit = false;
       for (let index = leg.endIndex + 1; index < candles.length; index += 1) {
@@ -1563,19 +1685,26 @@ export const detectGoldilocksZoneHistory = (
           );
           break;
         }
-        const outside =
-          zone.side === "demand"
-            ? candle.low > zone.high
-            : candle.high < zone.low;
-        if (outside) {
-          touchCountingStarted = true;
-          insideVisit = false;
+        const outside = qualifyGoldilocksDepartureCandle(
+          zone,
+          candles,
+          index,
+        ).qualifies;
+        if (!touchCountingStarted) {
+          if (outside) {
+            touchCountingStarted = true;
+            insideVisit = false;
+          }
           continue;
         }
         const touched =
           zone.side === "demand"
             ? candle.low <= zone.high
             : candle.high >= zone.low;
+        if (!touched) {
+          insideVisit = false;
+          continue;
+        }
         if (trackTouches && touched && touchCountingStarted && !insideVisit) {
           insideVisit = true;
           zone.state = "touched";
@@ -1861,26 +1990,29 @@ export const countZoneTouchesBefore = (
   let countingStarted = false;
   let insideVisit = false;
   let touches = 0;
-  const availableAt = zone.availableAt ?? zone.candleTime;
   for (
     let index = Math.max(0, zone.candleIndex + 1);
     index < Math.min(stopBeforeIndex, candles.length);
     index += 1
   ) {
     const candle = candles[index];
-    if (candle.time <= availableAt) continue;
     const invalid =
       zone.side === "demand" ? candle.low < zone.low : candle.high > zone.high;
     if (invalid) break;
-    const outside =
-      zone.side === "demand"
-        ? candle.close > zone.high
-        : candle.close < zone.low;
+    const outside = qualifyGoldilocksDepartureCandle(
+      zone,
+      candles,
+      index,
+    ).qualifies;
     if (!countingStarted) {
       if (outside) countingStarted = true;
       continue;
     }
     const touched = candle.high >= zone.low && candle.low <= zone.high;
+    if (!touched) {
+      insideVisit = false;
+      continue;
+    }
     if (touched && countingStarted && !insideVisit) {
       touches += 1;
       insideVisit = true;
@@ -1896,23 +2028,107 @@ export interface HistoricalZoneTouchState {
   totalTouches: number;
   touchesBeforeTouch: number;
   invalidated: boolean;
+  departureCandles: StrategyCandle[];
 }
 
-export const createHistoricalZoneTouchState = (): HistoricalZoneTouchState => ({
+export const createHistoricalZoneTouchState = (
+  priorCandles: StrategyCandle[] = [],
+): HistoricalZoneTouchState => ({
   armed: false,
   insideVisit: false,
   touchCandleIndex: -1,
   totalTouches: 0,
   touchesBeforeTouch: 0,
   invalidated: false,
+  departureCandles: [...priorCandles],
 });
+
+export interface GoldilocksSignalState {
+  touchCandleIndex: number;
+  invalidated: boolean;
+}
+
+export const createGoldilocksSignalState = (): GoldilocksSignalState => ({
+  touchCandleIndex: -1,
+  invalidated: false,
+});
+
+export interface GoldilocksSignalObservation {
+  confirmed: boolean;
+  immediateTouchEntry: boolean;
+  invalidated: boolean;
+  touchCandleIndex: number;
+}
+
+export interface GoldilocksExecutableQuote {
+  bid: number;
+  ask: number;
+  time: number;
+}
+
+export interface GoldilocksStreamTouchObservation {
+  touched: boolean;
+  broken: boolean;
+  executableEntry: number;
+}
+
+/**
+ * Immediate-touch execution uses the executable side of a streamed quote.
+ * A demand limit becomes reachable when ask reaches the proximal high; a
+ * supply limit becomes reachable when bid reaches the proximal low. The
+ * opposite quote side owns distal-stop validity because that is the side on
+ * which an opened position could be stopped.
+ */
+export const observeGoldilocksStreamTouch = (
+  zone: Pick<GoldilocksZone, 'side' | 'low' | 'high'>,
+  quote: GoldilocksExecutableQuote,
+): GoldilocksStreamTouchObservation => {
+  const executableEntry=zone.side==='demand'?quote.ask:quote.bid;
+  const touched=zone.side==='demand'
+    ?quote.ask<=zone.high
+    :quote.bid>=zone.low;
+  const broken=zone.side==='demand'
+    ?quote.bid<zone.low
+    :quote.ask>zone.high;
+  return {touched,broken,executableEntry};
+};
+
+/** Shared causal touch/close-through transition used by live, Lab, and backtests. */
+export const observeGoldilocksSignalCandle = (input: {
+  zone: GoldilocksZone;
+  candles: StrategyCandle[];
+  candleIndex: number;
+  armedAt?: number;
+  state: GoldilocksSignalState;
+  confirmationMode?: 'close-through' | 'touch-entry';
+}): GoldilocksSignalObservation => {
+  const {zone,candles,candleIndex,state}=input;
+  const candle=candles[candleIndex];
+  const mode=input.confirmationMode??'close-through';
+  if(!candle||state.invalidated)return {confirmed:false,immediateTouchEntry:false,invalidated:state.invalidated,touchCandleIndex:state.touchCandleIndex};
+  const eligibleAt=Math.max(input.armedAt??Number.POSITIVE_INFINITY,zone.availableAt??zone.candleTime);
+  const eligible=candle.time>=eligibleAt;
+  const touched=candle.high>=zone.low&&candle.low<=zone.high;
+  const broken=zone.side==='demand'?candle.low<zone.low:candle.high>zone.high;
+  const immediateTouchEntry=mode==='touch-entry'&&state.touchCandleIndex<0&&eligible&&touched;
+  if(broken&&!immediateTouchEntry){state.invalidated=true;return {confirmed:false,immediateTouchEntry:false,invalidated:true,touchCandleIndex:state.touchCandleIndex}}
+  if(state.touchCandleIndex<0&&eligible&&touched)state.touchCandleIndex=candleIndex;
+  const touch=state.touchCandleIndex>=0?candles[state.touchCandleIndex]:undefined;
+  const confirmed=Boolean(touch&&(immediateTouchEntry||(candleIndex>state.touchCandleIndex&&(zone.side==='demand'
+    ?candle.close>candle.open&&candle.close>touch.high
+    :candle.close<candle.open&&candle.close<touch.low))));
+  return {confirmed,immediateTouchEntry,invalidated:false,touchCandleIndex:state.touchCandleIndex};
+};
 
 export interface ZoneTimeframeTouchSummary {
   firstOutsideTime?: number;
+  /** Close time of the first candle that passes shared departure qualification. */
+  armedAt?: number;
   departureInsideCandleCount: number;
   touches: number;
   touchDetails: Array<{ time: number; price: number }>;
   invalidated: boolean;
+  invalidatedAt?: number;
 }
 
 export const summarizeZoneTimeframeTouches = (
@@ -1928,7 +2144,8 @@ export const summarizeZoneTimeframeTouches = (
     invalidated: false,
   };
   let insideVisit = false;
-  for (const candle of candles) {
+  for (let candleIndex = 0; candleIndex < candles.length; candleIndex += 1) {
+    const candle = candles[candleIndex];
     if (
       candle.time <= zone.candleTime ||
       candle.time + candleSeconds > completedBefore
@@ -1938,15 +2155,18 @@ export const summarizeZoneTimeframeTouches = (
       zone.side === "demand" ? candle.low < zone.low : candle.high > zone.high;
     if (broken) {
       summary.invalidated = true;
+      summary.invalidatedAt = candle.time;
       break;
     }
-    const outside =
-      zone.side === "demand"
-        ? candle.close > zone.high
-        : candle.close < zone.low;
+    const outside = qualifyGoldilocksDepartureCandle(
+      zone,
+      candles,
+      candleIndex,
+    ).qualifies;
     if (summary.firstOutsideTime === undefined) {
       if (outside) {
         summary.firstOutsideTime = candle.time;
+        summary.armedAt = candle.time + candleSeconds;
         insideVisit = false;
       } else if (candle.high >= zone.low && candle.low <= zone.high)
         summary.departureInsideCandleCount += 1;
@@ -1966,6 +2186,7 @@ export const summarizeZoneTimeframeTouches = (
     });
     if (summary.touches > 3) {
       summary.invalidated = true;
+      summary.invalidatedAt ??= candle.time;
       break;
     }
   }
@@ -1973,8 +2194,8 @@ export const summarizeZoneTimeframeTouches = (
 };
 
 /**
- * Finds the first completed confirmation-timeframe candle that closes beyond the
- * zone, then counts every later completed confirmation candle intersecting it.
+ * Finds the first completed confirmation-timeframe candle that passes shared
+ * departure qualification, then counts every later completed candle intersecting it.
  * Consecutive touching candles count individually. The trigger candle is
  * excluded by passing its open time as completedBefore.
  */
@@ -1991,7 +2212,8 @@ export const summarizeConfirmationTimeframeTouches = (
     touchDetails: [],
     invalidated: false,
   };
-  for (const candle of candles) {
+  for (let candleIndex = 0; candleIndex < candles.length; candleIndex += 1) {
+    const candle = candles[candleIndex];
     if (
       candle.time <= zone.candleTime ||
       candle.time + candleSeconds > completedBefore
@@ -2001,14 +2223,19 @@ export const summarizeConfirmationTimeframeTouches = (
       zone.side === "demand" ? candle.low < zone.low : candle.high > zone.high;
     if (broken) {
       summary.invalidated = true;
+      summary.invalidatedAt = candle.time;
       break;
     }
-    const outside =
-      zone.side === "demand"
-        ? candle.close > zone.high
-        : candle.close < zone.low;
+    const outside = qualifyGoldilocksDepartureCandle(
+      zone,
+      candles,
+      candleIndex,
+    ).qualifies;
     if (summary.firstOutsideTime === undefined) {
-      if (outside) summary.firstOutsideTime = candle.time;
+      if (outside) {
+        summary.firstOutsideTime = candle.time;
+        summary.armedAt = candle.time + candleSeconds;
+      }
       continue;
     }
     const touched = candle.high >= zone.low && candle.low <= zone.high;
@@ -2018,7 +2245,10 @@ export const summarizeConfirmationTimeframeTouches = (
       time: candle.time,
       price: zone.side === "demand" ? candle.low : candle.high,
     });
-    if (summary.touches > maximumTouches) summary.invalidated = true;
+    if (summary.touches > maximumTouches) {
+      summary.invalidated = true;
+      summary.invalidatedAt ??= candle.time;
+    }
   }
   return summary;
 };
@@ -2034,14 +2264,25 @@ export const observeHistoricalZoneCandle = (
   candleIndex: number,
   state: HistoricalZoneTouchState,
 ): HistoricalZoneTouchState => {
-  const outside =
-    zone.side === "demand" ? candle.low > zone.high : candle.high < zone.low;
+  state.departureCandles.push(candle);
   const touched = candle.high >= zone.low && candle.low <= zone.high;
-  if (outside) {
-    state.armed = true;
-    state.insideVisit = false;
+  if (!state.armed) {
+    const outside = qualifyGoldilocksDepartureCandle(
+      zone,
+      state.departureCandles,
+      state.departureCandles.length - 1,
+    ).qualifies;
+    if (outside) {
+      state.armed = true;
+      state.insideVisit = false;
+    }
+    return state;
   }
-  if (!touched || !state.armed || state.insideVisit) return state;
+  if (!touched) {
+    state.insideVisit = false;
+    return state;
+  }
+  if (state.insideVisit) return state;
   state.insideVisit = true;
   state.touchesBeforeTouch = state.totalTouches;
   state.totalTouches += 1;

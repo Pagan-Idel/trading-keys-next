@@ -515,3 +515,57 @@ export const cancelBacktest = (id: string) => {
   );
   return { id, status: "cancelled" as const };
 };
+
+type InterruptedBacktestRecoveryDependencies = {
+  getActiveBacktestRun: typeof getActiveBacktestRun;
+  getBacktestRuntime: typeof getBacktestRuntime;
+  updateBacktestRun: typeof updateBacktestRun;
+  addBacktestEvent: typeof addBacktestEvent;
+};
+
+const interruptedBacktestRecoveryDependencies: InterruptedBacktestRecoveryDependencies = {
+  getActiveBacktestRun,
+  getBacktestRuntime,
+  updateBacktestRun,
+  addBacktestEvent,
+};
+
+/**
+ * Retires the persisted queued/running backtest owned by a research worker that
+ * has already been confirmed dead. This keeps an interrupted inline research
+ * run from blocking its re-queued trial after a workstation restart.
+ */
+export const recoverInterruptedBacktestForWorker = (
+  interruptedWorkerPid: unknown,
+  dependencies: InterruptedBacktestRecoveryDependencies = interruptedBacktestRecoveryDependencies,
+  recoveredAt = new Date(),
+) => {
+  const workerPid = Number(interruptedWorkerPid);
+  if (!Number.isInteger(workerPid) || workerPid <= 0) return null;
+  const active = dependencies.getActiveBacktestRun();
+  if (!active) return null;
+  const runtime = dependencies.getBacktestRuntime(active.id);
+  if (
+    !runtime ||
+    !["queued", "running"].includes(runtime.status) ||
+    runtime.workerPid !== workerPid
+  )
+    return null;
+  const completedAt = recoveredAt.toISOString();
+  const error =
+    "Recovered after the interrupted research worker ended before this backtest completed.";
+  dependencies.updateBacktestRun(active.id, {
+    status: "failed",
+    completedAt,
+    progressStage: "interrupted",
+    heartbeatAt: completedAt,
+    workerPid: null,
+    error,
+  });
+  dependencies.addBacktestEvent(
+    active.id,
+    "run_interrupted_recovered",
+    "BACKTEST RECOVERED · interrupted research worker was gone; the queued trial may run again.",
+  );
+  return { id: active.id, status: "failed" as const, interruptedWorkerPid: workerPid };
+};

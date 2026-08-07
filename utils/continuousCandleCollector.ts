@@ -23,7 +23,10 @@ const inFlight=new Map<string,Promise<CandleSyncResult>>();
 const identity=(key:CandleCollectorKey)=>`${key.mode}:${key.pair}:${key.timeframe}`;
 const defaultDependencies:CandleCollectorDependencies={
   bounds:getArchivedCandleBounds,
-  bootstrap:(key,lookbackDays,maxCandles,signal)=>fetchCandleHistory(key.pair,key.timeframe,{lookbackDays,mode:key.mode,maxCandles,backfillPages:1,signal}),
+  bootstrap:(key,lookbackDays,maxCandles,signal)=>fetchCandleHistory(key.pair,key.timeframe,{
+    lookbackDays,mode:key.mode,maxCandles,
+    backfillPages:Math.max(1,Math.ceil(maxCandles/1_000)),signal,
+  }),
   incremental:(key,lastTime,count,signal)=>fetchCompletedCandlesSince(key.pair,key.timeframe,lastTime,key.mode,count,signal,false),
   repair:async(key,from,to,signal)=>({candles:await fetchCandles(key.pair,key.timeframe,5_000,from,to,key.mode,signal,false),coverageConfirmed:true}),
   append:upsertArchivedCandles,

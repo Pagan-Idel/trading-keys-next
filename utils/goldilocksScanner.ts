@@ -1,12 +1,17 @@
 import type { Candle } from './swingLabeler.ts';
+import { measureGoldilocksApproachPressure, type GoldilocksApproachPressure } from './approachPressure.ts';
 import { GOLDILOCKS_DEMO_TIMEFRAMES } from './goldilocksConfig.ts';
 import { getGoldilocksZoneExpiresAt } from './zoneAge.ts';
 import { determineSwingPoints, type SwingResult } from './swingLabeler.ts';
 import {
   annotateTimeframeConfluence,
+  createGoldilocksSignalState,
   detectGoldilocksZoneHistory,
   summarizeZoneTimeframeTouches,
   summarizeConfirmationTimeframeTouches,
+  observeGoldilocksSignalCandle,
+  observeGoldilocksStreamTouch,
+  qualifyGoldilocksDepartureCandle,
   validateGoldilocksEntryProximity,
   type GoldilocksEntryProximityCheck,
   type GoldilocksDirection,
@@ -204,7 +209,7 @@ export const buildGoldilocksHistoryChunked = (
   }
   for (let candleIndex = 0; candleIndex < strategyCandles.length; candleIndex += 1) {
     const candle = strategyCandles[candleIndex];
-    while (pendingIndex < pending.length && (pending[pendingIndex].availableAt ?? pending[pendingIndex].candleTime) < candle.time) {
+    while (pendingIndex < pending.length && (pending[pendingIndex].availableAt ?? pending[pendingIndex].candleTime) <= candle.time) {
       active.add(pending[pendingIndex]);
       countingStarted.set(pending[pendingIndex], false);
       pendingIndex += 1;
@@ -223,13 +228,18 @@ export const buildGoldilocksHistoryChunked = (
         active.delete(zone);
         continue;
       }
-      const outside = zone.side === 'demand' ? candle.low > zone.high : candle.high < zone.low;
-      if (outside) {
-        countingStarted.set(zone, true);
+      const started=countingStarted.get(zone)===true;
+      if (!started) {
+        const outside = qualifyGoldilocksDepartureCandle(
+          zone,
+          strategyCandles,
+          candleIndex,
+        ).qualifies;
+        if(outside)countingStarted.set(zone, true);
         continue;
       }
       const touched = candle.high >= zone.low && candle.low <= zone.high;
-      if ((options.trackTouches??true) && touched && countingStarted.get(zone)) {
+      if ((options.trackTouches??true) && touched) {
         zone.state = 'touched';
         zone.touches += 1;
         zone.firstTouchIndex ??= candleIndex;
@@ -246,6 +256,187 @@ export const buildGoldilocksHistoryChunked = (
   return { zones, activeZones, activeDemand: newest('demand'), activeSupply: newest('supply') };
 };
 
+/**
+ * Applies the confirmation-timeframe purity ledger to detected zones.
+ *
+ * Zone detection deliberately runs with `trackTouches:false` for both live and
+ * backtest scans. This pass supplies the executable lifecycle from the same
+ * lower-timeframe candle contract used by confirmation and research.
+ */
+export const summarizeGoldilocksCausalZoneLifecycle = (input: {
+  zone: GoldilocksZone;
+  confirmationCandles: StrategyCandle[];
+  confirmationSeconds: number;
+  zoneCandles: StrategyCandle[];
+  zoneSeconds: number;
+  completedBefore?: number;
+  maximumTouches?: number;
+}) => {
+  const completedBefore=input.completedBefore??Number.POSITIVE_INFINITY;
+  const maximumTouches=input.maximumTouches??3;
+  const candles=[...input.confirmationCandles].sort((left,right)=>left.time-right.time);
+  const departure=summarizeZoneTimeframeTouches(
+    input.zone,input.zoneCandles,input.zoneSeconds,completedBefore,
+  );
+  const signalStart=departure.armedAt===undefined?Number.POSITIVE_INFINITY:
+    Math.max(departure.armedAt,input.zone.availableAt??input.zone.candleTime);
+  let triggerIndex=-1;
+  let postTriggerBreakAt:number|undefined;
+  for(let index=0;index<candles.length;index+=1){
+    const candle=candles[index];
+    if(candle.time+input.confirmationSeconds>completedBefore)continue;
+    const broken=input.zone.side==='demand'?candle.low<input.zone.low:candle.high>input.zone.high;
+    if(triggerIndex>=0){if(broken){postTriggerBreakAt=candle.time;break}continue}
+    if(broken)break;
+    if(candle.time>=signalStart&&candle.high>=input.zone.low&&candle.low<=input.zone.high){
+      triggerIndex=index;
+    }
+  }
+  const triggerTime=triggerIndex>=0?candles[triggerIndex].time:undefined;
+  const purity=summarizeConfirmationTimeframeTouches(
+    input.zone,candles,input.confirmationSeconds,triggerTime??completedBefore,maximumTouches,
+  );
+  // A fourth prior touch or distal break before the candidate means that candle
+  // can never become the trigger. The trigger itself is deliberately excluded.
+  const validTriggerIndex=purity.invalidated?-1:triggerIndex;
+  const invalidatedAt=[input.zone.invalidatedAt,departure.invalidatedAt,purity.invalidatedAt,postTriggerBreakAt]
+    .filter((time):time is number=>typeof time==='number'&&Number.isFinite(time)&&time<completedBefore)
+    .sort((left,right)=>left-right)[0];
+  return {departure,purity,triggerIndex:validTriggerIndex,triggerCandle:validTriggerIndex>=0?candles[validTriggerIndex]:undefined,invalidatedAt};
+};
+
+export const applyConfirmationTimeframeZoneLifecycle = (
+  history: GoldilocksZoneHistory,
+  confirmationCandles: StrategyCandle[],
+  confirmationSeconds: number,
+  zoneCandles: StrategyCandle[],
+  zoneSeconds: number,
+  completedBefore = Number.POSITIVE_INFINITY,
+  maximumTouches = 3,
+): GoldilocksZoneHistory => {
+  const zones = history.zones.map((zone) => {
+    if (zone.kind !== 'base') return zone;
+    const lifecycle=summarizeGoldilocksCausalZoneLifecycle({
+      zone,confirmationCandles,confirmationSeconds,zoneCandles,zoneSeconds,completedBefore,maximumTouches,
+    });
+    if (lifecycle.departure.firstOutsideTime === undefined) return {
+      ...zone,
+      touches: 0,
+      state: lifecycle.invalidatedAt!==undefined?'invalidated' as const:'fresh' as const,
+      invalidatedAt:lifecycle.invalidatedAt,
+    };
+    const invalidated=lifecycle.invalidatedAt!==undefined;
+    return {
+      ...zone,
+      touches: lifecycle.purity.touches,
+      state: invalidated ? 'invalidated' as const : lifecycle.purity.touches > 0 ? 'touched' as const : 'fresh' as const,
+      invalidatedAt:lifecycle.invalidatedAt,
+    };
+  });
+  const activeZones = zones.filter((zone) => zone.state !== 'invalidated' && zone.state !== 'expired');
+  const newest = (side: GoldilocksZone['side']) => activeZones
+    .filter((zone) => zone.side === side)
+    .sort((left, right) => right.candleTime - left.candleTime)[0];
+  return { zones, activeZones, activeDemand: newest('demand'), activeSupply: newest('supply') };
+};
+
+export interface GoldilocksZoneChartEvidence {
+  zoneId: string;
+  zoneSide: GoldilocksZone['side'];
+  zoneTimeframe: string;
+  confirmationTimeframe: string;
+  formationCandleDetails: Array<{ time: number; price: number }>;
+  departureCandleTime?: number;
+  priorTouchDetails: Array<{ time: number; price: number }>;
+  touchCount: number;
+  triggerTouchTime?: number;
+  invalidatedAt?: number;
+  invalidationReason?: 'DISTAL BREAK' | 'FOURTH TOUCH';
+  approachPressure?: GoldilocksApproachPressure;
+}
+
+/**
+ * Builds chart diagnostics from the same completed-candle lifecycle used by
+ * execution. It is intentionally independent of whether a trade setup fired.
+ */
+export const buildGoldilocksZoneChartEvidence = (input: {
+  history: GoldilocksZoneHistory;
+  zoneCandles: StrategyCandle[];
+  zoneSeconds: number;
+  zoneTimeframe: string;
+  confirmationCandles: StrategyCandle[];
+  confirmationSeconds: number;
+  confirmationTimeframe: string;
+  completedBefore?: number;
+  maximumTouches?: number;
+}): GoldilocksZoneChartEvidence[] => {
+  const completedBefore = input.completedBefore ?? Number.POSITIVE_INFINITY;
+  const maximumTouches = input.maximumTouches ?? 3;
+  const confirmationCandles = [...input.confirmationCandles].sort((a,b)=>a.time-b.time);
+  const retainedZoneCandleTimes = new Set(input.zoneCandles.map((candle) => candle.time));
+  return input.history.zones
+    // A clipped chart tail cannot causally reconstruct an older base. Fail closed
+    // instead of relabeling the first retained candle as formation/departure evidence.
+    .filter((zone) => zone.kind === 'base' && retainedZoneCandleTimes.has(zone.candleTime))
+    .map((zone) => {
+      const lifecycle=summarizeGoldilocksCausalZoneLifecycle({
+        zone,confirmationCandles,confirmationSeconds:input.confirmationSeconds,
+        zoneCandles:input.zoneCandles,zoneSeconds:input.zoneSeconds,completedBefore,maximumTouches,
+      });
+      const {departure,purity}=lifecycle;
+      const departureOpen = departure.firstOutsideTime;
+      const formationCandleDetails = input.zoneCandles
+        .filter((candle) => candle.time >= zone.candleTime &&
+          (departureOpen === undefined || candle.time < departureOpen) &&
+          candle.time + input.zoneSeconds <= completedBefore)
+        .map((candle) => ({
+          time:candle.time,
+          price:zone.side==='demand'?candle.low:candle.high,
+        }));
+      const triggerIndex=lifecycle.triggerIndex;
+      let latestCompletedIndex=-1;
+      for(let index=0;index<confirmationCandles.length;index+=1){
+        if(confirmationCandles[index].time+input.confirmationSeconds<=completedBefore)
+          latestCompletedIndex=index;
+      }
+      const approachPressure = triggerIndex >= 0 && latestCompletedIndex > triggerIndex
+        ? measureGoldilocksApproachPressure(
+            zone,confirmationCandles,triggerIndex,latestCompletedIndex,
+            {firstOutsideTime:purity.firstOutsideTime},
+          )
+        : undefined;
+      const invalidatedAt=lifecycle.invalidatedAt;
+      return {
+        zoneId:zone.id,
+        zoneSide:zone.side,
+        zoneTimeframe:input.zoneTimeframe,
+        confirmationTimeframe:input.confirmationTimeframe,
+        formationCandleDetails,
+        departureCandleTime:departure.firstOutsideTime,
+        priorTouchDetails:purity.touchDetails,
+        touchCount:purity.touches,
+        triggerTouchTime:triggerIndex>=0?confirmationCandles[triggerIndex].time:undefined,
+        invalidatedAt,
+        invalidationReason:invalidatedAt===undefined?undefined:
+          purity.touches>maximumTouches&&purity.invalidatedAt===invalidatedAt?'FOURTH TOUCH':'DISTAL BREAK',
+        approachPressure,
+      };
+    });
+};
+
+export const getGoldilocksConfirmationHistoryStart = (
+  history: GoldilocksZoneHistory,
+  defaultStart: number,
+  confirmationSeconds: number,
+) => {
+  const earliestBaseTime = history.activeZones
+    .filter((zone) => zone.kind === 'base')
+    .reduce((earliest, zone) => Math.min(earliest, zone.candleTime), Number.POSITIVE_INFINITY);
+  return Number.isFinite(earliestBaseTime)
+    ? Math.min(defaultStart, Math.max(0, earliestBaseTime - confirmationSeconds))
+    : defaultStart;
+};
+
 export interface FreshGoldilocksConfirmation {
   zone: GoldilocksZone;
   direction: GoldilocksDirection;
@@ -254,10 +445,9 @@ export interface FreshGoldilocksConfirmation {
   confirmationCandle: StrategyCandle;
   priorTouches: number;
   proximity: GoldilocksEntryProximityCheck;
+  entryEligibilityTime?: number;
+  streamQuote?: {bid:number;ask:number;time:number;receivedAt:number};
 }
-
-const breaks = (zone: GoldilocksZone, candle: StrategyCandle) =>
-  zone.side === 'demand' ? candle.low < zone.low : candle.high > zone.high;
 
 export const findFreshGoldilocksConfirmations = (
   history: GoldilocksZoneHistory,
@@ -277,34 +467,88 @@ export const findFreshGoldilocksConfirmations = (
   return history.activeZones.filter((zone)=>zone.kind==="base").flatMap((zone) => {
     if ((zone.availableAt ?? zone.candleTime) >= confirmationCandle.time) return [];
     const armed=summarizeZoneTimeframeTouches(zone,zoneCandles,zoneSeconds,confirmationCandle.time);
-    if(armed.firstOutsideTime===undefined)return [];
+    if(armed.firstOutsideTime===undefined||armed.armedAt===undefined)return [];
     // A zone cannot be touched, broken, or otherwise evaluated before the
     // structure that created it is causally available to the strategy.
-    const signalStartTime=Math.max(armed.firstOutsideTime,zone.availableAt??zone.candleTime);
-    let touchCandle:StrategyCandle|undefined;
-    let touchIndex=-1;
+    const signalStartTime=Math.max(armed.armedAt,zone.availableAt??zone.candleTime);
+    const signalState=createGoldilocksSignalState();
+    let latestObservation:ReturnType<typeof observeGoldilocksSignalCandle>|undefined;
     for (let index=0;index<candles.length;index+=1) {
       const candle=candles[index];
-      if (candle.time < signalStartTime || candle.time > confirmationCandle.time ||
-        (confirmationMode==='close-through'&&candle.time===confirmationCandle.time)) continue;
-      if (breaks(zone, candle)) {touchCandle=undefined;break}
-      if(!touchCandle&&candle.high>=zone.low&&candle.low<=zone.high){touchCandle=candle;touchIndex=index}
+      if (candle.time < signalStartTime || candle.time > confirmationCandle.time) continue;
+      const observation=observeGoldilocksSignalCandle({
+        zone,candles,candleIndex:index,armedAt:armed.armedAt,state:signalState,confirmationMode,
+      });
+      if(observation.invalidated){latestObservation=undefined;break}
+      if(index===candles.length-1)latestObservation=observation;
     }
-    if (!touchCandle || (confirmationMode==='close-through'&&breaks(zone, confirmationCandle))) return [];
-    const causalCandles=candles.filter(candle=>candle.time>=signalStartTime);
-    const purity=summarizeConfirmationTimeframeTouches(zone,causalCandles,confirmationSeconds,touchCandle.time);
+    const touchIndex=signalState.touchCandleIndex;
+    const touchCandle=touchIndex>=0?candles[touchIndex]:undefined;
+    if (!touchCandle||!latestObservation?.confirmed) return [];
+    // Purity mirrors the historical backtester: count from the confirmation-
+    // timeframe departure after the base, including returns that occurred before
+    // structural availability. Availability gates the trigger, not prior history.
+    const purity=summarizeConfirmationTimeframeTouches(zone,candles,confirmationSeconds,touchCandle.time);
     if(purity.invalidated)return [];
     const direction: GoldilocksDirection = zone.side === 'demand' ? 'bullish' : 'bearish';
-    const confirmed = confirmationMode==='touch-entry'&&touchCandle.time===confirmationCandle.time?true:direction === 'bullish'
-      ? confirmationCandle.close > confirmationCandle.open && confirmationCandle.close > touchCandle.high
-      : confirmationCandle.close < confirmationCandle.open && confirmationCandle.close < touchCandle.low;
     const proximity=validateGoldilocksEntryProximity(zone,touchCandle,
       confirmationMode==='touch-entry'?(zone.side==='demand'?zone.high:zone.low):confirmationCandle.close);
-    return confirmed ? [{
+    return [{
       zone:{...zone,touches:purity.touches,maxPenetration:0},
       direction,firstOutsideTime:purity.firstOutsideTime!,touchCandle,confirmationCandle,
       priorTouches:purity.touches,
       proximity,
-    }] : [];
+    }];
   }).sort((a, b) => b.zone.candleTime - a.zone.candleTime);
+};
+
+export const findFreshGoldilocksStreamTouches = (
+  history: GoldilocksZoneHistory,
+  confirmationCandles: StrategyCandle[],
+  confirmationSeconds: number,
+  quote: {bid:number;ask:number;time:number;receivedAt:number},
+  zoneCandles: StrategyCandle[] = confirmationCandles,
+  zoneSeconds = confirmationSeconds,
+): FreshGoldilocksConfirmation[] => {
+  const completedCandles=[...confirmationCandles]
+    .filter(candle=>candle.time+confirmationSeconds<=quote.time)
+    .sort((left,right)=>left.time-right.time);
+  return history.activeZones.filter(zone=>zone.kind==='base').flatMap(zone=>{
+    if((zone.availableAt??zone.candleTime)>quote.time)return [];
+    const armed=summarizeZoneTimeframeTouches(zone,zoneCandles,zoneSeconds,quote.time);
+    if(armed.firstOutsideTime===undefined||armed.armedAt===undefined)return [];
+    const signalStartTime=Math.max(armed.armedAt,zone.availableAt??zone.candleTime);
+    const historicalState=createGoldilocksSignalState();
+    for(let index=0;index<completedCandles.length;index+=1){
+      if(completedCandles[index].time<signalStartTime)continue;
+      const observation=observeGoldilocksSignalCandle({
+        zone,candles:completedCandles,candleIndex:index,armedAt:armed.armedAt,
+        state:historicalState,confirmationMode:'touch-entry',
+      });
+      // A completed historical first touch is stale and terminal for immediate
+      // execution. Live automation must never chase it on a later quote.
+      if(observation.invalidated||observation.confirmed)return [];
+    }
+    const streamObservation=observeGoldilocksStreamTouch(zone,quote);
+    if(!streamObservation.touched||streamObservation.broken)return [];
+    const purity=summarizeConfirmationTimeframeTouches(
+      zone,completedCandles,confirmationSeconds,quote.time,
+    );
+    if(purity.invalidated)return [];
+    const midpoint=(quote.bid+quote.ask)/2;
+    const touchCandle:StrategyCandle={
+      time:quote.time,open:midpoint,high:quote.ask,low:quote.bid,close:midpoint,
+    };
+    const direction:GoldilocksDirection=zone.side==='demand'?'bullish':'bearish';
+    return [{
+      zone:{...zone,touches:purity.touches,maxPenetration:0},direction,
+      firstOutsideTime:purity.firstOutsideTime!,touchCandle,
+      confirmationCandle:touchCandle,priorTouches:purity.touches,
+      proximity:validateGoldilocksEntryProximity(
+        zone,touchCandle,streamObservation.executableEntry,
+        streamObservation.executableEntry,
+      ),
+      entryEligibilityTime:quote.time,streamQuote:quote,
+    }];
+  }).sort((left,right)=>right.zone.candleTime-left.zone.candleTime);
 };

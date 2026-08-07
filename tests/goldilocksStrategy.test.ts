@@ -31,7 +31,9 @@ import {
   annotateTimeframeConfluence,
   countZoneTouchesBefore,
   createHistoricalZoneTouchState,
+  observeGoldilocksStreamTouch,
   observeHistoricalZoneCandle,
+  qualifyGoldilocksDepartureCandle,
   summarizeConfirmationTimeframeTouches,
   summarizeZoneTimeframeTouches,
   measureGoldilocksIntrabarDepartureSpeed,
@@ -42,13 +44,18 @@ import {
   validateGoldilocksZoneApproach,
   type StrategyCandle,
 } from "../utils/goldilocksStrategy";
+
 import {
   applySpreadBuffer,
   calculateExactRiskRewardLevels,
   evaluateSpread,
 } from "../utils/spreadGuard";
 import {
+  applyConfirmationTimeframeZoneLifecycle,
+  buildGoldilocksZoneChartEvidence,
   findFreshGoldilocksConfirmations,
+  findFreshGoldilocksStreamTouches,
+  getGoldilocksConfirmationHistoryStart,
   getGoldilocksStructureBreakingLegDirection,
   getProtectedStructureTrend,
   zoneUsableAt,
@@ -155,8 +162,27 @@ import { measureZoneCorridor } from "../utils/zoneCorridor";
 import { mergeCandleCoverageRanges } from "../utils/candleArchive";
 import { buildAutoResearchConfigurations, getAutoResearchDatasetEndTime } from "../utils/autoResearchRunner";
 import { normalizeBacktestConfig } from "../utils/backtestRunner";
+import type { BacktestRunConfig } from "../utils/backtestStore";
 import { researchConfigHash } from "../utils/autoResearchStore";
 import { buildGoldilocksResearchManifest } from "../utils/goldilocksResearchManifest";
+
+const withDepartureAtrWarmup = (
+  candles: StrategyCandle[],
+  candleSeconds = 1,
+  center = 100,
+  atrRange = 1,
+): StrategyCandle[] => {
+  const firstTime = candles[0]?.time ?? 0;
+  const warmupEnd = Math.min(firstTime - candleSeconds, 0);
+  const warmup = Array.from({ length: 14 }, (_, index) => ({
+    time: warmupEnd - (13 - index) * candleSeconds,
+    open: center,
+    high: center + atrRange / 2,
+    low: center - atrRange / 2,
+    close: center,
+  }));
+  return [...warmup, ...candles];
+};
 
 test("creates swing legs only when the destination breaks structure", () => {
   assert.equal(
@@ -527,13 +553,13 @@ test("measures backtest edge from realized R instead of protected-win labels", (
 });
 
 test("labels a new run with only its strategy version and run date", () => {
-  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.49");
+  assert.equal(GOLDILOCKS_STRATEGY_VERSION, "0.51");
   assert.equal(
     getGoldilocksBacktestRunLabel(
       "lowerTimeframe",
       new Date("2026-07-20T12:00:00Z"),
     ),
-    "m15-m5-m1-research-v3 · 2026-07-20",
+    "m15-m5-m1-research-v4 · 2026-07-20",
   );
   assert.equal(
     getGoldilocksBacktestRunLabel("intraday", new Date("2026-07-20T12:00:00Z")),
@@ -544,37 +570,37 @@ test("labels a new run with only its strategy version and run date", () => {
       "higherTimeframe",
       new Date("2026-07-20T12:00:00Z"),
     ),
-    "d1-h4-h1-research-v3 · 2026-07-20",
+    "d1-h4-h1-research-v4 · 2026-07-20",
   );
 });
 
 test("shows research profiles with the current score-component maximums", () => {
   assert.equal(
-    goldilocksScoreContractVersionNumber("m15-m5-m1-research-v3"),
-    49,
+    goldilocksScoreContractVersionNumber("m15-m5-m1-research-v4"),
+    51,
   );
   assert.equal(
     goldilocksScoreComponentMaximum(
       "M1 approach warnings",
-      "m15-m5-m1-research-v3",
+      "m15-m5-m1-research-v4",
     ),
     5,
   );
   assert.equal(
     goldilocksScoreComponentMaximum(
       "M5 departure quality",
-      "m15-m5-m1-research-v3",
+      "m15-m5-m1-research-v4",
     ),
     4,
   );
   assert.equal(
-    goldilocksScoreComponentMaximum("M15 trend", "m15-m5-m1-research-v3"),
+    goldilocksScoreComponentMaximum("M15 trend", "m15-m5-m1-research-v4"),
     3,
   );
   assert.equal(
     goldilocksScoreComponentMaximum(
       "Zone inside zone",
-      "m15-m5-m1-research-v3",
+      "m15-m5-m1-research-v4",
     ),
     4,
   );
@@ -594,7 +620,7 @@ test("keeps the live intraday contract locked while exposing lower- and higher-t
     { trend: "M15", zone: "M5", confirmation: "M1", execution: "M1" },
   );
   assert.deepEqual(lower.confluence, ["M1", "M5", "M15"]);
-  assert.equal(lower.strategyVersion, "m15-m5-m1-research-v3");
+  assert.equal(lower.strategyVersion, "m15-m5-m1-research-v4");
   assert.deepEqual(
     {
       trend: intraday.trend,
@@ -619,7 +645,7 @@ test("keeps the live intraday contract locked while exposing lower- and higher-t
     { trend: "D", zone: "H4", confirmation: "H1", execution: "M5" },
   );
   assert.deepEqual(higher.confluence, ["H1", "H4", "D"]);
-  assert.equal(higher.strategyVersion, "d1-h4-h1-research-v3");
+  assert.equal(higher.strategyVersion, "d1-h4-h1-research-v4");
 });
 
 test("normalizes the two explicit confirmation modes and defaults safely", () => {
@@ -647,7 +673,7 @@ test("defaults new manual backtests to set-and-forget at the opposing base", () 
     GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID,
   );
   assert.equal(config.setAndForgetTargetMode, "opposing-base");
-  assert.match(config.label, /^0\.49 .* \d{4}-\d{2}-\d{2}$/);
+  assert.match(config.label, /^0\.51 .* \d{4}-\d{2}-\d{2}$/);
 });
 
 test("normalizes a complete backtest-only numeric tweak snapshot", () => {
@@ -809,6 +835,9 @@ test("builds a deterministic overnight matrix without varying account risk", () 
     }),
   );
   assert.ok(configurations.every((config) => config.lookbackDays === 365));
+  assert.ok(configurations.every((config)=>config.closeTradesBeforeWeekend===true));
+  assert.ok(configurations.every((config)=>config.reverseFinalSignal===false));
+  assert.ok(configurations.every((config)=>config.strategyVersion==='m15-m5-m1-research-v4'));
   assert.equal(
     researchConfigHash(configurations[0]),
     researchConfigHash({ ...configurations[0] }),
@@ -827,7 +856,7 @@ test("research ranking trades up to 3R for more than five percent lower drawdown
 test("manual backtests inherit the research leader without sealed-dataset fields",()=>{
   const defaults=manualBacktestDefaultsFromLeader({
     pairs:['EUR/USD'],lookbackDays:365,minimumScore:12,label:'Leader +1 score',
-    timeframeProfile:'lowerTimeframe',strategyVersion:'m15-m5-m1-research-v3',
+    timeframeProfile:'lowerTimeframe',strategyVersion:'m15-m5-m1-research-v4',
     riskProfile:'easy',tradeManager:'set-and-forget-2r-v1',confirmationMode:'touch-entry',
     setAndForgetTargetMode:'opposing-base',setAndForgetTargetR:2,archiveOnly:true,
     datasetEndTime:123,datasetKey:'sealed',researchManifest:{} as never,
@@ -2435,11 +2464,11 @@ test("accepts only the latest completed confirmation candle after a zone departu
     reasons: [],
   };
   const history = { zones: [zone], activeZones: [zone], activeDemand: zone };
-  const confirmationCandles: StrategyCandle[] = [
-    { time: 100, open: 102, high: 103, low: 101, close: 102.5 },
+  const confirmationCandles: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 100, open: 101, high: 103, low: 101, close: 102.5 },
     { time: 200, open: 101, high: 101.5, low: 99.8, close: 100.5 },
     { time: 300, open: 100.8, high: 103.2, low: 100.4, close: 102.2 },
-  ];
+  ], 100, 100, 0.1);
   const fresh = findFreshGoldilocksConfirmations(
     history,
     confirmationCandles,
@@ -2489,25 +2518,26 @@ test("accepts only the latest completed confirmation candle after a zone departu
   );
 });
 
-test("ignores confirmation candles from before a base is causally available", () => {
+test("counts pre-availability returns for purity but never uses them as the trade trigger", () => {
   const zone = {
     id: "causal-base-demand", kind: "base" as const, side: "demand" as const,
     candleIndex: 0, candleTime: 0, availableAt: 1_000, low: 99, high: 100,
     width: 1, legMidpoint: 105, legRange: 12, departureMultiple: 3,
     strength2x: true, touches: 0, maxPenetration: 0, state: "fresh" as const, reasons: [],
   };
-  const confirmationCandles: StrategyCandle[] = [
-    { time: 100, open: 102, high: 103, low: 101, close: 102 },
-    { time: 200, open: 100, high: 101, low: 98, close: 99 },
+  const confirmationCandles: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 100, open: 101, high: 102.6, low: 100.9, close: 102.5 },
+    { time: 200, open: 100.2, high: 100.5, low: 99.5, close: 100.2 },
     { time: 1_100, open: 102, high: 103, low: 101, close: 102 },
     { time: 1_200, open: 100.5, high: 101, low: 99.8, close: 100.2 },
-  ];
+  ], 100, 100, 0.1);
   const found = findFreshGoldilocksConfirmations(
     { zones: [zone], activeZones: [zone], activeDemand: zone }, confirmationCandles,
     100, 1_300_000, confirmationCandles, 100, "touch-entry",
   );
   assert.equal(found.length, 1);
   assert.equal(found[0].touchCandle.time, 1_200);
+  assert.equal(found[0].priorTouches, 1);
 });
 
 test("does not let one M5 candle act as both the zone touch and its later confirmation", () => {
@@ -2531,10 +2561,10 @@ test("does not let one M5 candle act as both the zone touch and its later confir
     reasons: [],
   };
   const history = { zones: [zone], activeZones: [zone], activeSupply: zone };
-  const touchOnly: StrategyCandle[] = [
-    { time: 300, open: 1.344, high: 1.3444, low: 1.3438, close: 1.3441 },
+  const touchOnly: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 300, open: 1.3443, high: 1.3444, low: 1.3438, close: 1.344 },
     { time: 600, open: 1.3442, high: 1.34498, low: 1.34412, close: 1.34412 },
-  ];
+  ], 300, 1.344, 0.0001);
   assert.equal(
     findFreshGoldilocksConfirmations(
       history,
@@ -2585,12 +2615,12 @@ test("keeps the first M5 zone overlap as the trigger while later touching candle
     reasons: [],
   };
   const history = { zones: [zone], activeZones: [zone], activeSupply: zone };
-  const m5: StrategyCandle[] = [
-    { time: 300, open: 98.5, high: 99, low: 98.2, close: 98.8 },
+  const m5: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 300, open: 99, high: 99.1, low: 98.2, close: 98.5 },
     { time: 600, open: 99.8, high: 100.1, low: 99.8, close: 100 },
     { time: 900, open: 100, high: 100.4, low: 99.95, close: 100.2 },
     { time: 1200, open: 100, high: 100.1, low: 99.6, close: 99.7 },
-  ];
+  ], 300, 100, 0.1);
   const result = findFreshGoldilocksConfirmations(
     history,
     m5,
@@ -2627,21 +2657,21 @@ test("scores purity from completed M5 reentries and ignores M15-only prior visit
     reasons: [],
   };
   const history = { zones: [zone], activeZones: [zone], activeSupply: zone };
-  const m15: StrategyCandle[] = [
-    { time: 900, open: 98.5, high: 99, low: 98.2, close: 98.8 },
+  const m15: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 900, open: 99, high: 99.1, low: 98.2, close: 98.5 },
     { time: 1800, open: 99.8, high: 100.2, low: 99.7, close: 99.9 },
     { time: 2700, open: 98.8, high: 99, low: 98.6, close: 98.9 },
     { time: 3600, open: 99.8, high: 100.3, low: 99.7, close: 100.1 },
     { time: 4500, open: 99.9, high: 100.2, low: 99.7, close: 100 },
     { time: 5400, open: 99.8, high: 100.4, low: 99.7, close: 100.2 },
-  ];
-  const m5: StrategyCandle[] = [
-    { time: 3300, open: 98.8, high: 99, low: 98.6, close: 98.9 },
+  ], 900, 100, 0.1);
+  const m5: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 3300, open: 99.1, high: 99.2, low: 98.6, close: 98.7 },
     { time: 3600, open: 99.8, high: 100.1, low: 99.8, close: 100 },
     { time: 4500, open: 99.9, high: 100.2, low: 99.9, close: 100.1 },
     { time: 5400, open: 99.9, high: 100.3, low: 99.9, close: 100.2 },
     { time: 6600, open: 100, high: 100.1, low: 99.6, close: 99.7 },
-  ];
+  ], 300, 100, 0.1);
   const result = findFreshGoldilocksConfirmations(
     history,
     m5,
@@ -2676,17 +2706,17 @@ test("arms purity on the first outside M5 candle and excludes the M5 trade trigg
     reasons: [],
   };
   const history = { zones: [zone], activeZones: [zone], activeSupply: zone };
-  const m15: StrategyCandle[] = [
-    { time: 900, open: 98.5, high: 99, low: 98, close: 98.8 },
+  const m15: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 900, open: 99, high: 99.1, low: 98.2, close: 98.5 },
     { time: 1800, open: 99.5, high: 100.2, low: 99.2, close: 99.8 },
     { time: 2700, open: 98.7, high: 99, low: 98.4, close: 98.6 },
     { time: 3600, open: 99.8, high: 100.3, low: 99.7, close: 100.1 },
-  ];
-  const m5: StrategyCandle[] = [
-    { time: 3300, open: 98.8, high: 99, low: 98.6, close: 98.9 },
+  ], 900, 100, 0.1);
+  const m5: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 3300, open: 99.1, high: 99.2, low: 98.6, close: 98.7 },
     { time: 3600, open: 99.8, high: 100.1, low: 99.7, close: 99.9 },
     { time: 3900, open: 99.9, high: 100, low: 99.4, close: 99.5 },
-  ];
+  ], 300, 100, 0.1);
   const result = findFreshGoldilocksConfirmations(
     history,
     m5,
@@ -2707,7 +2737,7 @@ test("arms purity on the first outside M5 candle and excludes the M5 trade trigg
   assert.equal(purity.touchDetails[0].price, 100.2);
 });
 
-test("counts completed M15 candles that linger before the first close away from the zone", () => {
+test("arms on a completed close away even when that candle's wick overlaps the zone", () => {
   const zone = {
     id: "lingering-departure",
     kind: "base" as const,
@@ -2726,11 +2756,11 @@ test("counts completed M15 candles that linger before the first close away from 
     state: "fresh" as const,
     reasons: [],
   };
-  const m15: StrategyCandle[] = [
+  const m15: StrategyCandle[] = withDepartureAtrWarmup([
     { time: 900, open: 100.4, high: 100.8, low: 99.8, close: 100.1 },
-    { time: 1800, open: 99.8, high: 99.9, low: 99.2, close: 99.4 },
+    { time: 1800, open: 99.9, high: 100.2, low: 99.2, close: 99.4 },
     { time: 2700, open: 99.5, high: 100.2, low: 99.4, close: 100 },
-  ];
+  ], 900, 100, 0.1);
   const summary = summarizeZoneTimeframeTouches(zone, m15, 900, 2700);
   assert.equal(summary.departureInsideCandleCount, 1);
   assert.equal(summary.firstOutsideTime, 1800);
@@ -2756,13 +2786,13 @@ test("can measure prior-touch visits on the selected confirmation timeframe", ()
     state: "fresh" as const,
     reasons: [],
   };
-  const confirmationCandles: StrategyCandle[] = [
+  const confirmationCandles: StrategyCandle[] = withDepartureAtrWarmup([
     { time: 300, open: 101.4, high: 102, low: 101.2, close: 101.8 },
     { time: 600, open: 101.2, high: 101.4, low: 100.8, close: 101.1 },
     { time: 900, open: 100.9, high: 101.2, low: 100.7, close: 101 },
     { time: 1200, open: 101.3, high: 101.8, low: 101.2, close: 101.6 },
     { time: 1500, open: 101.1, high: 101.3, low: 100.6, close: 100.9 },
-  ];
+  ], 300, 100, 0.1);
   const purity = summarizeConfirmationTimeframeTouches(
     zone,
     confirmationCandles,
@@ -2774,6 +2804,217 @@ test("can measure prior-touch visits on the selected confirmation timeframe", ()
     purity.touchDetails.map((touch) => touch.time),
     [600, 900, 1500],
   );
+});
+
+test("live lifecycle mirrors backtest purity before causal availability", () => {
+  const zone = {
+    id: "pre-availability-supply",
+    kind: "base" as const,
+    side: "supply" as const,
+    candleIndex: 0,
+    candleTime: 0,
+    availableAt: 1500,
+    low: 100,
+    high: 101,
+    width: 1,
+    legMidpoint: 95,
+    legRange: 10,
+    departureMultiple: 4,
+    strength2x: true,
+    touches: 0,
+    maxPenetration: 0,
+    state: "fresh" as const,
+    reasons: [],
+  };
+  const zoneCandles: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 300, open: 99.8, high: 99.9, low: 99.2, close: 99.4 },
+    { time: 600, open: 99.6, high: 100.2, low: 99.4, close: 99.7 },
+    { time: 900, open: 99.7, high: 99.9, low: 99.3, close: 99.5 },
+    { time: 1200, open: 99.7, high: 100.3, low: 99.5, close: 99.6 },
+  ], 300, 100, 0.1);
+  const confirmationCandles: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 300, open: 99.8, high: 99.9, low: 99.1, close: 99.3 },
+    { time: 600, open: 99.6, high: 100.2, low: 99.4, close: 99.7 },
+    { time: 900, open: 99.7, high: 100.3, low: 99.5, close: 99.6 },
+    { time: 1200, open: 99.6, high: 100.4, low: 99.3, close: 99.7 },
+    { time: 1260, open: 99.7, high: 100.5, low: 99.4, close: 99.6 },
+    { time: 1500, open: 99.7, high: 99.8, low: 99.1, close: 99.3 },
+    { time: 1800, open: 99.4, high: 99.7, low: 99, close: 99.2 },
+  ], 300, 100, 0.1);
+  const lifecycle = applyConfirmationTimeframeZoneLifecycle(
+    { zones: [zone], activeZones: [zone], activeSupply: zone },
+    confirmationCandles,
+    300,
+    zoneCandles,
+    300,
+    2100,
+  );
+  assert.equal(lifecycle.activeZones.length, 0);
+  assert.equal(lifecycle.zones[0].touches, 4);
+  assert.equal(lifecycle.zones[0].state, "invalidated");
+  assert.equal(lifecycle.zones[0].invalidatedAt, 1260);
+});
+
+test("live confirmation history starts at the oldest active base, not structural availability", () => {
+  const oldest = {
+    id: "old-base",
+    kind: "base" as const,
+    side: "supply" as const,
+    candleIndex: 0,
+    candleTime: 1_000,
+    availableAt: 9_000,
+    low: 100,
+    high: 101,
+    width: 1,
+    legMidpoint: 95,
+    legRange: 10,
+    departureMultiple: 4,
+    strength2x: true,
+    touches: 0,
+    maxPenetration: 0,
+    state: "fresh" as const,
+    reasons: [],
+  };
+  const newer = { ...oldest, id: "new-base", candleTime: 5_000, availableAt: 6_000 };
+  assert.equal(
+    getGoldilocksConfirmationHistoryStart(
+      { zones: [oldest, newer], activeZones: [oldest, newer], activeSupply: newer },
+      8_000,
+      60,
+    ),
+    940,
+  );
+});
+
+test("live lifecycle retains old confirmation touches beyond a short display tail", () => {
+  const zone = {
+    id: "old-touch-supply",
+    kind: "base" as const,
+    side: "supply" as const,
+    candleIndex: 0,
+    candleTime: 0,
+    availableAt: 2_000,
+    low: 100,
+    high: 101,
+    width: 1,
+    legMidpoint: 95,
+    legRange: 10,
+    departureMultiple: 4,
+    strength2x: true,
+    touches: 0,
+    maxPenetration: 0,
+    state: "fresh" as const,
+    reasons: [],
+  };
+  const zoneCandles: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 300, open: 99.8, high: 99.9, low: 99.2, close: 99.4 },
+  ], 300, 100, 0.1);
+  const confirmationCandles: StrategyCandle[] = withDepartureAtrWarmup([
+    { time: 300, open: 99.8, high: 99.9, low: 99.2, close: 99.4 },
+    { time: 600, open: 99.6, high: 100.2, low: 99.4, close: 99.7 },
+    { time: 900, open: 99.7, high: 100.3, low: 99.5, close: 99.6 },
+    { time: 1200, open: 99.6, high: 100.4, low: 99.3, close: 99.7 },
+    { time: 1500, open: 99.7, high: 100.5, low: 99.4, close: 99.6 },
+    { time: 1800, open: 99.5, high: 99.8, low: 99.1, close: 99.3 },
+  ], 300, 100, 0.1);
+  const lifecycle = applyConfirmationTimeframeZoneLifecycle(
+    { zones: [zone], activeZones: [zone], activeSupply: zone },
+    confirmationCandles,
+    300,
+    zoneCandles,
+    300,
+    2100,
+  );
+  assert.equal(lifecycle.activeZones.length, 0);
+  assert.equal(lifecycle.zones[0].touches, 4);
+  assert.equal(lifecycle.zones[0].state, "invalidated");
+  assert.equal(lifecycle.zones[0].invalidatedAt, 1500);
+
+  const displayTailOnly = applyConfirmationTimeframeZoneLifecycle(
+    { zones: [zone], activeZones: [zone], activeSupply: zone },
+    confirmationCandles.slice(-2),
+    300,
+    zoneCandles,
+    300,
+    2100,
+  );
+  assert.equal(displayTailOnly.activeSupply?.touches, 0);
+});
+
+test("automation chart evidence is produced without an actionable trade setup", () => {
+  const zone = {
+    id: "chart-evidence-supply", kind: "base" as const, side: "supply" as const,
+    candleIndex: 14, candleTime: 0, availableAt: 1_800, low: 100, high: 101,
+    width: 1, legMidpoint: 95, legRange: 10, departureMultiple: 4,
+    strength2x: true, touches: 0, maxPenetration: 0, state: "fresh" as const,
+    reasons: [],
+  };
+  const candles: StrategyCandle[] = withDepartureAtrWarmup([
+    {time:0,open:100.5,high:100.8,low:100.2,close:100.4},
+    {time:300,open:99.8,high:99.9,low:99.1,close:99.4},
+    {time:600,open:99.7,high:100.1,low:99.5,close:99.8},
+    {time:900,open:99.8,high:100.2,low:99.6,close:99.7},
+    {time:1200,open:99.7,high:100.3,low:99.5,close:99.8},
+    {time:1500,open:99.8,high:100.4,low:99.6,close:99.7},
+  ], 300, 100, 0.1);
+  const [evidence] = buildGoldilocksZoneChartEvidence({
+    history:{zones:[zone],activeZones:[zone],activeSupply:zone},
+    zoneCandles:candles,zoneSeconds:300,zoneTimeframe:'M5',
+    confirmationCandles:candles,confirmationSeconds:300,confirmationTimeframe:'M5',
+    completedBefore:1800,
+  });
+  assert.equal(evidence.departureCandleTime,300);
+  assert.equal(evidence.formationCandleDetails[0].time,0);
+  assert.deepEqual(evidence.priorTouchDetails.map(item=>item.time),[600,900,1200,1500]);
+  assert.equal(evidence.invalidatedAt,1500);
+  assert.equal(evidence.invalidationReason,'FOURTH TOUCH');
+});
+
+test("automation chart evidence fails closed when the retained candles omit the zone base", () => {
+  const zone = {
+    id: "clipped-chart-evidence", kind: "base" as const, side: "demand" as const,
+    candleIndex: 0, candleTime: -9_999, availableAt: 1_800, low: 100, high: 101,
+    width: 1, legMidpoint: 105, legRange: 10, departureMultiple: 4,
+    strength2x: true, touches: 0, maxPenetration: 0, state: "fresh" as const,
+    reasons: [],
+  };
+  const clippedCandles: StrategyCandle[] = withDepartureAtrWarmup([
+    {time:3_000,open:101.2,high:101.6,low:101.1,close:101.5},
+    {time:3_300,open:101.5,high:101.8,low:101.4,close:101.7},
+  ], 300, 101, 0.1);
+  const evidence = buildGoldilocksZoneChartEvidence({
+    history:{zones:[zone],activeZones:[zone],activeDemand:zone},
+    zoneCandles:clippedCandles,zoneSeconds:300,zoneTimeframe:'M5',
+    confirmationCandles:clippedCandles,confirmationSeconds:300,confirmationTimeframe:'M1',
+    completedBefore:3_600,
+  });
+  assert.deepEqual(evidence,[]);
+});
+
+test("the first eligible trigger is excluded before the fourth-touch rule runs", () => {
+  const zone = {
+    id:'trigger-is-not-prior',kind:'base' as const,side:'supply' as const,
+    candleIndex:14,candleTime:0,availableAt:1500,low:100,high:101,width:1,
+    legMidpoint:95,legRange:10,departureMultiple:4,strength2x:true,touches:0,
+    maxPenetration:0,state:'fresh' as const,reasons:[],
+  };
+  const zoneCandles:StrategyCandle[]=withDepartureAtrWarmup([
+    {time:0,open:100.5,high:100.8,low:100.2,close:100.4},
+    {time:300,open:99.8,high:99.9,low:99.1,close:99.4},
+  ],300,100,0.1);
+  const confirmationCandles:StrategyCandle[]=[
+    ...zoneCandles,
+    {time:600,open:99.7,high:100.1,low:99.5,close:99.8},
+    {time:900,open:99.8,high:100.2,low:99.6,close:99.7},
+    {time:1200,open:99.7,high:100.3,low:99.5,close:99.8},
+    {time:1500,open:99.8,high:100.4,low:99.6,close:99.7},
+    {time:1800,open:99.6,high:99.8,low:99.2,close:99.4},
+  ];
+  const lifecycle=applyConfirmationTimeframeZoneLifecycle(
+    {zones:[zone],activeZones:[zone],activeSupply:zone},confirmationCandles,300,zoneCandles,300,2100,
+  );
+  assert.equal(lifecycle.activeZones.length,1);
+  assert.equal(lifecycle.activeSupply?.touches,3);
 });
 
 test("allows oversized first-touch candles but still rejects a far executable entry", () => {
@@ -2921,10 +3162,11 @@ test("keeps adverse approach evidence score-only in the automation confirmation 
     close: 104.9 - index * 0.05,
   }));
   candles.push(
-    { time: 4_200, open: 104, high: 102.4, low: 100, close: 101 },
-    { time: 4_500, open: 101.5, high: 102.7, low: 101.3, close: 102.5 },
+    { time: 4_200, open: 102, high: 103, low: 101.8, close: 102.8 },
+    { time: 4_500, open: 102.2, high: 102.4, low: 100, close: 101 },
+    { time: 4_800, open: 101.5, high: 102.7, low: 101.3, close: 102.5 },
   );
-  assert.equal(validateGoldilocksZoneApproach(zone, candles, 14).allowed, false);
+  assert.equal(validateGoldilocksZoneApproach(zone, candles, 15).allowed, false);
   const confirmations = findFreshGoldilocksConfirmations(
     { zones: [zone], activeZones: [zone], activeDemand: zone },
     candles,
@@ -3031,6 +3273,139 @@ test("renders replay candle timestamps in Enid local time with historical DST", 
   assert.equal(formatStrategyReplayEnid(winter), "2026-01-19 07:30:00 CST");
 });
 
+test("qualifies departures with prior-only ATR, directional body, and close penetration gates", () => {
+  const demand = { side: "demand" as const, low: 99, high: 100 };
+  const supply = { side: "supply" as const, low: 100, high: 101 };
+  const qualify = (
+    zone: typeof demand | typeof supply,
+    candidate: StrategyCandle,
+  ) => {
+    const candles = withDepartureAtrWarmup([candidate], 60, 100);
+    return qualifyGoldilocksDepartureCandle(zone, candles, candles.length - 1);
+  };
+
+  assert.equal(
+    qualify(demand, { time: 0, open: 99.8, high: 100.1, low: 99.7, close: 100.1 }).qualifies,
+    false,
+    "a tiny demand close penetration must fail",
+  );
+  assert.equal(
+    qualify(supply, { time: 0, open: 100.2, high: 100.3, low: 99.9, close: 99.9 }).qualifies,
+    false,
+    "a tiny supply close penetration must fail",
+  );
+  assert.equal(
+    qualify(demand, { time: 0, open: 100, high: 101, low: 99, close: 100.5 }).qualifies,
+    false,
+    "a body below half of a large-wick range must fail",
+  );
+  assert.equal(
+    qualify(demand, { time: 0, open: 100.1, high: 100.3, low: 100.05, close: 100.3 }).qualifies,
+    false,
+    "a body below one quarter prior ATR must fail",
+  );
+  assert.equal(
+    qualify(demand, { time: 0, open: 99.7, high: 100.2, low: 99.6, close: 100.2 }).qualifies,
+    false,
+    "close penetration below one quarter prior ATR must fail",
+  );
+
+  const exactDemand = qualify(demand, {
+    time: 0, open: 100, high: 100.25, low: 99.75, close: 100.25,
+  });
+  assert.equal(exactDemand.qualifies, true);
+  assert.equal(exactDemand.priorAtr14, 1);
+  assert.equal(exactDemand.bodyFraction, 0.5);
+  assert.equal(exactDemand.bodyAtrMultiple, 0.25);
+  assert.equal(exactDemand.closePenetrationAtrMultiple, 0.25);
+
+  const exactSupply = qualify(supply, {
+    time: 0, open: 100, high: 100.25, low: 99.75, close: 99.75,
+  });
+  assert.equal(exactSupply.qualifies, true);
+  assert.equal(exactSupply.bodyFraction, 0.5);
+  assert.equal(exactSupply.bodyAtrMultiple, 0.25);
+  assert.equal(exactSupply.closePenetrationAtrMultiple, 0.25);
+
+  assert.equal(
+    qualifyGoldilocksDepartureCandle(
+      demand,
+      [{ time: 0, open: 100, high: 100.5, low: 99.75, close: 100.5 }],
+      0,
+    ).qualifies,
+    false,
+    "missing prior ATR14 fails closed",
+  );
+  assert.equal(
+    qualify(demand, { time: 0, open: 100, high: 100.5, low: 100.5, close: 100.5 }).qualifies,
+    false,
+    "a zero-range candle fails closed",
+  );
+});
+
+test("departure ATR excludes the candidate and all future candles", () => {
+  const zone = { side: "demand" as const, low: 99, high: 100 };
+  const candles = withDepartureAtrWarmup([
+    { time: 0, open: 100, high: 500, low: 99.75, close: 100.25 },
+    { time: 60, open: 100, high: 1000, low: 1, close: 900 },
+  ], 60, 100);
+  const candidateIndex = candles.length - 2;
+  const result = qualifyGoldilocksDepartureCandle(zone, candles, candidateIndex);
+  assert.equal(result.priorAtr14, 1);
+  assert.equal(result.qualifies, false, "the candidate's huge range affects body fraction, not its prior ATR");
+  const withoutFuture = qualifyGoldilocksDepartureCandle(zone, candles.slice(0, -1), candidateIndex);
+  assert.deepEqual(result, withoutFuture);
+});
+
+test("freezes the first qualifying departure, then counts only later return visits", () => {
+  const zone = {
+    id: "departure-freeze-demand", kind: "base" as const, side: "demand" as const,
+    candleIndex: 0, candleTime: -1, low: 99, high: 100, width: 1,
+    legMidpoint: 105, legRange: 10, departureMultiple: 4, strength2x: true,
+    touches: 0, maxPenetration: 0, state: "fresh" as const, reasons: [],
+  };
+  const candles = withDepartureAtrWarmup([
+    { time: 0, open: 99.8, high: 100.1, low: 99.7, close: 100.1 },
+    { time: 60, open: 100, high: 100.5, low: 99.75, close: 100.5 },
+    { time: 120, open: 100.4, high: 101, low: 100.3, close: 101 },
+    { time: 180, open: 100.5, high: 100.7, low: 99.9, close: 100.6 },
+  ], 60, 100);
+  const summary = summarizeZoneTimeframeTouches(zone, candles, 60);
+  assert.equal(summary.firstOutsideTime, 60, "the tiny earlier close cannot arm the zone");
+  assert.equal(summary.departureInsideCandleCount, 1, "the failed close remains in causal history");
+  assert.equal(summary.touches, 1, "the departure candle is excluded and the later wick return counts");
+  assert.deepEqual(summary.touchDetails.map((touch) => touch.time), [180]);
+});
+
+test("nonqualifying outside closes cannot create a confirmation trade", () => {
+  const zone = {
+    id: "tiny-close-no-trade", kind: "base" as const, side: "demand" as const,
+    candleIndex: 0, candleTime: -1, availableAt: 0, low: 99, high: 100, width: 1,
+    legMidpoint: 105, legRange: 10, departureMultiple: 1, strength2x: false,
+    touches: 0, maxPenetration: 0, state: "fresh" as const, reasons: [],
+  };
+  const candles = withDepartureAtrWarmup([
+    { time: 0, open: 99.8, high: 100.1, low: 99.7, close: 100.1 },
+    { time: 60, open: 100.2, high: 100.4, low: 99.9, close: 100.3 },
+  ], 60, 100);
+  const found = findFreshGoldilocksConfirmations(
+    { zones: [zone], activeZones: [zone], activeDemand: zone },
+    candles, 60, 120_000, candles, 60,
+  );
+  assert.equal(found.length, 0);
+});
+
+test("research, backtest, chart, local automation, and Pi use the shared causal engine", () => {
+  const root = path.resolve(process.cwd());
+  const source = (relativePath: string) => fs.readFileSync(path.join(root, relativePath), "utf8");
+  assert.match(source("utils/goldilocksStrategy.ts"), /export const qualifyGoldilocksDepartureCandle/);
+  assert.match(source("utils/goldilocksScanner.ts"), /qualifyGoldilocksDepartureCandle/);
+  assert.match(source("utils/goldilocksBacktest.ts"), /summarizeZoneTimeframeTouches/);
+  assert.match(source("pages/api/strategy-lab/zones.ts"), /goldilocksStrategy|goldilocksScanner/);
+  assert.match(source("workers/goldilocksWorker.ts"), /goldilocksStrategy|goldilocksScanner/);
+  assert.match(source("utils/strategyReplay.ts"), /goldilocksStrategy|goldilocksScanner/);
+});
+
 test("uses the first zone-timeframe close away even when its wick still overlaps the zone", () => {
   const calm = Array.from({ length: 14 }, (_, index) => ({
     time: index * 900,
@@ -3043,7 +3418,7 @@ test("uses the first zone-timeframe close away even when its wick still overlaps
     ...calm,
     { time: 14 * 900, open: 100, high: 100.2, low: 99.9, close: 100.1 },
     { time: 15 * 900, open: 100.1, high: 100.4, low: 97, close: 99.8 },
-    { time: 16 * 900, open: 99.8, high: 99.9, low: 99.6, close: 99.7 },
+    { time: 16 * 900, open: 99.9, high: 99.9, low: 99.5, close: 99.5 },
   ];
   const zone = detectGoldilocksZones(history, {
     direction: "bearish",
@@ -3051,10 +3426,13 @@ test("uses the first zone-timeframe close away even when its wick still overlaps
     endIndex: 16,
   }).zones.find((item) => item.kind === "base");
   assert.ok(zone);
-  assert.equal(zone.departureQuality?.departureCandleTime, 15 * 900);
-  assert.equal(zone.departureQuality?.shockRejected, true);
-  assert.ok((zone.departureMultiple ?? Infinity) < 1);
-  assert.ok((zone.wickDepartureMultiple ?? 0) > 7);
+  assert.equal(
+    qualifyGoldilocksDepartureCandle(zone, history, 15).qualifies,
+    false,
+    "the large-wick marginal close does not satisfy the body-fraction gate",
+  );
+  assert.equal(zone.departureQuality?.departureCandleTime, 16 * 900);
+  assert.equal(zone.departureQuality?.shockRejected, false);
   assert.equal(validateGoldilocksDepartureQuality(zone).allowed, true);
 
   const departureTime = zone.departureQuality!.departureCandleTime;
@@ -3430,24 +3808,25 @@ test("uses a 14 point live threshold by default and clamps configured thresholds
 });
 
 test("detects the largest opposite base and most discounted continuation demand", () => {
-  const result = detectGoldilocksZones(candles, {
+  const warmed = withDepartureAtrWarmup(candles, 1, 100, 0.1);
+  const result = detectGoldilocksZones(warmed, {
     direction: "bullish",
-    startIndex: 5,
-    endIndex: 13,
+    startIndex: 19,
+    endIndex: 27,
   });
   assert.equal(result.zones.length, 2);
   assert.equal(result.zones[0].kind, "base");
-  assert.equal(result.zones[0].candleIndex, 5);
+  assert.equal(result.zones[0].candleIndex, 19);
   assert.equal(result.zones[0].low, 97.8);
   assert.equal(result.zones[0].high, 101.0);
   assert.equal(
     result.zones[0].departureQuality?.departureCandleIndex,
-    6,
+    20,
     "departure scoring must use the first zone-timeframe candle that closes away from the zone",
   );
   assert.equal(result.zones[0].departureQuality?.departureCandleTime, 6);
   assert.equal(result.zones[1].kind, "continuation");
-  assert.equal(result.zones[1].candleIndex, 9);
+  assert.equal(result.zones[1].candleIndex, 23);
   assert.ok(result.zones[1].high <= result.midpoint);
 });
 
@@ -3572,40 +3951,40 @@ test("extends the bullish base distal edge to the true leg low from another cand
 });
 
 test("counts an exact proximal-boundary equality as a touch after 2x departure", () => {
-  const sample: StrategyCandle[] = [
+  const sample: StrategyCandle[] = withDepartureAtrWarmup([
     { time: 0, open: 100, high: 100.4, low: 99, close: 99.5 },
     { time: 1, open: 99.5, high: 103, low: 99.4, close: 102.8 },
     { time: 2, open: 102.8, high: 104, low: 102.5, close: 103.7 },
     { time: 3, open: 103.7, high: 104, low: 100, close: 101 },
-  ];
+  ], 1, 100, 0.1);
   const result = detectGoldilocksZones(sample, {
     direction: "bullish",
-    startIndex: 0,
-    endIndex: 3,
+    startIndex: 14,
+    endIndex: 17,
   });
   assert.equal(result.zones[0].state, "touched");
   assert.equal(result.zones[0].touches, 1);
 });
 
 test("treats exact equality at the leg-extreme distal boundary as a touch, not a break", () => {
-  const wickOnly: StrategyCandle[] = [
+  const wickOnly: StrategyCandle[] = withDepartureAtrWarmup([
     { time: 0, open: 100, high: 100.4, low: 99, close: 99.5 },
     { time: 1, open: 99.5, high: 103, low: 99.4, close: 102.8 },
     { time: 2, open: 102.8, high: 104, low: 102.5, close: 103.7 },
     { time: 3, open: 103.7, high: 104, low: 98.8, close: 99.4 },
-  ];
+  ], 1, 100, 0.1);
   const wickResult = detectGoldilocksZones(wickOnly, {
     direction: "bullish",
-    startIndex: 0,
-    endIndex: 3,
+    startIndex: 14,
+    endIndex: 17,
   });
   assert.equal(wickResult.zones[0].state, "touched");
   const closedThrough = wickOnly.map((candle) => ({ ...candle }));
-  closedThrough[3].close = 98.9;
+  closedThrough[17].close = 98.9;
   const closeResult = detectGoldilocksZones(closedThrough, {
     direction: "bullish",
-    startIndex: 0,
-    endIndex: 3,
+    startIndex: 14,
+    endIndex: 17,
   });
   assert.equal(closeResult.zones[0].low, 98.8);
   assert.equal(closeResult.zones[0].state, "touched");
@@ -4016,22 +4395,22 @@ test("uses the nearest bullish candle before a bearish swing high as its supply 
 });
 
 test("counts distinct zone visits rather than every consecutive touching candle", () => {
-  const sample: StrategyCandle[] = [
+  const sample: StrategyCandle[] = withDepartureAtrWarmup([
     { time: 0, open: 100, high: 100.3, low: 99, close: 99.5 },
     { time: 1, open: 100.5, high: 103, low: 100.5, close: 102.8 },
     { time: 2, open: 102.8, high: 103, low: 99.8, close: 100.2 },
     { time: 3, open: 100.2, high: 100.4, low: 99.7, close: 100.1 },
     { time: 4, open: 101, high: 102, low: 100.8, close: 101.8 },
     { time: 5, open: 101.8, high: 102, low: 99.9, close: 100.3 },
-  ];
+  ], 1, 100, 0.1);
   const result = detectGoldilocksZones(sample, {
     direction: "bullish",
-    startIndex: 0,
-    endIndex: 5,
+    startIndex: 14,
+    endIndex: 19,
   });
   const base = result.zones.find((zone) => zone.kind === "base");
   assert.equal(base?.touches, 2);
-  assert.equal(base?.firstTouchIndex, 2);
+  assert.equal(base?.firstTouchIndex, 16);
 });
 
 test("does not count touches before the originating swing makes a zone actionable", () => {
@@ -4046,13 +4425,13 @@ test("does not count touches before the originating swing makes a zone actionabl
     { direction: "bullish", startIndex: 0, endIndex: 3 },
   ]);
   const base = history.zones.find((zone) => zone.kind === "base");
-  assert.equal(base?.availableAt, 40);
+  assert.equal(base?.availableAt, 50);
   assert.equal(base?.touches, 0);
   assert.equal(base?.firstTouchIndex, undefined);
 });
 
 test("invalidates a zone on its fourth qualifying touch", () => {
-  const sample: StrategyCandle[] = [
+  const sample: StrategyCandle[] = withDepartureAtrWarmup([
     { time: 10, open: 100, high: 100.3, low: 99, close: 99.5 },
     { time: 20, open: 100.5, high: 103, low: 100.5, close: 102.8 },
     { time: 30, open: 102, high: 103, low: 99.8, close: 100.2 },
@@ -4062,9 +4441,9 @@ test("invalidates a zone on its fourth qualifying touch", () => {
     { time: 70, open: 101, high: 102, low: 99.6, close: 100.2 },
     { time: 80, open: 101, high: 102, low: 100.5, close: 101.5 },
     { time: 90, open: 101, high: 102, low: 99, close: 100.2 },
-  ];
+  ], 10, 100, 0.1);
   const history = detectGoldilocksZoneHistory(sample, [
-    { direction: "bullish", startIndex: 0, endIndex: 1 },
+    { direction: "bullish", startIndex: 14, endIndex: 15 },
   ]);
   const base = history.zones.find((zone) => zone.kind === "base");
   assert.equal(base?.touches, 4);
@@ -4078,23 +4457,23 @@ test("invalidates a zone on its fourth qualifying touch", () => {
 });
 
 test("historical trade labels snapshot prior touches and exclude the triggering touch candle", () => {
-  const sample: StrategyCandle[] = [
+  const sample: StrategyCandle[] = withDepartureAtrWarmup([
     { time: 10, open: 100, high: 100.3, low: 99, close: 99.5 },
     { time: 20, open: 99.5, high: 103, low: 99.4, close: 102.8 },
     { time: 30, open: 102, high: 103, low: 101, close: 102.5 },
     { time: 40, open: 102.5, high: 102.8, low: 100, close: 101 },
     { time: 50, open: 101, high: 102, low: 99.8, close: 100.8 },
     { time: 60, open: 100.8, high: 101.5, low: 99.5, close: 100.5 },
-  ];
+  ], 10, 100, 0.1);
   const history = detectGoldilocksZoneHistory(sample, [
-    { direction: "bullish", startIndex: 0, endIndex: 1 },
+    { direction: "bullish", startIndex: 14, endIndex: 15 },
   ]);
   const base = history.zones.find((zone) => zone.kind === "base");
   assert.ok(base);
   assert.equal(base.touches, 1);
-  assert.equal(countZoneTouchesBefore(base, sample, 3), 0);
-  assert.equal(countZoneTouchesBefore(base, sample, 4), 1);
-  assert.equal(countZoneTouchesBefore(base, sample, 5), 1);
+  assert.equal(countZoneTouchesBefore(base, sample, 17), 0);
+  assert.equal(countZoneTouchesBefore(base, sample, 18), 1);
+  assert.equal(countZoneTouchesBefore(base, sample, 19), 1);
 });
 
 test("stored replay purity rejects reconstructed touches before the saved first outside candle", () => {
@@ -4174,10 +4553,12 @@ test("historical scanners keep consecutive touching candles in one visit while c
     state: "fresh" as const,
     reasons: [],
   };
-  const state = createHistoricalZoneTouchState();
+  const state = createHistoricalZoneTouchState(
+    withDepartureAtrWarmup([], 1, 100, 0.1),
+  );
   observeHistoricalZoneCandle(
     zone,
-    { time: 3, open: 99, high: 99.5, low: 98.5, close: 99 },
+    { time: 3, open: 99.5, high: 99.5, low: 98.5, close: 99 },
     0,
     state,
   );
@@ -4367,6 +4748,20 @@ test("historical zone labels keep outcome, trigger, active state, and dates out 
   );
 });
 
+test("live zone labels distinguish causal touches and show activation time", () => {
+  assert.equal(
+    formatStrategyZoneLabel({
+      historicalTradeZone: false,
+      kind: "base",
+      side: "supply",
+      departureMultiple: 21.8125,
+      touches: 0,
+      availableAt: 1785933300,
+    }),
+    "Base supply · 21.8x · 0 eligible touches · active Aug 05, 07:35",
+  );
+});
+
 test("historical context-zone labels receive their causal M15 touch count at replay time", () => {
   const zone = {
     id: "context-supply",
@@ -4387,12 +4782,12 @@ test("historical context-zone labels receive their causal M15 touch count at rep
     state: "fresh" as const,
     reasons: [],
   };
-  const candles = [
+  const candles = withDepartureAtrWarmup([
     { time: 100, open: 1.1651, high: 1.1654, low: 1.165, close: 1.1652 },
     { time: 200, open: 1.165, high: 1.1652, low: 1.16495, close: 1.165 },
     { time: 300, open: 1.1648, high: 1.16485, low: 1.1644, close: 1.1645 },
     { time: 400, open: 1.1647, high: 1.165, low: 1.1646, close: 1.1648 },
-  ];
+  ], 100, 1.165, 0.0001);
   const beforeRetouch = annotateReplayZonePurityAt(zone, candles, 100, 400);
   const afterRetouch = annotateReplayZonePurityAt(zone, candles, 100, 500);
   assert.equal(beforeRetouch.touches, 0);
@@ -4896,10 +5291,10 @@ test("automation touch-entry treats the latest completed first-touch candle as t
     availableAt:1,low:99,high:100,width:1,legMidpoint:105,legRange:12,departureMultiple:3,
     strength2x:true,touches:0,maxPenetration:0,state:"fresh" as const,reasons:[],
   };
-  const candles:StrategyCandle[]=[
-    {time:100,open:101,high:102,low:100.5,close:101.5},
+  const candles:StrategyCandle[]=withDepartureAtrWarmup([
+    {time:100,open:100.8,high:102,low:100.5,close:101.8},
     {time:200,open:100.5,high:100.6,low:99.8,close:100.1},
-  ];
+  ],100,100,0.1);
   const found=findFreshGoldilocksConfirmations(
     {zones:[zone],activeZones:[zone],activeDemand:zone},candles,100,300_000,candles,100,'touch-entry',
   );
@@ -4908,14 +5303,52 @@ test("automation touch-entry treats the latest completed first-touch candle as t
   assert.equal(found[0].confirmationCandle.time,200);
 });
 
-test("automation compatibility accepts the sealed lower-timeframe set-and-forget contract",()=>{
-  const compatibility=getAutomationCompatibility({
+test("stream touch uses executable ask for demand and bid for supply",()=>{
+  assert.deepEqual(observeGoldilocksStreamTouch(
+    {side:'demand',low:99,high:100},{bid:99.95,ask:100,time:200},
+  ),{touched:true,broken:false,executableEntry:100});
+  assert.deepEqual(observeGoldilocksStreamTouch(
+    {side:'supply',low:100,high:101},{bid:100,ask:100.05,time:200},
+  ),{touched:true,broken:false,executableEntry:100});
+  assert.equal(observeGoldilocksStreamTouch(
+    {side:'demand',low:99,high:100},{bid:98.99,ask:100,time:200},
+  ).broken,true);
+});
+
+test("stream touch scanner triggers at the exact quote and never chases a completed old touch",()=>{
+  const zone={
+    id:'stream-zone',kind:'base' as const,side:'demand' as const,candleIndex:0,candleTime:0,
+    availableAt:100,low:99,high:100,width:1,legMidpoint:105,legRange:12,departureMultiple:3,
+    strength2x:true,touches:0,maxPenetration:0,state:'fresh' as const,reasons:[],
+  };
+  const outside=withDepartureAtrWarmup([
+    {time:100,open:100.8,high:102,low:100.5,close:101.8},
+  ],100,100,0.1);
+  const quote={bid:99.95,ask:100,time:250,receivedAt:250_000};
+  const fresh=findFreshGoldilocksStreamTouches(
+    {zones:[zone],activeZones:[zone],activeDemand:zone},outside,100,quote,outside,100,
+  );
+  assert.equal(fresh.length,1);
+  assert.equal(fresh[0].entryEligibilityTime,250);
+  assert.equal(fresh[0].streamQuote?.ask,100);
+  const stale=[...outside,{time:200,open:100.5,high:100.6,low:99.8,close:100.1}];
+  assert.equal(findFreshGoldilocksStreamTouches(
+    {zones:[zone],activeZones:[zone],activeDemand:zone},stale,100,
+    {...quote,time:350,receivedAt:350_000},stale,100,
+  ).length,0);
+});
+
+test("automation accepts stream touch but rejects research-only weekend holding",()=>{
+  const baseConfig={
     pairs:['GBP/JPY'],lookbackDays:365,minimumScore:11,label:'sealed winner',
-    strategyVersion:'m15-m5-m1-research-v3',timeframeProfile:'lowerTimeframe',
+    strategyVersion:'m15-m5-m1-research-v4',timeframeProfile:'lowerTimeframe',
     riskProfile:'easy',tradeManager:'set-and-forget-2r-v1',confirmationMode:'touch-entry',
-    setAndForgetTargetR:2,setAndForgetTargetMode:'opposing-base',closeTradesBeforeWeekend:false,
+    setAndForgetTargetR:2,setAndForgetTargetMode:'opposing-base',closeTradesBeforeWeekend:true,
     strategyTweaks:GOLDILOCKS_BACKTEST_TWEAK_DEFAULTS,gateSettings:GOLDILOCKS_BACKTEST_GATE_DEFAULTS,
     scoreWeights:GOLDILOCKS_SCORE_WEIGHTS,
-  });
-  assert.deepEqual(compatibility,{compatible:true,blockers:[]});
+  } satisfies BacktestRunConfig;
+  assert.equal(getAutomationCompatibility(baseConfig).compatible,true);
+  const weekendHolding=getAutomationCompatibility({...baseConfig,closeTradesBeforeWeekend:false});
+  assert.equal(weekendHolding.compatible,false);
+  assert.match(weekendHolding.blockers.join(' '),/liquidates before the weekend/i);
 });

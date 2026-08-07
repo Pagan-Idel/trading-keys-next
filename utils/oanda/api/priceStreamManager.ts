@@ -30,9 +30,17 @@ type StreamState = {
 const STREAM_QUOTE_MAX_AGE_MS = 2_000;
 const STREAM_MESSAGE_TIMEOUT_MS = 15_000;
 const priceCache = new Map<string, OandaQuote>();
+const quoteHistory = new Map<string, OandaQuote[]>();
+const STREAM_QUOTE_HISTORY_LIMIT=5_000;
 const streams = new Map<string, StreamState>();
 const idleStops=new Map<string,NodeJS.Timeout>();
 const cacheKey = (symbol: string, mode: Mode) => `${mode}:${normalizePairKeyUnderscore(symbol)}`;
+
+export const appendBoundedStreamQuote=(history:OandaQuote[],quote:OandaQuote,limit=STREAM_QUOTE_HISTORY_LIMIT)=>{
+  history.push(quote);
+  if(history.length>limit)history.splice(0,history.length-limit);
+  return history;
+};
 
 const getAccountDetails = (mode: Mode = getLoginMode()) => ({
   hostname: mode === "live" ? "https://stream-fxtrade.oanda.com" : "https://stream-fxpractice.oanda.com",
@@ -54,14 +62,17 @@ const acceptPriceMessage = (state: StreamState, message: any) => {
   const key = cacheKey(instrument, state.mode);
   const current = priceCache.get(key);
   if (current && Date.parse(message.time) < Date.parse(current.oandaTime)) return;
-  priceCache.set(key, {
+  const quote:OandaQuote={
     bid,
     ask,
     oandaTime: message.time,
     receivedAt: Date.now(),
     tradeable: message.tradeable !== false,
     source: "stream",
-  });
+  };
+  priceCache.set(key,quote);
+  const history=quoteHistory.get(key)??[];
+  quoteHistory.set(key,appendBoundedStreamQuote(history,quote));
   state.reconnectAttempt = 0;
 };
 
@@ -187,6 +198,26 @@ export const getLatestQuote = (symbol: string, mode: Mode = getLoginMode(), maxA
   const quote = priceCache.get(cacheKey(symbol, mode));
   if (!quote || !quote.tradeable || Date.now() - quote.receivedAt > maxAgeMs) return null;
   return quote;
+};
+
+export const getStreamQuotesAfter=(symbol:string,mode:Mode=getLoginMode(),receivedAfter=0)=>(
+  quoteHistory.get(cacheKey(symbol,mode))??[]
+).filter(quote=>quote.receivedAt>receivedAfter);
+
+export const fetchStreamQuotesAfter=async(
+  symbol:string,mode:Mode=getLoginMode(),receivedAfter=0,
+):Promise<OandaQuote[]>=>{
+  const hubUrl=typeof process!=='undefined'?process.env.OANDA_MARKET_DATA_HUB_URL:undefined;
+  if(hubUrl){
+    try{
+      const response=await fetch(`${hubUrl}/quotes?instrument=${encodeURIComponent(normalizePairKeyUnderscore(symbol))}&after=${receivedAfter}`,{
+        signal:AbortSignal.timeout(1_500),headers:{Accept:'application/json'},
+      });
+      if(response.ok)return await response.json() as OandaQuote[];
+    }catch{return []}
+    return [];
+  }
+  return getStreamQuotesAfter(symbol,mode,receivedAfter);
 };
 
 export const waitForFreshPrice = async (symbol: string, mode: Mode = getLoginMode(), timeoutMs = 5_000): Promise<OandaQuote | null> => {

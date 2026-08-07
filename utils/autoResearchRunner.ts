@@ -4,7 +4,7 @@ import { assertResearchAllowed } from './piRuntimeGuard.ts';
 import { forexPairs } from './constants.ts';
 import { calculateBacktestPerformance } from './backtestAnalytics.ts';
 import { simulateBacktestPortfolio } from './backtestPortfolio.ts';
-import { BACKTEST_CANDLE_LIMITS, cancelBacktest, executeBacktestInline, normalizeBacktestConfig } from './backtestRunner.ts';
+import { BACKTEST_CANDLE_LIMITS, cancelBacktest, executeBacktestInline, normalizeBacktestConfig, recoverInterruptedBacktestForWorker } from './backtestRunner.ts';
 import {autoPromoteResearchLeaderToPi} from './autoResearchPiPromotion.ts';
 import { getActiveBacktestRun, getBacktestDashboard, getBacktestRuntime, getBacktestTrainingData, type BacktestRunConfig } from './backtestStore.ts';
 import { checkpointCandleArchive, getCandleArchiveStorageUsage, getCandleArchiveSummary } from './candleArchive.ts';
@@ -84,7 +84,8 @@ export const buildAutoResearchConfigurations=(input:StartAutoResearchInput={}):B
     lookbackDays:365,backfillPages:0,label:'Leader control',riskProfile:'default',startingBalance:1000,leverage:30,
     tradeManager:'set-and-forget-2r-v1',setAndForgetTargetMode:'opposing-base',setAndForgetTargetR:2,
     scoreWeights:expandGoldilocksScoreCategoryWeights(fallbackFamily.scoreCategories),gateSettings:normalizeGoldilocksBacktestGates(undefined)});
-  const leader=normalizeBacktestConfig({...fallback,...input.baselineConfig,pairs,lookbackDays:365,backfillPages:0});
+  const leader=normalizeBacktestConfig({...fallback,...input.baselineConfig,pairs,lookbackDays:365,backfillPages:0,
+    closeTradesBeforeWeekend:true,reverseFinalSignal:false});
   const score=Math.min(20,Math.max(0,leader.minimumScore));
   const touches=Math.min(3,Math.max(0,Number(leader.strategyTweaks?.maximumPriorTouches??3)));
   const seed=Math.abs(Math.floor(input.explorationSeed??Date.now()));
@@ -328,11 +329,12 @@ export const recoverOrStartAutoResearch=(input:StartAutoResearchInput={})=>{
   if(!active)return startAutoResearch(input);
   if(active.status==='paused')return {id:active.id,status:'paused' as const,recovered:false};
   if(isProcessAlive(active.workerPid))return {id:active.id,status:active.status,recovered:false,workerPid:active.workerPid};
+  const recoveredBacktest=recoverInterruptedBacktestForWorker(active.workerPid);
   const reset=resetInterruptedAutoResearchTrials(String(active.id));
   updateAutoResearchCampaign(String(active.id),{status:'queued',workerPid:null,currentTrialId:null,error:null});
-  addAutoResearchEvent(String(active.id),'campaign_recovered',`AUTO RESEARCH RECOVERED · stale worker cleared · ${reset} interrupted trial(s) returned to the queue.`);
+  addAutoResearchEvent(String(active.id),'campaign_recovered',`AUTO RESEARCH RECOVERED · stale worker cleared · ${reset} interrupted trial(s) returned to the queue${recoveredBacktest?' · stale backtest released':''}.`,undefined,{resetTrials:reset,recoveredBacktestId:recoveredBacktest?.id??null,interruptedWorkerPid:active.workerPid});
   const workerPid=launchResearchWorker(String(active.id));
-  return {id:active.id,status:'queued' as const,recovered:true,workerPid};
+  return {id:active.id,status:'queued' as const,recovered:true,workerPid,recoveredBacktestId:recoveredBacktest?.id??null};
 };
 
 export const pauseAutoResearch=(id:string)=>{

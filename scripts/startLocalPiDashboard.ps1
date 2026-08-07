@@ -53,16 +53,14 @@ if (-not (Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction Silent
     -RedirectStandardError (Join-Path $logDirectory 'local-dashboard.error.log')
 }
 
+# Research is archive-only. Do not let a workstation research worker inherit
+# credentials that could apply a result to local automation or the Pi.
+$env:PI_PULSE_CONTROL_TOKEN = ''
+$env:PULSE_CONTROL_TOKEN = ''
+
 Start-Process -FilePath (Join-Path $repository 'node_modules\.bin\tsx.cmd') `
   -ArgumentList 'runner/resumeAutoResearch.ts' `
   -WorkingDirectory $repository `
   -WindowStyle Hidden `
   -RedirectStandardOutput (Join-Path $logDirectory 'local-research.log') `
   -RedirectStandardError (Join-Path $logDirectory 'local-research.error.log')
-
-Start-Process -FilePath (Join-Path $repository 'node_modules\.bin\tsx.cmd') `
-  -ArgumentList 'runner/autoPromoteResearchLeaders.ts' `
-  -WorkingDirectory $repository `
-  -WindowStyle Hidden `
-  -RedirectStandardOutput (Join-Path $logDirectory 'local-research-promotion.log') `
-  -RedirectStandardError (Join-Path $logDirectory 'local-research-promotion.error.log')

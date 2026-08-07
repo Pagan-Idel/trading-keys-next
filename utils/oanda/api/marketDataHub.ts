@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { fetchPriceOnce, getStreamIdleCooldownMs, initializePriceStreams, stopAllStreams } from './priceStreamManager.ts';
+import { fetchPriceOnce, getStreamIdleCooldownMs, getStreamQuotesAfter, initializePriceStreams, stopAllStreams } from './priceStreamManager.ts';
 
 type Mode = 'live' | 'demo';
 const HOST = '127.0.0.1';
@@ -35,6 +35,12 @@ export const startMarketDataHub = async (mode: Mode) => {
       if(request.method==='POST'){if(idleTimer)clearTimeout(idleTimer);idleTimer=null;await reconcile(mode)}
       else {if(idleTimer)clearTimeout(idleTimer);idleTimer=setTimeout(()=>void reconcile(mode),getStreamIdleCooldownMs())}
       response.end(JSON.stringify(getHubInterestSnapshot()));return;
+    }
+    if(request.method==='GET'&&url.pathname==='/quotes'){
+      const instrument=url.searchParams.get('instrument');
+      if(!instrument){response.statusCode=400;response.end(JSON.stringify({error:'instrument is required'}));return}
+      const after=Number(url.searchParams.get('after')??0);
+      response.end(JSON.stringify(getStreamQuotesAfter(instrument,mode,Number.isFinite(after)?after:0)));return;
     }
     if (request.method !== 'GET' || url.pathname !== '/quote') {
       response.statusCode = 404;

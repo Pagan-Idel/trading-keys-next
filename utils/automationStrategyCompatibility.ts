@@ -15,7 +15,9 @@ export const getAutomationCompatibility=(config:BacktestRunConfig)=>{
   if(!isGoldilocksTimeframeProfileId(config.timeframeProfile))blockers.push('Automation requires a recognized timeframe profile.');
   else if(config.strategyVersion!==getGoldilocksTimeframeProfile(config.timeframeProfile).strategyVersion)
     blockers.push('Strategy version does not match its timeframe profile.');
-  if(!['close-through','touch-entry'].includes(String(config.confirmationMode)))blockers.push('Automation requires a recognized confirmation mode.');
+  if(!['close-through','touch-entry'].includes(String(config.confirmationMode)))blockers.push('Automation requires a recognized close-through or stream-driven immediate-touch confirmation mode.');
+  if(config.closeTradesBeforeWeekend===false)blockers.push('Automation always liquidates before the weekend; a research run that holds across weekends is not execution-compatible.');
+  if(config.reverseFinalSignal)blockers.push('YOLO reverse-final-signal is a backtest-only assumption and cannot be activated in automation.');
   if(![GOLDILOCKS_DEFAULT_MANAGEMENT.policyId,GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID].includes(String(config.tradeManager) as typeof GOLDILOCKS_SET_AND_FORGET_2R_MANAGEMENT_ID))
     blockers.push('Automation currently supports secure-half and set-and-forget trade managers.');
   if(!sameNumbers(config.strategyTweaks as Record<string,number>|undefined,GOLDILOCKS_BACKTEST_TWEAK_DEFAULTS))blockers.push('Research-only numeric strategy tweaks do not match the automation contract.');

@@ -1,5 +1,5 @@
 import { fetchCandles } from '../utils/oanda/api/fetchCandles.ts';
-import { cancelPriceStreamIdleStop, fetchPriceOnce, isStreamInitialized, schedulePriceStreamIdleStop, setMarketDataInterest, startPriceStream, stopPriceStream, waitForFreshPrice } from '../utils/oanda/api/priceStreamManager.ts';
+import { cancelPriceStreamIdleStop, fetchPriceOnce, fetchStreamQuotesAfter, isStreamInitialized, schedulePriceStreamIdleStop, setMarketDataInterest, startPriceStream, stopPriceStream, waitForFreshPrice } from '../utils/oanda/api/priceStreamManager.ts';
 import { openNow, type Trade } from '../utils/oanda/api/openNow.ts';
 import { getTradeDetailsById } from '../utils/oanda/api/getTradeDetails.ts';
 import { modifyTrade, replaceTradeProtection } from '../utils/oanda/api/modifyTrade.ts';
@@ -7,7 +7,7 @@ import { closeTrade } from '../utils/oanda/api/closeTrade.ts';
 import { closeTradePartial } from '../utils/oanda/api/close-partial.ts';
 import { ACTION } from '../utils/oanda/orderTypes.ts';
 import { placeTrade } from '../utils/placeTrade.ts';
-import { annotateConfluenceAt, buildGoldilocksHistory, buildGoldilocksHistoryChunked, findFreshGoldilocksConfirmations, getGoldilocksTrend, toStrategyCandles } from '../utils/goldilocksScanner.ts';
+import { annotateConfluenceAt, applyConfirmationTimeframeZoneLifecycle, buildGoldilocksHistory, buildGoldilocksHistoryChunked, buildGoldilocksZoneChartEvidence, findFreshGoldilocksConfirmations, findFreshGoldilocksStreamTouches, getGoldilocksConfirmationHistoryStart, getGoldilocksTrend, toStrategyCandles, type FreshGoldilocksConfirmation } from '../utils/goldilocksScanner.ts';
 import { getGoldilocksZoneFormationWindow, validateGoldilocksEntryProximity, validateTwoToOneRunway } from '../utils/goldilocksStrategy.ts';
 import { getHistoricalNewsGateForRange } from '../utils/historicalNewsStore.ts';
 import { evaluateSpread } from '../utils/spreadGuard.ts';
@@ -66,6 +66,8 @@ const attemptedConfirmations = new Set<string>();
 const ATTEMPTED_CONFIRMATION_LIMIT=2_000;
 const MEMORY_TELEMETRY_INTERVAL_MS=15*60*1000;
 let lastMemoryTelemetryAt=0;
+let immediateWatchActive=false;
+let immediateQuoteCursor=Date.now();
 const readWorkingCandles=(timeframe:string,count=GOLDILOCKS_LIVE_CANDLE_LIMITS[timeframe])=>{
   const bounds=getArchivedCandleBounds({pair,timeframe,mode});
   if(bounds.endTime===null)return [];
@@ -105,8 +107,16 @@ export const millisecondsUntilNextConfirmationClose = (now = Date.now()) => {
     workerScanJitterMs(pair);
 };
 
-const loadConfirmationCandles = async () => {
-  cachedConfirmationCandles=readWorkingCandles(CONFIRMATION_TIMEFRAME,CONFIRMATION_CANDLE_COUNT);
+const loadConfirmationCandles = async (history: ReturnType<typeof buildGoldilocksHistory>['history']) => {
+  const bounds=getArchivedCandleBounds({pair,timeframe:CONFIRMATION_TIMEFRAME,mode});
+  if(bounds.endTime===null)return [];
+  const defaultStart=Math.max(0,bounds.endTime-CONFIRMATION_SECONDS*Math.max(1,CONFIRMATION_CANDLE_COUNT-1));
+  const requestedStart=getGoldilocksConfirmationHistoryStart(history,defaultStart,CONFIRMATION_SECONDS);
+  cachedConfirmationCandles=readArchivedCandles(
+    {pair,timeframe:CONFIRMATION_TIMEFRAME,mode},
+    requestedStart,
+    bounds.endTime+CONFIRMATION_SECONDS,
+  );
   return cachedConfirmationCandles;
 };
 
@@ -135,8 +145,9 @@ const journalFor = (
   risk?: { profile: RiskProfile; riskPercentage: number },
   approachPressure?: GoldilocksApproachPressure,
   zoneCorridors?: ZoneCorridorMeasurement[],
+  entryEligibilityTime=confirmationTime+CONFIRMATION_SECONDS,
 ): JournalData => {
-  const zoneAgeSeconds=getGoldilocksZoneAgeSeconds(zone.candleTime,confirmationTime+CONFIRMATION_SECONDS);
+  const zoneAgeSeconds=getGoldilocksZoneAgeSeconds(zone.candleTime,entryEligibilityTime);
   return ({
   direction,
   rrZone: { low: zone.low, high: zone.high },
@@ -448,7 +459,7 @@ const monitorTrade = async (trade: Trade, journal: JournalData) => {
           try {
             trailingAtr = calculateAtr(await fetchCandles(
               pair,
-              CONFIRMATION_TIMEFRAME,
+              TIMEFRAMES.execution,
               GOLDILOCKS_DEFAULT_MANAGEMENT.trailingAtrPeriod + 1,
               undefined,
               undefined,
@@ -567,7 +578,7 @@ const loadZoneHistory = async () => {
   return cachedHistory;
 };
 
-const loadScoringContext = async (zone: Parameters<typeof annotateConfluenceAt>[0], time: number, entry:number, direction:'BUY'|'SELL',stopLoss:number,takeProfit:number) => {
+const loadScoringContext = async (zone: Parameters<typeof annotateConfluenceAt>[0], entryEligibilityTime: number, entry:number, direction:'BUY'|'SELL',stopLoss:number,takeProfit:number) => {
   const snapshots = await Promise.all(TIMEFRAMES.confluence.map(async timeframe => {
     if (timeframe === ZONE_TIMEFRAME && cachedHistory) return { timeframe, history: cachedHistory.history, candles: [],strategyCandles:cachedHistory.candles };
     const candles=readWorkingCandles(timeframe);
@@ -575,9 +586,9 @@ const loadScoringContext = async (zone: Parameters<typeof annotateConfluenceAt>[
   }));
   const trendCandles = snapshots.find(snapshot => snapshot.timeframe === TREND_TIMEFRAME)?.candles ?? [];
   return {
-    zone: annotateConfluenceAt(zone, ZONE_TIMEFRAME, time, snapshots),
-    trend: getGoldilocksTrend(trendCandles.slice(-5_000), time),
-    zoneCorridors:snapshots.map(snapshot=>measureZoneCorridor({pair,timeframe:snapshot.timeframe,measuredAt:time+CONFIRMATION_SECONDS,entry,stopLoss,takeProfit,zones:snapshot.history.zones,candles:snapshot.strategyCandles})),
+    zone: annotateConfluenceAt(zone, ZONE_TIMEFRAME, entryEligibilityTime, snapshots),
+    trend: getGoldilocksTrend(trendCandles, entryEligibilityTime),
+    zoneCorridors:snapshots.map(snapshot=>measureZoneCorridor({pair,timeframe:snapshot.timeframe,measuredAt:entryEligibilityTime,entry,stopLoss,takeProfit,zones:snapshot.history.zones,candles:snapshot.strategyCandles})),
   };
 };
 
@@ -595,11 +606,60 @@ const safetyBlockReason = async (): Promise<string | null> => {
   return null;
 };
 
+const waitForImmediateStreamTouch=async(
+  history:ReturnType<typeof applyConfirmationTimeframeZoneLifecycle>,
+  confirmationCandles:ReturnType<typeof toStrategyCandles>,
+  zoneCandles:ReturnType<typeof toStrategyCandles>,
+):Promise<FreshGoldilocksConfirmation[]>=>{
+  const executableZones=history.activeZones.filter(zone=>{
+    if(zone.kind!=='base')return false;
+    const lifecycle=getZoneLifecycle(pair,zone.id);
+    return !lifecycle||!['TOUCHED','EXECUTED','INVALIDATED','EXPIRED'].includes(lifecycle.state);
+  });
+  immediateWatchActive=executableZones.length>0;
+  if(!immediateWatchActive){immediateQuoteCursor=Date.now();return []}
+  const watchStartedAt=Date.now();
+  const deadline=watchStartedAt+Math.max(250,millisecondsUntilNextConfirmationClose(watchStartedAt));
+  let lastLeaseAt=0;
+  if(!usesSharedMarketDataHub&&!isStreamInitialized(pair,mode))startPriceStream(pair,mode);
+  while(!killed&&Date.now()<deadline){
+    if(usesSharedMarketDataHub&&Date.now()-lastLeaseAt>=10_000){
+      await setMarketDataInterest(pair,true,marketDataOwner);lastLeaseAt=Date.now();
+    }
+    const quotes=await fetchStreamQuotesAfter(pair,mode,immediateQuoteCursor);
+    for(const quote of quotes){
+      immediateQuoteCursor=Math.max(immediateQuoteCursor,quote.receivedAt);
+      const quoteTime=Date.parse(quote.oandaTime)/1_000;
+      if(Number.isFinite(quoteTime)){
+        const touches=findFreshGoldilocksStreamTouches(
+          {...history,activeZones:executableZones},confirmationCandles,
+          CONFIRMATION_SECONDS,{bid:Number(quote.bid),ask:Number(quote.ask),time:quoteTime,receivedAt:quote.receivedAt},
+          zoneCandles,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME],
+        );
+        if(touches.length)return touches;
+      }
+    }
+    await wait(50);
+  }
+  return [];
+};
+
 const scan = async () => {
+  immediateWatchActive=false;
   logMemoryTelemetry();
   updateWorkerStatus(pair, 'scanning', 'loading_zones', `Scanning ${ZONE_TIMEFRAME} Goldilocks zones and ${CONFIRMATION_TIMEFRAME} confirmation candles.`, mode);
   const snapshot = await loadZoneHistory();
-  for(const zone of snapshot.history.zones){
+  const confirmationRaw = await loadConfirmationCandles(snapshot.history);
+  const confirmationCandles = toStrategyCandles(confirmationRaw);
+  const zoneHistory=applyConfirmationTimeframeZoneLifecycle(
+    snapshot.history,
+    confirmationCandles,
+    CONFIRMATION_SECONDS,
+    snapshot.candles,
+    GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME],
+    Date.now()/1_000,
+  );
+  for(const zone of zoneHistory.zones){
     let lifecycle=getZoneLifecycle(pair,zone.id)??{zoneId:zone.id,pair,state:'DISCOVERED',updatedAt:Date.now()} as ZoneLifecycleRecord;
     lifecycle=zone.state==='expired'
       ?transitionZoneLifecycle(lifecycle,{type:'expire',reason:'Zone age exceeded the executable lifecycle limit.'})
@@ -608,36 +668,66 @@ const scan = async () => {
         :transitionZoneLifecycle(lifecycle,{type:'departure_confirmed'});
     persistZoneLifecycle(lifecycle);
   }
-  const confirmationRaw = await loadConfirmationCandles();
-  const confirmationCandles = toStrategyCandles(confirmationRaw);
-  const confirmations = findFreshGoldilocksConfirmations(snapshot.history, confirmationCandles, CONFIRMATION_SECONDS,Date.now(),snapshot.candles,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME],confirmationMode);
+  let confirmations = confirmationMode==='close-through'
+    ?findFreshGoldilocksConfirmations(zoneHistory, confirmationCandles, CONFIRMATION_SECONDS,Date.now(),snapshot.candles,GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME],confirmationMode)
+    :[];
   const setups=confirmations.map(confirmation=>{
     const touchIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.touchCandle.time);
     const confirmationIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.confirmationCandle.time);
     return {zone:confirmation.zone,touchCandle:confirmation.touchCandle,confirmationCandle:confirmation.confirmationCandle,
-      approachPressure:touchIndex>=0&&confirmationIndex>touchIndex?measureGoldilocksApproachPressure(confirmation.zone,confirmationCandles,touchIndex,confirmationIndex):undefined};
+      approachPressure:touchIndex>=0&&confirmationIndex>touchIndex?measureGoldilocksApproachPressure(confirmation.zone,confirmationCandles,touchIndex,confirmationIndex,{firstOutsideTime:confirmation.firstOutsideTime}):undefined};
   });
   const trendCandles=readWorkingCandles(TREND_TIMEFRAME);
   const executionCandles=readWorkingCandles(TIMEFRAMES.execution,500);
+  const earliestActiveBase=zoneHistory.activeZones
+    .filter(zone=>zone.kind==='base')
+    .reduce((earliest,zone)=>Math.min(earliest,zone.candleTime),Number.POSITIVE_INFINITY);
+  const displayStart=Number.isFinite(earliestActiveBase)
+    ?Math.max(0,earliestActiveBase-GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME]*20)
+    :snapshot.candles.at(-400)?.time??0;
+  const evidenceHistory={
+    ...zoneHistory,
+    zones:zoneHistory.zones.filter(zone=>zone.kind==='base'&&(
+      zoneHistory.activeZones.some(active=>active.id===zone.id)||
+      (zone.invalidatedAt??0)>=displayStart
+    )),
+  };
+  const zoneEvidence=buildGoldilocksZoneChartEvidence({
+    history:evidenceHistory,zoneCandles:snapshot.candles,
+    zoneSeconds:GOLDILOCKS_TIMEFRAME_SECONDS[ZONE_TIMEFRAME],zoneTimeframe:ZONE_TIMEFRAME,
+    confirmationCandles,confirmationSeconds:CONFIRMATION_SECONDS,confirmationTimeframe:CONFIRMATION_TIMEFRAME,
+    completedBefore:Date.now()/1_000,
+  });
   const snapshotSetups=setups.length?setups:getActiveTrade(pair)
     ?((getAutomationZoneSnapshot(pair)?.setups??[]) as typeof setups):[];
   saveAutomationZoneSnapshot({
     pair,mode,scannedAt:new Date().toISOString(),trend:getGoldilocksTrend(trendCandles.slice(-5_000)),
     zoneTimeframe:ZONE_TIMEFRAME,confirmationTimeframe:CONFIRMATION_TIMEFRAME,
     confirmationMode,minimumScore,
-    zones:snapshot.history.activeZones.filter(zone=>zone.kind==='base'),
-    candles:{[ZONE_TIMEFRAME]:snapshot.candles.slice(-400),[CONFIRMATION_TIMEFRAME]:confirmationCandles.slice(-500),
+    zones:zoneHistory.activeZones.filter(zone=>zone.kind==='base'),
+    zoneEvidence,
+    candles:{[ZONE_TIMEFRAME]:snapshot.candles.filter(candle=>candle.time>=displayStart),[CONFIRMATION_TIMEFRAME]:confirmationCandles.filter(candle=>candle.time>=displayStart),
       [TREND_TIMEFRAME]:toStrategyCandles(trendCandles).slice(-400),[TIMEFRAMES.execution]:toStrategyCandles(executionCandles).slice(-500)},
     confirmationCount:confirmations.length,setups:snapshotSetups,
   });
   const blocked = await safetyBlockReason();
   if (blocked) {
+    if(confirmationMode==='touch-entry'){
+      immediateQuoteCursor=Date.now();
+      if(!usesSharedMarketDataHub)schedulePriceStreamIdleStop(pair,mode);
+      else await setMarketDataInterest(pair,false,marketDataOwner);
+    }
     updateWorkerStatus(pair, 'paused', 'safety_guard', blocked, mode);
     return;
   }
+  if(confirmationMode==='touch-entry'&&!confirmations.length){
+    confirmations=await waitForImmediateStreamTouch(zoneHistory,confirmationCandles,snapshot.candles);
+  }
   if (!confirmations.length) {
-    if(!usesSharedMarketDataHub)schedulePriceStreamIdleStop(pair,mode);
-    else await setMarketDataInterest(pair,false,marketDataOwner);
+    if(!immediateWatchActive){
+      if(!usesSharedMarketDataHub)schedulePriceStreamIdleStop(pair,mode);
+      else await setMarketDataInterest(pair,false,marketDataOwner);
+    }
     updateWorkerStatus(pair, 'waiting', 'waiting_for_confirmation', `No fresh ${CONFIRMATION_TIMEFRAME} ${confirmationMode==='touch-entry'?'immediate touch':'close-through confirmation'} is ready.`, mode);
     return;
   }
@@ -655,6 +745,11 @@ const scan = async () => {
     const key = `${confirmation.zone.id}:${confirmation.confirmationCandle.time}`;
     let lifecycle=getZoneLifecycle(pair,confirmation.zone.id)??{zoneId:confirmation.zone.id,pair,state:'ACTIVE_FAR',updatedAt:Date.now()} as ZoneLifecycleRecord;
     if(['EXECUTED','INVALIDATED','EXPIRED'].includes(lifecycle.state)||lifecycle.touchKey===key)continue;
+    if(confirmation.streamQuote)logMessage(
+      `IMMEDIATE STREAM TOUCH | ${pair} | ${confirmation.zone.side} proximal boundary reached at ${new Date(confirmation.entryEligibilityTime!*1_000).toISOString()}.`,
+      {zoneId:confirmation.zone.id,quote:confirmation.streamQuote,entryEligibilityTime:confirmation.entryEligibilityTime,priorTouches:confirmation.priorTouches},
+      {pair,fileName:'goldilocksWorker',step:'stream_touch_triggered'},
+    );
     lifecycle=transitionZoneLifecycle(lifecycle,{type:'approach'});lifecycle=transitionZoneLifecycle(lifecycle,{type:'arm'});
     lifecycle=transitionZoneLifecycle(lifecycle,{type:'touch',touchKey:key});persistZoneLifecycle(lifecycle);
     if (attemptedConfirmations.has(key)) continue;
@@ -707,7 +802,7 @@ const scan = async () => {
       updateWorkerStatus(pair, 'waiting', 'entry_proximity_rejected', liveProximity.reason, mode);
       continue;
     }
-    const finalCheck = validateTwoToOneRunway(confirmation.zone,snapshot.history.activeZones,liveEntry,{
+    const finalCheck = validateTwoToOneRunway(confirmation.zone,zoneHistory.activeZones,liveEntry,{
       targetRewardRatio:setAndForget?appliedStrategy.config.setAndForgetTargetR:2,
       targetOpposingBase:setAndForget&&appliedStrategy.config.setAndForgetTargetMode==='opposing-base',
     });
@@ -717,17 +812,19 @@ const scan = async () => {
       continue;
     }
 
-    const scoringContext = await loadScoringContext(confirmation.zone, confirmation.confirmationCandle.time,finalCheck.entry,direction,finalCheck.stopLoss,finalCheck.takeProfit);
-    const entryEligibilityTime=confirmation.confirmationCandle.time+CONFIRMATION_SECONDS;
+    const entryEligibilityTime=confirmation.entryEligibilityTime??confirmation.confirmationCandle.time+CONFIRMATION_SECONDS;
+    const scoringContext = await loadScoringContext(confirmation.zone, entryEligibilityTime,finalCheck.entry,direction,finalCheck.stopLoss,finalCheck.takeProfit);
     const zoneAgeSeconds=getGoldilocksZoneAgeSeconds(scoringContext.zone.candleTime,entryEligibilityTime);
-    const touchIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.touchCandle.time);
-    const confirmationIndex=confirmationCandles.findIndex(candle=>candle.time===confirmation.confirmationCandle.time);
-    const approachPressure=touchIndex>=0&&confirmationIndex>touchIndex
+    const pressureCandles=confirmation.streamQuote?[...confirmationCandles,confirmation.touchCandle]:confirmationCandles;
+    const touchIndex=pressureCandles.findIndex(candle=>candle.time===confirmation.touchCandle.time);
+    const confirmationIndex=confirmation.streamQuote?Math.max(0,touchIndex-1):pressureCandles.findIndex(candle=>candle.time===confirmation.confirmationCandle.time);
+    const approachPressure=touchIndex>=0&&(confirmation.streamQuote?confirmationIndex<touchIndex:confirmationIndex>touchIndex)
       ?measureGoldilocksApproachPressure(
         scoringContext.zone,
-        confirmationCandles,
+        pressureCandles,
         touchIndex,
         confirmationIndex,
+        {firstOutsideTime:confirmation.firstOutsideTime},
       )
       :undefined;
     const score = scoreGoldilocksSetup({
@@ -804,7 +901,12 @@ const scan = async () => {
         ?undefined:(setAndForget?appliedStrategy.config.setAndForgetTargetR??2:2),
       risk: riskDecision.riskPercentage,
       executableEntryGuard:({executableEntry})=>{
-        const executionCheck=validateTwoToOneRunway(confirmation.zone,snapshot.history.activeZones,executableEntry,{
+        const executionProximity=validateGoldilocksEntryProximity(
+          confirmation.zone,confirmation.touchCandle,
+          confirmation.confirmationCandle.close,executableEntry,
+        );
+        if(!executionProximity.allowed)return {allowed:false,reason:executionProximity.reason};
+        const executionCheck=validateTwoToOneRunway(confirmation.zone,zoneHistory.activeZones,executableEntry,{
           targetRewardRatio:setAndForget?appliedStrategy.config.setAndForgetTargetR:2,
           targetOpposingBase:setAndForget&&appliedStrategy.config.setAndForgetTargetMode==='opposing-base',
         });
@@ -816,7 +918,7 @@ const scan = async () => {
       return;
     }
     persistZoneLifecycle(transitionZoneLifecycle(lifecycle,{type:'execute'}));
-    const journal = journalFor(direction, tradeInfo.spread, scoringContext.zone, confirmation.confirmationCandle.time, score, riskDecision, approachPressure,scoringContext.zoneCorridors);
+    const journal = journalFor(direction, tradeInfo.spread, scoringContext.zone, confirmation.confirmationCandle.time, score, riskDecision, approachPressure,scoringContext.zoneCorridors,entryEligibilityTime);
     await monitorTrade({
       id: tradeInfo.tradeId,
       instrument: normalizePairKeyUnderscore(pair),
@@ -840,7 +942,7 @@ const run = async () => {
     } catch (error) {
       updateWorkerStatus(pair, 'error', 'strategy_error', (error as Error).message, mode);
     }
-    if (!killed) await wait(millisecondsUntilNextConfirmationClose());
+    if (!killed) await wait(confirmationMode==='touch-entry'&&immediateWatchActive?100:millisecondsUntilNextConfirmationClose());
   }
   if (!usesSharedMarketDataHub) await stopPriceStream(pair, mode);
   updateWorkerStatus(pair, 'stopped', 'worker_stopped', 'Goldilocks worker stopped.', mode);

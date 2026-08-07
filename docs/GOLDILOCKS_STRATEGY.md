@@ -33,7 +33,7 @@ These are intentionally small for rapid practice testing. Keep them centralized 
 `utils/goldilocksConfig.ts` when moving to higher timeframes.
 
 Backtesting, automatic research, Strategy Lab, and approved demo automation expose the
-`m15-m5-m1-research-v3` profile: M15 trend/range, M5 zones and first-outside
+`m15-m5-m1-research-v4` profile: M15 trend/range, M5 zones and first-outside
 lifecycle, and M1 prior-touch purity plus first-touch/later close-through
 confirmation. M1 is also the lowest available post-entry resolution. Entry becomes
 eligible only after the confirming M1 candle completes, and outcome simulation starts
@@ -72,7 +72,7 @@ new history boundary. Box and
 Fibonacci drawings persist locally per pair and visible timeframe, with optional OHLC
 light-magnet snapping. Clicking a displayed trade's touch candle switches to M1.
 The displayed prior-touch amount is measured as touching candles on M5, the confirmation
-timeframe. Purity arms on the first completed M5 candle fully outside the zone after its
+timeframe. Purity arms on the first completed M5 candle that qualifies as departure after its
 base. Every later completed M5 candle intersecting the zone counts individually,
 including consecutive touching candles. The trade-trigger M5 candle is excluded from
 prior history. M15 separately retains its originating departure for zone lifecycle and
@@ -80,10 +80,10 @@ departure-quality evidence.
 Replay charts mark reconstructed prior-touch candles with orange dots only; they omit
 the timeframe and sequence label and do not render a per-touch audit list.
 They separately mark every zone-timeframe formation candle from the selected base
-through the candle before the first fully outside departure with yellow dots. These
+through the candle before the first qualifying departure with yellow dots. These
 formation markers explain departure compactness and never count as prior touches.
-They also anchor a `DEPARTURE` arrow to the first completed zone-timeframe candle
-fully outside the trade zone. That same candle supplies departure-quality scoring and
+They also anchor a `DEPARTURE` arrow to the first qualifying completed zone-timeframe
+candle. Its wick may still overlap the trade zone. That same candle supplies departure-quality scoring and
 the zone-formation news window. A departure rejected by the two-of-three shock gate keeps
 the same departure marker without displaying shock or wick-rejection diagnostics.
 For a current-version stored replay, the saved touch count remains authoritative. A
@@ -120,7 +120,7 @@ The Score Components card leads with the stored total out of 20, its minimum thr
 and the resulting pass/fail status.
 
 The historical research runner and approved demo automation also expose a separate
-`d1-h4-h1-research-v3` profile. It mirrors the contract as D1 trend/range, H4 zones,
+`d1-h4-h1-research-v4` profile. It mirrors the contract as D1 trend/range, H4 zones,
 first-outside and prior-touch purity, H1 first touch plus a distinct later H1
 close-through confirmation, and M5 post-entry ordering. Confluence is H1/H4/D1.
 Selecting either research profile on Backtesting does not itself change automation.
@@ -132,8 +132,8 @@ Backtesting also stores a selected trade manager with every run. New manual runs
 to `Set and forget` with the automatic opposing-base target. The live-aligned manager
 banks 50% at +1R, removes the broker take-profit, and trails
 the remaining 50% with a causal 2x ATR(14) chandelier stop. The trail follows the best
-favorable price, never loosens, and never moves behind break-even. It uses completed M5
-candles live and the available causal execution candles in backtests; it does not use
+favorable price, never loosens, and never moves behind break-even. It uses completed
+execution-timeframe candles in both live/demo and backtests; it does not use
 market structure. The prior manager is labeled `Break-even strategy (previous)`: it protects
 at +1R, exits fully at 2R below score 16, keeps 25% toward 4R for scores 16-17, and
 keeps 50% toward 4R for scores 18+, with runner protection at +1R. `Set and forget`
@@ -177,8 +177,14 @@ demand enters at the zone high and supply enters at the zone low on the first el
 touch candle. Its recorded signal time, replay marker, and risk-reward drawing begin on
 that touch candle. The immediate mode does not use the completed touch candle as
 pre-entry approach evidence. Zone lifecycle, purity, scoring, entry-distance, market,
-news, execution-coverage, and minimum target-runway gates remain active. This selector
-is backtest-only and never changes live/demo automation.
+news, execution-coverage, and minimum target-runway gates remain active. Automation
+implements the same proximal-boundary trigger causally from fresh OANDA stream quotes:
+demand triggers when executable ask reaches the zone high; supply triggers when
+executable bid reaches the zone low. It then evaluates every remaining gate and submits
+a market order using a second fresh quote. Historical midpoint OHLC cannot reconstruct
+spread, stream sampling, gate latency, or that later market fill, so the backtest's
+boundary entry remains an explicit execution approximation rather than an exact fill
+replay.
 Manual backtests also expose `Close trades before weekend`, enabled by default. Turning
 it off removes Friday liquidation from simulated outcomes and counterfactual manager
 paths, allowing positions to remain open across the weekend. It does not disable the
@@ -279,13 +285,15 @@ a trade.
 
 A zone can be fresh, touched, invalidated, or expired.
 
-1. The originating leg must complete before the zone is available.
-2. Once the structural break identifies the zone, scan forward from its M15 base: the first completed M15 candle fully outside is the originating departure and arms touch counting, even when it predates `availableAt`. Confirmation-timeframe touches, breaks, and purity checks begin no earlier than `availableAt`; formation candles cannot invalidate or trigger a zone before it exists causally.
-3. Purity arms on the first completed M5 candle fully outside the zone after its base. Every later completed M5 candle whose wick enters the zone counts as one qualifying prior touch, provided it completes before the first M5 trade-trigger touch. Consecutive touching M5 candles count individually.
+1. The originating leg must complete before the zone is available. Because OANDA
+   timestamps a candle at its open, `availableAt` is the structure-breaking endpoint
+   candle's close time, never its opening time.
+2. Once the structural break identifies the zone, scan forward from its base. The originating departure is the first completed directional candle whose close is strictly beyond the proximal boundary, whose body is at least 50% of its range, whose body is at least 0.25 ATR(14), and whose close penetrates at least 0.25 ATR beyond the proximal boundary. ATR(14) uses only the 14 completed candles before the candidate; missing, invalid, or non-positive ATR and invalid or zero candle range fail closed. Demand requires a bullish candle and supply requires a bearish candle. The wick may still overlap the zone, and the existing 3 ATR shock warning remains diagnostic rather than a gate. A nonqualifying marginal close remains in causal history and scanning continues to the first qualifying candle, which is then frozen. Confirmation-timeframe purity applies the same shared qualification after the base and includes later return candles even when they predate `availableAt`. At discovery, those already-completed returns are known causal history and can make the zone touched or invalidated. `availableAt` prevents a trade trigger before the structure is known; it does not erase prior price history.
+3. Purity arms on the first qualifying completed M5 departure candle after its base. The departure candle itself is excluded. Every later completed M5 candle whose wick enters the zone counts as one qualifying prior touch, provided it completes before the first M5 trade-trigger touch. Consecutive touching M5 candles count individually.
 4. Equality with the proximal boundary counts as a touch.
 5. Touch depth has no effect: any intersection with the zone counts as exactly one touch.
 6. The first M5 candle whose wick intersects the zone is frozen as the trade-trigger touch. Later touching M5 candles cannot replace it while the strategy waits for close-through confirmation.
-7. The first M5 trigger candle and all later candles are excluded from prior-touch count. They belong to the pending trade trigger, not the pre-trigger purity ledger.
+7. The first M5 trigger candle and all later candles are excluded from prior-touch count. They belong to the pending trade trigger, not the pre-trigger purity ledger. Shared lifecycle processing freezes this trigger before applying the fourth-touch rule.
 8. A fourth qualifying touch invalidates the zone; three remains the maximum allowed.
 9. Demand invalidates when a wick trades below its distal low. Supply invalidates when
    a wick trades above its distal high.
@@ -304,11 +312,32 @@ source zone remains usable at the displayed historical time and that source zone
 actually drawn. An unrelated or hidden zone cannot leave an orphan marker on a stored
 trade replay.
 
+Live automation and backtest/research charts use the same zone model and shared chart
+component; the Raspberry Pi runs the compiled ARM build of that source rather than a
+second strategy implementation. A live zone rectangle retains its originating base for
+formation context, and its label reports the backtester-aligned confirmation-timeframe
+touch count plus the Enid activation time. Returns after confirmation-timeframe
+departure and before `availableAt` count as prior history at discovery, but they cannot
+create a trade trigger before the zone is structurally available. The worker computes the label and executable lifecycle from archived confirmation
+candles beginning just before the earliest active base candle (not its later
+`availableAt`). The browser receives the complete retained interval needed to show each
+active base plus per-zone formation, close-outside departure, numbered prior-touch,
+fourth-touch/distal invalidation, liquidity-sweep, and fast-attack evidence. These
+annotations do not depend on an actionable trade. Display selection must never define
+touch eligibility.
+
 ## Touch and confirmation
 
 M15 owns the first outside candle. M5 owns prior-touch purity, the first trade touch,
 and later confirmation. M1 never creates a setup; it is retained only to resolve
 post-entry ordering inside completed M5 candles.
+
+In immediate-touch mode, the selected profile's confirmation timeframe still owns
+purity history, but the live trigger is the first newly received executable OANDA
+stream quote at the proximal boundary. Demand uses ask and supply uses bid. A quote
+whose opposite executable side has already crossed the distal stop is broken, not
+tradable. The exact OANDA quote timestamp is entry eligibility. A completed historical
+touch is stale and is never chased after restart.
 
 For a demand setup:
 
@@ -382,7 +411,7 @@ All gates must pass before scoring and again where volatility can change the res
 | Existing trade      | Only one open broker trade per pair                                                                                                                                                                                                                                                                                                                                                                |
 | Portfolio margin    | Atomically reserve proposed margin and stop-risk across all pair workers. Reject unless at least 50% of NAV remains as available-margin headroom, projected closeout utilization stays at or below 25%, and combined open stop-risk stays at or below 2% of NAV. Missing broker account fields fail closed.                                                                                        |
 | Zone                | Active, no more than 30 calendar days old, no more than three touches, not broken                                                                                                                                                                                                                                                                                                                  |
-| Confirmation        | Latest completed M5 close-through after a distinct M5 touch candle                                                                                                                                                                                                                                                                                                                                 |
+| Confirmation        | Close-through: latest completed M5 close-through after a distinct M5 touch. Immediate: first newly observed executable stream quote at the proximal boundary; completed old touches are stale.                                                                                                                                                                                          |
 | Entry proximity     | First-touch candle range is measured and displayed as diagnostic context but never rejects a setup. The fresh executable ask for BUY or bid for SELL must remain no more than 50% of one zone width beyond the proximal edge. The confirmation close has no separate distance gate. Historical backtests use that close as the modeled executable entry because historical bid/ask is unavailable. |
 | Spread              | Valid quote and no more than 3 pips                                                                                                                                                                                                                                                                                                                                                                |
 | Runway              | Clear 2R at confirmation and current executable entry                                                                                                                                                                                                                                                                                                                                              |
@@ -470,6 +499,10 @@ After entry:
 6. Persist the final outcome and realized P/L.
 7. Recover and resume management of an existing OANDA trade after worker restart.
 
+An executed base is terminal and cannot create a second strategy trade. While a base is
+waiting, its first eligible trigger remains frozen across later confirmations and gate
+rechecks; a rejected confirmation does not silently replace that touch.
+
 ## Live OANDA market-data contract
 
 OANDA is the sole live price source. Do not substitute TradingView or another broker's
@@ -487,6 +520,10 @@ differ.
   make the connection stale. Missing stream messages for 15 seconds causes a reconnect
   with exponential backoff and jitter.
 - The stream parser buffers partial newline-delimited JSON across network chunks.
+- The shared hub retains a bounded per-instrument stream-event buffer. Immediate-touch
+  workers advance a received-time cursor through every sampled quote, so a boundary
+  contact received while candle reconstruction is busy is evaluated after that scan
+  rather than being overwritten by the latest cache value.
 - Official completed midpoint candles remain authoritative for strategy OHLC. A stream
   is sampled by OANDA and must not be treated as a lossless tick feed or used to invent
   an official completed candle.
@@ -766,7 +803,9 @@ storage, completed-trial leaders, and recent research events. It can start, paus
 resume, or stop a campaign. Queued configurations may be reordered, edited, or removed
 before they start; completed and running trials remain immutable evidence. The Windows
 dashboard startup task recovers an interrupted non-paused campaign, returns its running
-trial to the queue, and launches a new bounded batch when no active campaign exists.
+trial to the queue, retires the stale queued/running backtest row owned by the dead
+campaign worker, and launches a new bounded batch when no active campaign exists. It
+does not retire an active manual backtest owned by a different process.
 Ranked leaders remain advisory and cannot change live/demo risk or strategy settings.
 Historical scans pre-index each zone's first completed outside candle once and then
 advance causally through confirmation candles. They must not rescan the complete zone
@@ -801,18 +840,23 @@ Persisted live zone lifecycle terminology is `DISCOVERED`, `DEPARTURE_PENDING`,
 entry after restart. Historical zone construction, touch equality, confirmation, score,
 and runway semantics are unchanged.
 
-Pair-local pricing streams are not started at worker boot. A fresh actionable
-confirmation activates a renewable interest lease, and exact execution remains
-fail-closed until a fresh quote exists. An idle cooldown prevents disconnect thrashing.
+Pair-local pricing streams are not started at worker boot in close-through mode. A
+fresh actionable close-through activates a renewable interest lease. Immediate-touch
+mode instead keeps the shared-hub lease renewed while at least one unconsumed active
+base is eligible, examines each newly received stream quote, and releases interest when
+no executable base remains. Exact execution remains fail-closed until a fresh quote
+exists. An idle cooldown prevents disconnect thrashing.
 The service-owned market-data hub converts all current leases into one combined OANDA
 subscription and closes that network stream when no leases remain. `openTrades` is checked at boot,
 for actionable confirmations, during trade reconciliation, and immediately before
 order submission; far/no-zone scans do not request it.
 
-After every pair scan, including a market-hours safety pause, the Pi stores a compact
-read-only visualization snapshot containing bounded M1/M5/M15/H1 candles, H1 trend,
-active base zones, scan timestamp, actionable confirmations, and their causal approach
-pressure evidence. The control response merges the current broker-trade ledger so the
+After every pair scan, including a market-hours safety pause, the Pi stores a read-only
+visualization snapshot containing the retained interval needed to show every active
+base's origin, H1 trend, active base zones, scan timestamp, actionable confirmations,
+and per-zone causal chart evidence. Formation, departure, numbered touches,
+invalidation, liquidity sweeps, and fast attacks are independent of trade eligibility.
+The control response merges the current broker-trade ledger so the
 PC chart can draw an active entry, stop, and target without waiting for another scan. Continuations
 are excluded from this display payload. The Pi control service exposes one selected
 pair at `/api/zones`; the PC-side `/api/automation/pi-zones` route proxies that payload

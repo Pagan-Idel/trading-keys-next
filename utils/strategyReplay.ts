@@ -353,6 +353,7 @@ export const formatStrategyZoneLabel = (zone: {
   side: "demand" | "supply";
   departureMultiple: number;
   touches: number;
+  availableAt?: number;
   zoneFamily?: "swing" | "imbalance-balance";
   imbalancePattern?:
     | "up-balance-up"
@@ -385,11 +386,16 @@ export const formatStrategyZoneLabel = (zone: {
   const zoneKind = zone.kind === "base" ? "Base" : "Continuation";
   const touchLabel = zone.historicalTradeZone
     ? `${zone.touches} prior touch${zone.touches === 1 ? "" : "es"}`
-    : `${zone.touches} touch${zone.touches === 1 ? "" : "es"}`;
+    : zone.historicalContextZone
+      ? `${zone.touches} touch${zone.touches === 1 ? "" : "es"}`
+      : `${zone.touches} eligible touch${zone.touches === 1 ? "" : "es"}`;
   const confluence = zone.timeframeConfluence
     ? ` · ZIZ ${zone.timeframeConfluence.timeframeCount}/3${zone.timeframeConfluence.timeframes.length === zone.timeframeConfluence.timeframeCount ? ` · ${zone.timeframeConfluence.timeframes.join("+")}` : ""}`
     : "";
-  return `${prefix}${zoneKind} ${zone.side} · ${zone.departureMultiple.toFixed(1)}x · ${touchLabel}${confluence}`;
+  const activation = !zone.historicalTradeZone && !zone.historicalContextZone && Number.isFinite(zone.availableAt)
+    ? ` · active ${formatStrategyChartTimeEnid(zone.availableAt!)}`
+    : "";
+  return `${prefix}${zoneKind} ${zone.side} · ${zone.departureMultiple.toFixed(1)}x · ${touchLabel}${activation}${confluence}`;
 };
 
 export const getStrategyReplayWindow = (

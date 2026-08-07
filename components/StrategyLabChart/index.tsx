@@ -6,6 +6,7 @@ import {
   LineSeries,
   createSeriesMarkers,
   createChart,
+  type AutoscaleInfoProvider,
   type CandlestickData,
   type IChartApi,
   type ISeriesApi,
@@ -15,6 +16,7 @@ import {
 } from "lightweight-charts";
 import styled from "styled-components";
 import type { GoldilocksApproachPressure } from "../../utils/approachPressure";
+import type { GoldilocksZoneChartEvidence } from "../../utils/goldilocksScanner";
 import {
   detectGoldilocksZones,
   findGoldilocksZoneDistalBreakTime,
@@ -39,6 +41,12 @@ import {
   getReplayVisibleStart,
   sortUniqueReplayCandleItems,
 } from "../../utils/strategyReplay";
+import {
+  autoscalePriceRangeWithZones,
+  canRestoreLogicalChartRange,
+  chartViewportCandleKey,
+  type LogicalChartRange,
+} from "../../utils/chartViewport";
 
 type Zone = {
   id: string;
@@ -370,10 +378,12 @@ type ChartScenario = {
   candles: StrategyCandle[];
   timeframe?: string;
   isReplay?: boolean;
+  isLiveAutomation?: boolean;
   leg: SwingLeg;
   detection?: GoldilocksDetection;
   swings?: SwingMarker[];
   zones?: GoldilocksZone[];
+  zoneEvidence?: GoldilocksZoneChartEvidence[];
   tradeSetup?: HistoricalTradeSetup | null;
   tradeSetups?: HistoricalTradeSetup[];
   rejectedFirstTouches?: RejectedFirstTouch[];
@@ -407,6 +417,7 @@ export default function StrategyLabChart({
   drilldownTimeframe = "M1",
   drawingStorageKey = "test",
   timeframeLoading = false,
+  availableTimeframes,
   hasOlder = false,
   hasNewer = false,
   onTimeframeChange,
@@ -422,6 +433,7 @@ export default function StrategyLabChart({
   drilldownTimeframe?: ChartTimeframe;
   drawingStorageKey?: string;
   timeframeLoading?: boolean;
+  availableTimeframes?: ChartTimeframe[];
   hasOlder?: boolean;
   hasNewer?: boolean;
   onTimeframeChange?: (timeframe: ChartTimeframe) => void;
@@ -431,7 +443,11 @@ export default function StrategyLabChart({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const onTimeframeChangeRef = useRef(onTimeframeChange);
+  onTimeframeChangeRef.current = onTimeframeChange;
   const visibleTimeRangeRef = useRef<{ from: Time; to: Time } | null>(null);
+  const visibleLogicalRangeRef = useRef<LogicalChartRange | null>(null);
+  const viewportCandleKeyRef = useRef<string | null>(null);
   const [positions, setPositions] = useState<
     Array<
       Zone & {
@@ -479,6 +495,8 @@ export default function StrategyLabChart({
     : null;
   useEffect(() => {
     visibleTimeRangeRef.current = null;
+    visibleLogicalRangeRef.current = null;
+    viewportCandleKeyRef.current = null;
     setTradeIdCopied(false);
   }, [replayViewportKey]);
   useEffect(
@@ -512,6 +530,8 @@ export default function StrategyLabChart({
   };
   useEffect(() => {
     visibleTimeRangeRef.current = null;
+    visibleLogicalRangeRef.current = null;
+    viewportCandleKeyRef.current = null;
     skipDrawingPersist.current = true;
     try {
       const stored = JSON.parse(
@@ -690,7 +710,11 @@ export default function StrategyLabChart({
       return result as UTCTimestamp;
     };
     return displayedDetectionZones.flatMap((zone) => {
-      if (zone.candleTime < firstTime || zone.candleTime > lastTime) return [];
+      if (
+        zone.candleTime > lastTime ||
+        (zone.candleTime < firstTime && !scenario?.isLiveAutomation)
+      )
+        return [];
       const historicalTradeZone = scenario?.tradeSetup?.zone.id === zone.id;
       const visibleBreak = findGoldilocksZoneDistalBreakTime(
         zone,
@@ -713,14 +737,18 @@ export default function StrategyLabChart({
         kind: zone.side,
         low: zone.low,
         high: zone.high,
-        startTime: atOrBefore(zone.candleTime),
+        startTime: zone.candleTime < firstTime
+          ? (firstTime as UTCTimestamp)
+          : atOrBefore(zone.candleTime),
         endTime: atOrAfter(rawEnd),
-        baseTime: atOrBefore(zone.candleTime),
+        baseTime: zone.candleTime < firstTime
+          ? (firstTime as UTCTimestamp)
+          : atOrBefore(zone.candleTime),
         historicalTradeZone,
         researchIbi: zone.zoneFamily === "imbalance-balance",
       };
     });
-  }, [candles, displayedDetectionZones, scenario?.tradeSetup, strategyCandles]);
+  }, [candles, displayedDetectionZones, scenario?.isLiveAutomation, scenario?.tradeSetup, strategyCandles]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -754,6 +782,23 @@ export default function StrategyLabChart({
           formatStrategyChartTimeEnid(Number(time)),
       },
     });
+    const liveAutoscaleZones = scenario?.isLiveAutomation
+      ? (["demand", "supply"] as const).flatMap((side) => {
+          const currentPrice = Number(candles.at(-1)?.close);
+          const nearest = zones
+            .filter((zone) => zone.kind === side)
+            .sort((left, right) => {
+              const distance = (zone: Zone) =>
+                currentPrice < zone.low
+                  ? zone.low - currentPrice
+                  : currentPrice > zone.high
+                    ? currentPrice - zone.high
+                    : 0;
+              return distance(left) - distance(right);
+            })[0];
+          return nearest ? [nearest] : [];
+        })
+      : [];
     const series = chart.addSeries(CandlestickSeries, {
       upColor: "#2edb91",
       downColor: "#ff5f70",
@@ -761,12 +806,23 @@ export default function StrategyLabChart({
       wickDownColor: "#ff5f70",
       borderVisible: false,
       priceLineVisible: false,
+      autoscaleInfoProvider: ((baseImplementation) => {
+        const base = baseImplementation();
+        if (!base?.priceRange || !liveAutoscaleZones.length) return base;
+        return {
+          ...base,
+          priceRange: autoscalePriceRangeWithZones(base.priceRange, liveAutoscaleZones),
+        };
+      }) satisfies AutoscaleInfoProvider,
       priceFormat: {
         type: "price",
         precision: pricePrecision,
         minMove: 10 ** -pricePrecision,
       },
     });
+    const viewportCandleKey = chartViewportCandleKey(
+      candles.map((candle) => Number(candle.time)),
+    );
     const candleReadout = document.createElement("div");
     candleReadout.style.cssText =
       "position:absolute;left:190px;top:14px;z-index:4;padding:7px 9px;border:1px solid #303744;border-radius:7px;background:rgba(8,10,14,.9);color:#dce6f2;font:700 11px/1.3 ui-monospace,SFMono-Regular,Consolas,monospace;box-shadow:0 8px 24px rgba(0,0,0,.3);pointer-events:none;display:none";
@@ -796,7 +852,7 @@ export default function StrategyLabChart({
           (time) => time >= selectedTime && time < selectedTime + interval,
         )
       )
-        onTimeframeChange?.(drilldownTimeframe);
+        onTimeframeChangeRef.current?.(drilldownTimeframe);
     };
     chart.subscribeClick(openTouchDrilldown);
     const captureDrawing = (param: MouseEventParams<Time>) => {
@@ -964,8 +1020,102 @@ export default function StrategyLabChart({
     }));
     const firstCandleTime = candleTimes[0]?.time ?? 0;
     const lastCandleTime = candleTimes.at(-1)?.time ?? 0;
+    const evidenceZoneIds = new Set(
+      (scenario?.zoneEvidence ?? []).map((evidence) => evidence.zoneId),
+    );
+    const markerAtEvidenceTime = <T extends {
+      time: number;
+      text: string;
+      color: string;
+      shape: "circle" | "square" | "arrowUp" | "arrowDown";
+    } & (
+      | { position: "aboveBar" | "belowBar"; price?: never }
+      | { position: "atPriceMiddle"; price: number }
+    )>(marker: T) => {
+      if (marker.time < firstCandleTime || marker.time > lastCandleTime)
+        return [];
+      const candleIndex = getReplayCandleIndexAtOrBefore(candleTimes, marker.time);
+      const candle = candles[candleIndex];
+      return candle ? [{ ...marker, time: candle.time as UTCTimestamp }] : [];
+    };
+    const zoneEvidenceMarkers = (scenario?.zoneEvidence ?? []).flatMap(
+      (evidence) => {
+        const zone = knownZones.find((item) => item.id === evidence.zoneId);
+        const side = zone?.side ?? evidence.zoneSide;
+        const fastAttackTime =
+          evidence.approachPressure?.fastApproachPushStartTimes?.at(-1) ??
+          evidence.approachPressure?.approachEvidenceTime;
+        return [
+          ...evidence.formationCandleDetails.flatMap((detail, index) =>
+            markerAtEvidenceTime({
+              time: detail.time,
+              position: "atPriceMiddle" as const,
+              price: detail.price,
+              color: "#ffd45c",
+              shape: "circle" as const,
+              text: index === 0 ? "BASE" : "",
+            }),
+          ),
+          ...(evidence.departureCandleTime === undefined
+            ? []
+            : markerAtEvidenceTime({
+                time: evidence.departureCandleTime,
+                position: side === "supply" ? "aboveBar" as const : "belowBar" as const,
+                color: "#ff9f43",
+                shape: side === "supply" ? "arrowDown" as const : "arrowUp" as const,
+                text: "DEPARTURE",
+              })),
+          ...evidence.priorTouchDetails.flatMap((touch, index) =>
+            markerAtEvidenceTime({
+              time: touch.time,
+              position: "atPriceMiddle" as const,
+              price: touch.price,
+              color: index >= 3 ? "#ff6876" : "#f4a340",
+              shape: "circle" as const,
+              text: index === 3 ? "TOUCH 4 - INVALID" : `TOUCH ${index + 1}`,
+            }),
+          ),
+          ...(evidence.invalidatedAt === undefined
+            ? []
+            : markerAtEvidenceTime({
+                time: evidence.invalidatedAt,
+                position: side === "supply" ? "aboveBar" as const : "belowBar" as const,
+                color: "#ff4f5e",
+                shape: "square" as const,
+                text: evidence.invalidationReason ?? "INVALIDATED",
+              })),
+          ...(evidence.approachPressure?.latestSweepTime == null
+            ? []
+            : [evidence.approachPressure.latestSweepTime]
+          ).flatMap((time) => markerAtEvidenceTime({
+            time,
+            text: side === "demand"
+              ? "LIQUIDITY SWEEP - HIGHS SWEPT"
+              : "LIQUIDITY SWEEP - LOWS SWEPT",
+            color: "#f7c948",
+            position: side === "demand" ? "aboveBar" as const : "belowBar" as const,
+            shape: "circle" as const,
+          })),
+          ...(evidence.approachPressure?.adversePressureFlags.some((flag) =>
+            flag.startsWith("momentum_drive_into_"),
+          )
+            ? fastAttackTime == null
+              ? []
+              : [fastAttackTime]
+            : []).flatMap((time) => markerAtEvidenceTime({
+              time,
+              text: "FAST ATTACK",
+              color: "#d977ff",
+              position: side === "supply" ? "belowBar" as const : "aboveBar" as const,
+              shape: "square" as const,
+            })),
+        ];
+      },
+    );
     const priorTouchMarkers = (
-      scenario?.tradeSetup?.priorTouchDetails ?? []
+      evidenceZoneIds.has(scenario?.tradeSetup?.zone.id ?? "")
+        ? []
+        : scenario?.tradeSetup?.priorTouchDetails ?? []
     ).flatMap((touch) => {
       if (touch.time < firstCandleTime || touch.time > lastCandleTime)
         return [];
@@ -987,7 +1137,9 @@ export default function StrategyLabChart({
       ];
     });
     const formationCandleMarkers = (
-      scenario?.tradeSetup?.formationCandleDetails ?? []
+      evidenceZoneIds.has(scenario?.tradeSetup?.zone.id ?? "")
+        ? []
+        : scenario?.tradeSetup?.formationCandleDetails ?? []
     ).flatMap((detail) => {
       if (detail.time < firstCandleTime || detail.time > lastCandleTime)
         return [];
@@ -1008,7 +1160,9 @@ export default function StrategyLabChart({
         },
       ];
     });
-    const departureQuality = scenario?.tradeSetup?.zone.departureQuality;
+    const departureQuality = evidenceZoneIds.has(scenario?.tradeSetup?.zone.id ?? "")
+      ? undefined
+      : scenario?.tradeSetup?.zone.departureQuality;
     const departureMarkers =
       departureQuality &&
       departureQuality.departureCandleTime >= firstCandleTime &&
@@ -1037,7 +1191,9 @@ export default function StrategyLabChart({
             ];
           })()
         : [];
-    const approachPressure = scenario?.tradeSetup?.approachPressure;
+    const approachPressure = evidenceZoneIds.has(scenario?.tradeSetup?.zone.id ?? "")
+      ? undefined
+      : scenario?.tradeSetup?.approachPressure;
     const approachEvidenceMarkers = approachPressure
       ? [
           ...(
@@ -1165,6 +1321,7 @@ export default function StrategyLabChart({
       series,
       [
         ...structureMarkers,
+        ...zoneEvidenceMarkers,
         ...formationCandleMarkers,
         ...priorTouchMarkers,
         ...departureMarkers,
@@ -1397,7 +1554,15 @@ export default function StrategyLabChart({
       );
     }
     chart.timeScale().fitContent();
-    if (visibleTimeRangeRef.current) {
+    if (
+      canRestoreLogicalChartRange(
+        viewportCandleKeyRef.current,
+        viewportCandleKey,
+        visibleLogicalRangeRef.current,
+      )
+    ) {
+      chart.timeScale().setVisibleLogicalRange(visibleLogicalRangeRef.current!);
+    } else if (visibleTimeRangeRef.current) {
       chart.timeScale().setVisibleRange(visibleTimeRangeRef.current);
     } else if (scenario?.tradeSetup && entryTime !== undefined) {
       const closestIndexTo = (target: number) => {
@@ -1585,6 +1750,14 @@ export default function StrategyLabChart({
     };
     const timer = window.setTimeout(schedulePlace, 50);
     chart.timeScale().subscribeVisibleLogicalRangeChange(schedulePlace);
+    const rememberViewport = (
+      range: { from: number; to: number } | null,
+    ) => {
+      visibleLogicalRangeRef.current = range;
+      visibleTimeRangeRef.current = chart.timeScale().getVisibleRange();
+      viewportCandleKeyRef.current = viewportCandleKey;
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(rememberViewport);
     const updateHistoryButtons = (
       range: { from: number; to: number } | null,
     ) => {
@@ -1595,14 +1768,20 @@ export default function StrategyLabChart({
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(updateHistoryButtons);
     updateHistoryButtons(chart.timeScale().getVisibleLogicalRange());
+    rememberViewport(chart.timeScale().getVisibleLogicalRange());
     const observer = new ResizeObserver(schedulePlace);
     observer.observe(containerRef.current);
     return () => {
+      visibleLogicalRangeRef.current = chart.timeScale().getVisibleLogicalRange();
       visibleTimeRangeRef.current = chart.timeScale().getVisibleRange();
+      viewportCandleKeyRef.current = viewportCandleKey;
       window.clearTimeout(timer);
       if (placementFrame) window.cancelAnimationFrame(placementFrame);
       observer.disconnect();
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(schedulePlace);
+      chart
+        .timeScale()
+        .unsubscribeVisibleLogicalRangeChange(rememberViewport);
       chart
         .timeScale()
         .unsubscribeVisibleLogicalRangeChange(updateHistoryButtons);
@@ -1624,7 +1803,6 @@ export default function StrategyLabChart({
     hasNewer,
     hasOlder,
     lightMagnet,
-    onTimeframeChange,
     pricePrecision,
     runway,
     scenario,
@@ -1684,18 +1862,20 @@ export default function StrategyLabChart({
         </TradeIdBadge>
       )}
       <TimeframeToolbar role="group" aria-label="Chart timeframe">
-        {chartTimeframes.map((item) => (
-          <TimeframeButton
-            key={item}
-            type="button"
-            active={timeframe === item}
-            disabled={timeframeLoading}
-            aria-pressed={timeframe === item}
-            onClick={() => onTimeframeChange?.(item)}
-          >
-            {item}
-          </TimeframeButton>
-        ))}
+        {chartTimeframes.map((item) => {
+          const available = !availableTimeframes || availableTimeframes.includes(item);
+          return <TimeframeButton
+              key={item}
+              type="button"
+              active={timeframe === item}
+              disabled={timeframeLoading || !available}
+              aria-pressed={timeframe === item}
+              title={available ? undefined : "This Pi snapshot does not include this timeframe"}
+              onClick={() => available && onTimeframeChange?.(item)}
+            >
+              {item}
+            </TimeframeButton>;
+        })}
       </TimeframeToolbar>
       <DrawingToolbar>
         <TimeframeButton

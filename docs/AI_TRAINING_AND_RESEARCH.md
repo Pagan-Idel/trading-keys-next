@@ -58,6 +58,15 @@ Completed OANDA midpoint OHLC is stored separately in `data/candle-history.sqlit
 database contains market data only and is intentionally separate from
 `data/automation.sqlite` so large M1 archives do not slow trade/event writes.
 
+Live/demo zone purity is reconstructed from the same confirmation-timeframe touch
+utilities used by research and backtests. Each worker reads archived confirmation
+candles from the earliest currently active base through the latest completed candle,
+then removes fourth-touch or broken zones before confirmation and runway evaluation.
+Automation snapshots retain the interval needed to show every active base and carry a
+per-zone causal evidence ledger for formation, departure, touches, invalidation, sweeps,
+and fast attacks. The payload is still not an algorithm input and cannot erase older
+qualifying touches.
+
 Automatic campaign state and trial summaries are stored separately in
 `data/goldilocks-research.sqlite`. A campaign configuration hash, dataset-manifest
 key, backtest run ID, official realized-R metrics, per-pair metrics, and every
@@ -70,6 +79,11 @@ and seals that bounded snapshot, and queues the same comparison matrix again. Ea
 trial remains attached to its own immutable dataset key and end time. The campaign
 continues until a user explicitly pauses or stops it; live/demo strategy settings are
 never promoted automatically.
+When workstation startup recovers an interrupted campaign, it also retires the
+queued/running backtest row owned by that dead campaign worker before returning the
+interrupted trial to the queue. Partial rows remain failed evidence, while the queued
+trial receives a clean deterministic rerun. An unrelated manual backtest is never
+retired by campaign recovery.
 Automatic comparison matrices use a fixed 365-day lookback for every strategy stack.
 The queue editor identifies trials by their immutable primary key and exposes only
 research inputs; labels are generated from the trial ID, stack, and score threshold.
@@ -80,6 +94,10 @@ seeded wildcard that rotates among manager, target, confirmation, entry-distance
 touch-limit, and score-weight variants. Wildcards remain research-only and never
 change live/demo settings automatically. Session availability is not manually editable
 from the queue.
+Every newly rebased cycle normalizes the anchor to the current profile version, enables
+mandatory Friday liquidation, and disables the backtest-only reverse-signal option.
+This prevents a historically strong but automation-incompatible weekend-hold artifact
+from seeding another nominally promotable cycle.
 
 ## Event vocabulary
 
@@ -197,7 +215,7 @@ assumption. Disabled runs omit simulated Friday liquidation but retain the weekl
 entry-hours gate unless that independent gate is also disabled. This setting is
 backtest-only and never changes live/demo weekend safety.
 
-Strategy `0.49` applies the same account-wide admission policy to live/demo orders and
+Strategy `0.51` applies the same account-wide admission policy to live/demo orders and
 the chronological portfolio projection. A candidate must leave at least 50% of NAV as
 available margin, keep projected margin-closeout usage at or below 25%, and keep known
 plus conservatively estimated open stop risk at or below 2% of NAV. Live/demo workers
@@ -210,6 +228,16 @@ Official strategy-edge and research metrics use only chronologically portfolio-a
 trades. Margin-blocked signals retain their counterfactual outcome for missed-trade
 research, but they contribute nothing to realized R, expectancy, profit factor, win
 rate, loss streak, drawdown, or projected account P/L.
+
+Immediate-touch research uses the first confirmation-timeframe OHLC intersection and
+models entry at the proximal boundary. Demo automation observes the same boundary from
+new OANDA executable stream quotes (ask for demand, bid for supply), freezes that exact
+quote time, runs all remaining gates, and places a market order from a second fresh
+quote. Configuration parity and signal-boundary parity can therefore be tested exactly,
+but historical realized R cannot prove fill parity: archived midpoint candles omit
+spread, sampled stream timing, decision latency, and slippage. Research runs with
+`closeTradesBeforeWeekend=false` are also ineligible for automation because Friday
+liquidation is a permanent live/demo safety rule.
 
 ## Prevent leakage
 
@@ -224,7 +252,7 @@ rate, loss streak, drawdown, or projected account P/L.
 - Version every strategy change and retain failed experiments.
 - Treat the D1/H4/H1 profile as a separate strategy version; never merge its rows with
   H1/M15/M5 as though the setup detector were unchanged.
-- Treat M15/M5/M1 as its own `m15-m5-m1-research-v3` strategy version as well.
+- Treat M15/M5/M1 as its own `m15-m5-m1-research-v4` strategy version as well.
   Its confirmation and execution-resolution inputs are both M1, but simulation begins
   only after the confirming M1 candle completes; never reuse that completed candle's
   range as post-entry evidence.

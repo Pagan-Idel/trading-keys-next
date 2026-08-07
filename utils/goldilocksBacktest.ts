@@ -5,6 +5,7 @@ import {
 } from "./swingLabeler.ts";
 import {
   annotateConfluenceAt,
+  applyConfirmationTimeframeZoneLifecycle,
   buildGoldilocksHistoryChunked,
   buildGoldilocksLegs,
   buildProtectedStructureTrendTimeline,
@@ -14,8 +15,10 @@ import {
 } from "./goldilocksScanner.ts";
 import {
   createHistoricalZoneTouchState,
+  observeGoldilocksSignalCandle,
   getGoldilocksZoneFormationWindow,
   summarizeConfirmationTimeframeTouches,
+  summarizeZoneTimeframeTouches,
   validateGoldilocksDepartureQuality,
   validateGoldilocksEntryProximity,
   validateGoldilocksZoneApproach,
@@ -931,7 +934,7 @@ export const simulateGoldilocksPair = (
     total: 4,
     percent: 0,
   });
-  const zoneHistory = buildGoldilocksHistoryChunked(
+  let zoneHistory = buildGoldilocksHistoryChunked(
     input.zoneCandles,
     1_000,
     200,
@@ -945,6 +948,13 @@ export const simulateGoldilocksPair = (
   });
   const confirmation = toStrategyCandles(input.confirmationCandles);
   const zoneSignalCandles = toStrategyCandles(input.zoneCandles);
+  zoneHistory = applyConfirmationTimeframeZoneLifecycle(
+    zoneHistory,
+    confirmation,
+    confirmationSeconds,
+    zoneSignalCandles,
+    zoneSeconds,
+  );
   const confirmationHistory = buildGoldilocksHistoryChunked(
     input.confirmationCandles,
     1_000,
@@ -989,26 +999,16 @@ export const simulateGoldilocksPair = (
     invalidatedBeforeArmed: boolean;
   };
   const zoneArmingState = (zone: GoldilocksZone) => {
-    const firstIndex = firstAtOrAfter(zoneSignalCandles, zone.candleTime + 1);
-    for (let index = firstIndex; index < zoneSignalCandles.length; index += 1) {
-      const candle = zoneSignalCandles[index];
-      const broken =
-        zone.side === "demand"
-          ? candle.low < zone.low
-          : candle.high > zone.high;
-      if (broken)
-        return { zoneArmedAt: undefined, invalidatedBeforeArmed: true };
-      const outside =
-        zone.side === "demand"
-          ? candle.low > zone.high
-          : candle.high < zone.low;
-      if (outside)
-        return {
-          zoneArmedAt: candle.time + zoneSeconds,
-          invalidatedBeforeArmed: false,
-        };
-    }
-    return { zoneArmedAt: undefined, invalidatedBeforeArmed: false };
+    const summary = summarizeZoneTimeframeTouches(
+      zone,
+      zoneSignalCandles,
+      zoneSeconds,
+    );
+    return {
+      zoneArmedAt: summary.armedAt,
+      invalidatedBeforeArmed:
+        summary.invalidated && summary.firstOutsideTime === undefined,
+    };
   };
   const pending = zoneHistory.zones
     .filter((zone) => zone.kind === "base")
@@ -1024,7 +1024,7 @@ export const simulateGoldilocksPair = (
     const candle = confirmation[index];
     while (
       pendingIndex < pending.length &&
-      (pending[pendingIndex].availableAt ?? pending[pendingIndex].candleTime) <
+      (pending[pendingIndex].availableAt ?? pending[pendingIndex].candleTime) <=
         candle.time
     ) {
       const zone = pending[pendingIndex++];
@@ -1047,57 +1047,28 @@ export const simulateGoldilocksPair = (
     }
     for (const [zoneId, state] of active) {
       const { zone } = state;
-      const touched = candle.high >= zone.low && candle.low <= zone.high;
-      const eligibleImmediateTouch =
-        input.confirmationMode === "touch-entry" &&
-        state.touch.touchCandleIndex < 0 &&
-        !state.invalidatedBeforeArmed &&
-        state.zoneArmedAt !== undefined &&
-        candle.time >= state.zoneArmedAt &&
-        touched;
       if (
         candle.time > expiresAt(zone.candleTime) ||
-        (zone.invalidatedAt &&
-          candle.time >= zone.invalidatedAt &&
-          !eligibleImmediateTouch)
+        (zone.invalidatedAt && candle.time >= zone.invalidatedAt)
       ) {
         active.delete(zoneId);
         continue;
       }
-      const broken =
-        zone.side === "demand"
-          ? candle.low < zone.low
-          : candle.high > zone.high;
-      if (broken && !eligibleImmediateTouch) {
+      if (state.invalidatedBeforeArmed) {
         active.delete(zoneId);
         continue;
       }
-      if (state.touch.touchCandleIndex < 0) {
-        if (state.invalidatedBeforeArmed) {
-          active.delete(zoneId);
-          continue;
-        }
-        if (
-          state.zoneArmedAt !== undefined &&
-          candle.time >= state.zoneArmedAt &&
-          touched
-        )
-          state.touch.touchCandleIndex = index;
-      }
+      const observation=observeGoldilocksSignalCandle({
+        zone,candles:confirmation,candleIndex:index,armedAt:state.zoneArmedAt,
+        state:state.touch,confirmationMode:input.confirmationMode,
+      });
+      if(observation.invalidated){active.delete(zoneId);continue}
       const pendingTouch =
         state.touch.touchCandleIndex >= 0
           ? confirmation[state.touch.touchCandleIndex]
           : undefined;
-      const immediateTouchEntry =
-        input.confirmationMode === "touch-entry" &&
-        state.touch.touchCandleIndex === index;
-      const confirmed =
-        pendingTouch !== undefined &&
-        (immediateTouchEntry ||
-          (zone.side === "demand"
-            ? candle.close > candle.open && candle.close > pendingTouch.high
-            : candle.close < candle.open && candle.close < pendingTouch.low));
-      if (!confirmed) {
+      const immediateTouchEntry = observation.immediateTouchEntry;
+      if (!observation.confirmed || !pendingTouch) {
         continue;
       }
       const signalEntry = immediateTouchEntry
@@ -1117,13 +1088,11 @@ export const simulateGoldilocksPair = (
           confirmationCloseTime,
           "Weekly market-hours gate blocks entries from Friday 16:00 through Sunday 18:00 America/New_York.",
         );
-        state.touch.touchCandleIndex = -1;
         continue;
       }
       const holidayStatus = getForexHolidayStatusAt(entryDate);
       if (gateSettings.holiday && holidayStatus.blocked) {
         input.onHolidayRejected?.(confirmationCloseTime, holidayStatus.reason);
-        state.touch.touchCandleIndex = -1;
         continue;
       }
       if (
@@ -1134,7 +1103,6 @@ export const simulateGoldilocksPair = (
           confirmationCloseTime,
           "Neither pair currency is inside its DST-aware local trading session at entry eligibility.",
         );
-        state.touch.touchCandleIndex = -1;
         continue;
       }
       const departureQuality = validateGoldilocksDepartureQuality(
@@ -1215,7 +1183,6 @@ export const simulateGoldilocksPair = (
       };
       if (gateSettings.entryNews && !newsGate.allowed) {
         input.onNewsRejected?.(newsGate, confirmationCloseTime);
-        state.touch.touchCandleIndex = -1;
         continue;
       }
       const known = zoneHistory.zones.filter((item) =>
@@ -1241,7 +1208,7 @@ export const simulateGoldilocksPair = (
             maxPenetration: 0,
           },
           timeframes.zone,
-          candle.time,
+          confirmationCloseTime,
           sources,
         );
         const direction = zone.side === "demand" ? "BUY" : "SELL";
@@ -1252,6 +1219,7 @@ export const simulateGoldilocksPair = (
           confirmation,
           state.touch.touchCandleIndex,
           immediateTouchEntry ? Math.max(0, index - 1) : index,
+          { firstOutsideTime: purity.firstOutsideTime },
         );
         const score = scoreGoldilocksSetup({
           zone: scoredZone,
@@ -1345,7 +1313,6 @@ export const simulateGoldilocksPair = (
             );
             executionDirection = reversedExecution.direction;
             if (gateSettings.twoToOneRunway && !executionRunway.allowed) {
-              state.touch.touchCandleIndex = -1;
               continue;
             }
           }
@@ -1369,7 +1336,6 @@ export const simulateGoldilocksPair = (
               confirmationCloseTime,
               executionCoverage.reason,
             );
-            state.touch.touchCandleIndex = -1;
             continue;
           }
           const weekendLiquidationTime =
@@ -1447,9 +1413,11 @@ export const simulateGoldilocksPair = (
               }
             : null;
           if (result) candidates.push(result);
+          // Live persists EXECUTED as terminal. A base can produce at most one
+          // fully qualified strategy candidate, regardless of outcome duration.
+          active.delete(zoneId);
         }
       }
-      state.touch.touchCandleIndex = -1;
     }
   }
   candidates.sort(

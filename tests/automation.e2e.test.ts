@@ -41,7 +41,7 @@ test('multi-worker automation adopts approved configuration only across a stoppe
     await waitFor(()=>fs.existsSync(resultsDirectory)&&fs.readdirSync(resultsDirectory).length===pairs.length);
     const first=pairs.map(pair=>JSON.parse(fs.readFileSync(path.join(resultsDirectory,`${pair.replace('/','_')}.json`),'utf8')));
     assert.deepEqual(first.map(row=>row.pair).sort(),[...pairs].sort());
-    assert.ok(first.every(row=>row.sourceRunUid==='built-in'&&row.archiveRows===3&&row.confirmations===1));
+    assert.ok(first.every(row=>row.sourceRunUid==='built-in'&&row.archiveRows===17&&row.confirmations===1));
     assert.equal(new Set(first.map(row=>row.order.id)).size,pairs.length);
     assert.ok(first.every(row=>row.order.mode==='demo'&&row.order.transport==='fixture'));
 

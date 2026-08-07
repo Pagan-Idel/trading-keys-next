@@ -1,5 +1,5 @@
 import type {BacktestRunConfig} from './backtestStore.ts';
-import {getBacktestDashboard} from './backtestStore.ts';
+import {getBacktestRunUid} from './backtestStore.ts';
 import {getBestAutoResearchResult} from './autoResearchStore.ts';
 import {applyAutomationStrategy,getAppliedAutomationStrategy} from './automationStore.ts';
 import {getAutomationCompatibility} from './automationStrategyCompatibility.ts';
@@ -42,17 +42,12 @@ export const restartPiWithApprovedStrategy=async(input:{
   return {status:'activated' as const,activeRunUid};
 };
 
-const leaderRunUid=(backtestRunId:string)=>{
-  const dashboard=getBacktestDashboard(backtestRunId) as any;
-  return dashboard.runs?.find((run:any)=>run.id===backtestRunId)?.runUid as string|undefined;
-};
-
 export const autoPromoteResearchLeaderToPi=async()=>{
   const leader=getBestAutoResearchResult();
   if(!leader)return {status:'no-eligible-leader' as const};
   const compatibility=getAutomationCompatibility(leader.config);
   if(!compatibility.compatible)return {status:'incompatible' as const,blockers:compatibility.blockers};
-  const runUid=leaderRunUid(leader.backtestRunId);
+  const runUid=getBacktestRunUid(leader.backtestRunId);
   if(!runUid)throw new Error('The research leader has no immutable run ID.');
   const baseUrl=process.env.PI_PULSE_URL??'http://127.0.0.1:4080';
   const token=process.env.PI_PULSE_CONTROL_TOKEN??process.env.PULSE_CONTROL_TOKEN;

@@ -4,7 +4,7 @@ import { isRiskProfile } from '../../../utils/dynamicRisk';
 import { getAutomationRuntime } from '../../../utils/automationProcessManager';
 import { getLatestAutomationRecommendation } from '../../../utils/automationStrategyPromotion';
 import { getBestAutoResearchResult } from '../../../utils/autoResearchStore';
-import { getBacktestDashboard } from '../../../utils/backtestStore';
+import { getBacktestRunUid } from '../../../utils/backtestStore';
 import { getAutomationCompatibility } from '../../../utils/automationStrategyCompatibility';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -51,9 +51,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if(!leader)return res.status(409).json({error:'No all-time research leader is available.'});
         const compatibility=getAutomationCompatibility(leader.config);
         if(!compatibility.compatible)return res.status(409).json({error:compatibility.blockers.join(' ')});
-        const run=(getBacktestDashboard(leader.backtestRunId) as any).runs?.find((item:any)=>item.id===leader.backtestRunId);
-        if(!run?.runUid)return res.status(409).json({error:'The all-time leader has no immutable public run ID.'});
-        applyAutomationStrategy(run.runUid,leader.config);
+        const runUid=getBacktestRunUid(leader.backtestRunId);
+        if(!runUid)return res.status(409).json({error:'The all-time leader has no immutable public run ID.'});
+        applyAutomationStrategy(runUid,leader.config);
       }else if(req.body?.action==='move-to-latest'){
         const runtime=getAutomationRuntime(),dashboard=getAutomationDashboard(20);
         if(runtime.running)return res.status(409).json({error:'Stop automation before changing its strategy configuration.'});

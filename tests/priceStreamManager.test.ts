@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { consumePricingChunk } from '../utils/oanda/api/priceStreamManager.ts';
+import { appendBoundedStreamQuote, consumePricingChunk } from '../utils/oanda/api/priceStreamManager.ts';
 
 test('OANDA stream parser preserves JSON split across network chunks', () => {
   const state = { decoder: new TextDecoder(), carry: '' };
@@ -28,4 +28,14 @@ test('OANDA stream parser handles multiple JSON lines in one chunk', () => {
     message => messages.push(message),
   );
   assert.deepEqual(messages.map(message => message.time), ['a', 'b']);
+});
+
+test('stream quote history retains every sampled quote across a busy scan boundary',()=>{
+  const history=[] as Parameters<typeof appendBoundedStreamQuote>[0];
+  for(let index=1;index<=4;index+=1)appendBoundedStreamQuote(history,{
+    bid:String(index),ask:String(index+0.1),oandaTime:`2026-08-06T01:00:0${index}Z`,
+    receivedAt:index,tradeable:true,source:'stream',
+  },3);
+  assert.deepEqual(history.map(quote=>quote.receivedAt),[2,3,4]);
+  assert.equal(history.some(quote=>Number(quote.ask)===3.1),true);
 });

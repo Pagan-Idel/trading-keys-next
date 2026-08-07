@@ -808,6 +808,14 @@ export const getBacktestLeaderboard = () => {
     metricsJson: undefined,
   }));
 };
+export const getBacktestRunUid = (runId: string) => {
+  const row = database()
+    .prepare(
+      "SELECT run_uid AS runUid FROM backtest_runs WHERE id=? OR UPPER(run_uid)=UPPER(?) LIMIT 1",
+    )
+    .get(runId, runId) as { runUid?: string } | undefined;
+  return row?.runUid;
+};
 export const getBacktestDashboard = (runId?: string) => {
   const d = database();
   const runs = d

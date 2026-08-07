@@ -1,4 +1,4 @@
-export const GOLDILOCKS_STRATEGY_VERSION = "0.49";
+export const GOLDILOCKS_STRATEGY_VERSION = "0.51";
 
 export const GOLDILOCKS_RESEARCH_VERSION = "goldilocks-auto-research-v1";
 
@@ -13,7 +13,7 @@ export const GOLDILOCKS_CONFIRMATION_MODES = {
     id: "touch-entry",
     label: "Immediate first-touch entry",
     description:
-      "Model a resting entry at the zone proximal edge as soon as the first eligible candle touches it.",
+      "Backtests model a proximal-edge fill; automation reacts to the first fresh executable streamed quote that reaches that boundary and then runs final order gates.",
   },
 } as const;
 
@@ -48,7 +48,7 @@ export const GOLDILOCKS_TIMEFRAME_PROFILES = {
   lowerTimeframe: {
     id: "lowerTimeframe",
     label: "M15 / M5 / M1",
-    strategyVersion: "m15-m5-m1-research-v3",
+    strategyVersion: "m15-m5-m1-research-v4",
     trend: "M15",
     zone: "M5",
     confirmation: "M1",
@@ -72,7 +72,7 @@ export const GOLDILOCKS_TIMEFRAME_PROFILES = {
   higherTimeframe: {
     id: "higherTimeframe",
     label: "D1 / H4 / H1",
-    strategyVersion: "d1-h4-h1-research-v3",
+    strategyVersion: "d1-h4-h1-research-v4",
     trend: "D",
     zone: "H4",
     confirmation: "H1",
@@ -89,7 +89,7 @@ export const GOLDILOCKS_CHART_STACKS = {
   lowerTimeframe: {
     id: "lowerTimeframe",
     label: "M1 / M5 / M15",
-    strategyVersion: "m15-m5-m1-research-v3",
+    strategyVersion: "m15-m5-m1-research-v4",
     confirmation: "M1",
     zone: "M5",
     trend: "M15",
@@ -121,7 +121,7 @@ export const GOLDILOCKS_CHART_STACKS = {
   multiDay: {
     id: "multiDay",
     label: "H1 / H4 / D1",
-    strategyVersion: "d1-h4-h1-research-v3",
+    strategyVersion: "d1-h4-h1-research-v4",
     confirmation: "H1",
     zone: "H4",
     trend: "D",
@@ -160,6 +160,9 @@ export const getGoldilocksTimeframeProfile = (value: unknown) =>
   ];
 
 export const GOLDILOCKS_DEPARTURE_QUALITY = {
+  minimumBodyFraction: 0.5,
+  minimumBodyAtrMultiple: 0.25,
+  minimumClosePenetrationAtrMultiple: 0.25,
   shockRangeAtrMultiple: 3,
   rejectionWickFraction: 0.5,
   minimumShockCloseDepartureZoneMultiple: 1,
@@ -211,15 +214,15 @@ export const GOLDILOCKS_TIMEFRAME_SECONDS: Record<string, number> = {
   D: 24 * 60 * 60,
 };
 
-// Pi-friendly live/demo working sets. The disk archive is retained separately
-// and can be consumed in full by an explicit backtest job.
+// Live/demo archive floors. These cover the complete retention horizon plus
+// detector warm-up; strategy decisions must not be made from a shorter UI tail.
 export const GOLDILOCKS_LIVE_CANDLE_LIMITS: Record<string, number> = {
-  M1: 10_000,
-  M5: 5_000,
-  M15: 5_000,
-  H1: 5_000,
+  M1: 50_000,
+  M5: 15_000,
+  M15: 11_000,
+  H1: 9_000,
   H4: 5_000,
-  D: 5_000,
+  D: 1_000,
 };
 
 export const GOLDILOCKS_SCORE_WEIGHTS = {

@@ -825,6 +825,11 @@ range as an `OANDA_NO_PRINT` interval. It then commits the real candles without 
 OHLC values and excludes that exact interval from later repair requests. Failed,
 unconfirmed, or unbounded gaps remain fail-closed.
 Zone state, open trades, and pricing-stream state never stop this archive synchronization.
+Pair collectors use a deterministic bounded start offset so enabled pairs do not issue
+REST reads on the same five-minute boundary. A pair synchronizes its required timeframes
+sequentially rather than as a burst. An internally generated OANDA read timeout receives
+one jittered retry; a second timeout still fails closed and external shutdown aborts are
+never retried. No failed read advances archive coverage or creates candle data.
 
 Normal scans read their bounded working sets from SQLite and do not invoke independent
 full-history loaders. The archive primary key deduplicates pair/timeframe timestamps.

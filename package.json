@@ -44,6 +44,7 @@
     "test:automation:integration": "tsx --test tests/automationControl.integration.test.ts tests/switchToLatest.integration.test.ts",
     "test:automation:e2e": "tsx --test tests/automation.e2e.test.ts",
     "validate:automation": "npm run test:automation && npm run test:automation:integration && npm run test:automation:e2e && npm run test:strategy && tsc --noEmit && npm run build:threads",
+    "validate:pi:local": "npm run validate:automation && npm run build:pi-runtime",
     "benchmark:automation": "tsx scripts/benchmarkAutomation.ts",
     "test:deployment:docker": "docker run --rm -v \"%cd%:/repo:ro\" alpine:3.20 sh -lc \"apk add --no-cache bash shellcheck git shadow util-linux nodejs >/dev/null && bash -n /repo/pi/deploy.sh /repo/pi/verify-deployment.sh /repo/tests/deploymentScripts.test.sh && shellcheck /repo/pi/deploy.sh /repo/pi/verify-deployment.sh /repo/tests/deploymentScripts.test.sh && useradd -m tradingkeys && bash /repo/tests/deploymentScripts.test.sh /repo\"",
     "build:pi-runtime": "node scripts/buildPiRuntime.mjs",

@@ -44,7 +44,7 @@ export PATH="$BIN:$PATH"
 export TRADING_KEYS_DEPLOY_TEST_MODE=true
 export TRADING_KEYS_DEPLOY_ROOT="$ROOT"
 export TRADING_KEYS_DEPLOY_REMOTE="$ORIGIN"
-export TRADING_KEYS_DEPLOY_VALIDATION_COMMAND='mkdir -p artifacts/pi-runtime && touch artifacts/pi-runtime/controlServer.mjs artifacts/pi-runtime/candleCollectorWorker.mjs && cp pi/automation-pulse-control.service artifacts/pi-runtime/'
+export TRADING_KEYS_DEPLOY_VALIDATION_COMMAND="mkdir -p artifacts/pi-runtime && touch artifacts/pi-runtime/controlServer.mjs artifacts/pi-runtime/candleCollectorWorker.mjs && cp pi/automation-pulse-control.service artifacts/pi-runtime/ && echo validated >> '$ROOT/data/validation-runs'"
 export TRADING_KEYS_DEPLOY_SYSTEMCTL="$BIN/systemctl"
 export TRADING_KEYS_DEPLOY_UNIT_TARGET="$ROOT/systemd/automation-pulse-control.service"
 export TRADING_KEYS_VERIFY_URL=http://fixture.invalid/status
@@ -72,11 +72,14 @@ echo preserved > "$ROOT-data-seed"
 run_deploy
 test ! -e "$ROOT/app"
 test -d "$ROOT/data"
+test "$(wc -l < "$ROOT/data/validation-runs")" -eq 1
 echo runtime-data > "$ROOT/data/preserved.txt"
 printf '%s\n' '{"desiredState":"running","revision":7}' > "$ROOT/data/automation-desired-state.json"
 
 run_deploy --promote
 test -L "$ROOT/app"
+test "$(wc -l < "$ROOT/data/validation-runs")" -eq 1
+grep -q 'Reusing validated candidate:' "$DEPLOY_LOG"
 test "$(cat "$ROOT/data/preserved.txt")" = runtime-data
 grep -q '"desiredState":"running"' "$ROOT/data/automation-desired-state.json"
 grep -q 'KillMode=control-group' "$TRADING_KEYS_DEPLOY_UNIT_TARGET"

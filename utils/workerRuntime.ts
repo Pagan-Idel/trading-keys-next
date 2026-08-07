@@ -16,6 +16,16 @@ export const workerScanJitterMs=(pair:string,maximumMs=1_500)=>{
   return hash%(limit+1);
 };
 
+// Candle collectors are separate processes. A wider deterministic window prevents
+// every pair from hitting OANDA on the same five-minute boundary.
+export const candleCollectorJitterMs=(pair:string,maximumMs=15_000)=>workerScanJitterMs(`candles:${pair}`,maximumMs);
+
+export const runSequentially=async<T,R>(values:readonly T[],work:(value:T)=>Promise<R>)=>{
+  const results:R[]=[];
+  for(const value of values)results.push(await work(value));
+  return results;
+};
+
 export type WorkerStatusSnapshot={
   state:string;step:string;message:string|null;mode:string;pid:number|null;updatedAt:string;
 };

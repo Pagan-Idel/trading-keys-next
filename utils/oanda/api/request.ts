@@ -77,10 +77,16 @@ export const oandaReadRequest=async(options:OandaReadOptions):Promise<Response>=
     }catch(error){
       if(error instanceof OandaReadError)throw error;
       const aborted=Boolean(options.signal?.aborted),timeout=!aborted&&controller.signal.aborted;
+      const retry=timeout&&attempt===1;
       const diagnostic:OandaReadDiagnostic={operation:options.operation,endpointTemplate:options.endpointTemplate,mode:options.mode,
-        method:'GET',attempt,pid:process.pid,pair:options.pair,credentialSources:sources,retryScheduled:false,retrySucceeded:false,
-        retryExhausted:false,timeout,abort:aborted};
+        method:'GET',attempt,pid:process.pid,pair:options.pair,credentialSources:sources,retryScheduled:retry,retrySucceeded:false,
+        retryExhausted:timeout&&attempt===2,timeout,abort:aborted};
       emit(diagnostic,deps.diagnostic);
+      if(retry){
+        const jitter=Math.round(min+Math.min(1,Math.max(0,random()))*(max-min));
+        await sleep(jitter,options.signal??new AbortController().signal);
+        continue;
+      }
       throw new OandaReadError(`OANDA ${options.operation} ${aborted?'aborted':timeout?'timed out':'failed'}.`,diagnostic);
     }finally{clearTimeout(timer);options.signal?.removeEventListener('abort',onAbort)}
   }

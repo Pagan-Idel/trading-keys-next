@@ -3,7 +3,7 @@ import { getGoldilocksTimeframeProfile,GOLDILOCKS_LIVE_CANDLE_LIMITS } from '../
 import { getAppliedAutomationStrategy } from '../utils/automationStore.ts';
 import { pruneArchivedCandles } from '../utils/candleArchive.ts';
 import { logMessage } from '../utils/automationLogger.ts';
-import { workerScanJitterMs } from '../utils/workerRuntime.ts';
+import { candleCollectorJitterMs, runSequentially } from '../utils/workerRuntime.ts';
 import { isExpectedCollectorShutdown } from '../utils/candleCollectorRuntime.ts';
 
 const pair=process.argv[2]??'',mode: 'live'|'demo'=process.argv.some(value=>value==='--mode=live')?'live':'demo';
@@ -15,13 +15,16 @@ const collectors=timeframes.map(timeframe=>new ContinuousCandleCollector({pair,t
 const stop=()=>{stopped=true;controller.abort(new DOMException('Collector shutting down','AbortError'))};
 process.once('SIGINT',stop);process.once('SIGTERM',stop);
 const wait=(milliseconds:number)=>new Promise<void>(resolve=>{const timer=setTimeout(resolve,milliseconds);controller.signal.addEventListener('abort',()=>{clearTimeout(timer);resolve()},{once:true})});
-const nextCloseDelay=()=>{const interval=5*60_000;return (Math.floor(Date.now()/interval)+1)*interval-Date.now()+350+workerScanJitterMs(pair)};
+const synchronizeCollectors=(method:'bootstrap'|'synchronize')=>runSequentially(collectors,collector=>collector[method](controller.signal));
+const nextCloseDelay=()=>{const interval=5*60_000;return (Math.floor(Date.now()/interval)+1)*interval-Date.now()+350+candleCollectorJitterMs(pair)};
 const run=async()=>{
   if(!pair)throw new Error('No pair was provided to the candle collector.');
-  await Promise.all(collectors.map(collector=>collector.bootstrap(controller.signal)));
+  await wait(candleCollectorJitterMs(pair));
+  if(stopped)return;
+  await synchronizeCollectors('bootstrap');
   while(!stopped){
     try{
-      const results=await Promise.all(collectors.map(collector=>collector.synchronize(controller.signal)));
+      const results=await synchronizeCollectors('synchronize');
       const gaps=results.filter(result=>result.gapDetected);
       for(const result of results)if(result.noPrintRecorded)logMessage(`CANDLE NO-PRINT | ${pair} | ${result.key.timeframe} | broker-confirmed interval retained without synthetic OHLC.`,result.noPrintRecorded,
         {pair,level:'warn',fileName:'candleCollector',step:'candle_no_print_recorded'});

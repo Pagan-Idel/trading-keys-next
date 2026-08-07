@@ -38,19 +38,42 @@ COMMIT="$(git_source rev-parse origin/main)"
 SHORT="${COMMIT:0:12}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RELEASE="$RELEASES/$STAMP-$SHORT"
+RELEASE_APP=""
 
-install -d -o tradingkeys -g tradingkeys "$RELEASE"
-git_source archive "$COMMIT" | tar -x -C "$RELEASE"
-rm -rf -- "$RELEASE/artifacts"
-install -d -o tradingkeys -g tradingkeys "$RELEASE/runtime"
-ln -s "$DATA" "$RELEASE/data"
-chown -R tradingkeys:tradingkeys "$RELEASE"
+if $PROMOTE; then
+  # Reuse the newest candidate that was fully validated for this exact commit.
+  # This keeps candidate and promotion byte-for-byte identical and avoids a
+  # second npm install, test run, and runtime build on the Pi.
+  for marker in "$RELEASES"/*-"$SHORT"/VALIDATED_CANDIDATE; do
+    [[ -f "$marker" ]] || continue
+    [[ "$(cat "$marker")" == "$COMMIT" ]] || continue
+    candidate_release="${marker%/VALIDATED_CANDIDATE}"
+    candidate_app="$candidate_release/artifacts/pi-runtime"
+    [[ -f "$candidate_app/controlServer.mjs" ]] || continue
+    [[ -f "$candidate_app/DEPLOYED_COMMIT" ]] || continue
+    [[ "$(cat "$candidate_app/DEPLOYED_COMMIT")" == "$COMMIT" ]] || continue
+    RELEASE="$candidate_release"
+    RELEASE_APP="$candidate_app"
+  done
+fi
 
-runuser -u tradingkeys -- bash -lc "cd '$RELEASE' && TRADING_KEYS_PI_RUNTIME=true $VALIDATION_COMMAND"
-RELEASE_APP="$RELEASE/artifacts/pi-runtime"
-[[ -f "$RELEASE_APP/controlServer.mjs" ]] || { echo "Validated build did not produce the Pi runtime."; exit 1; }
-ln -s "$DATA" "$RELEASE_APP/data"
-printf '%s\n' "$COMMIT" > "$RELEASE_APP/DEPLOYED_COMMIT"
+if [[ -n "$RELEASE_APP" ]]; then
+  echo "Reusing validated candidate: $RELEASE_APP"
+else
+  install -d -o tradingkeys -g tradingkeys "$RELEASE"
+  git_source archive "$COMMIT" | tar -x -C "$RELEASE"
+  rm -rf -- "$RELEASE/artifacts"
+  install -d -o tradingkeys -g tradingkeys "$RELEASE/runtime"
+  ln -s "$DATA" "$RELEASE/data"
+  chown -R tradingkeys:tradingkeys "$RELEASE"
+
+  runuser -u tradingkeys -- bash -lc "cd '$RELEASE' && TRADING_KEYS_PI_RUNTIME=true $VALIDATION_COMMAND"
+  RELEASE_APP="$RELEASE/artifacts/pi-runtime"
+  [[ -f "$RELEASE_APP/controlServer.mjs" ]] || { echo "Validated build did not produce the Pi runtime."; exit 1; }
+  ln -s "$DATA" "$RELEASE_APP/data"
+  printf '%s\n' "$COMMIT" > "$RELEASE_APP/DEPLOYED_COMMIT"
+  printf '%s\n' "$COMMIT" > "$RELEASE/VALIDATED_CANDIDATE"
+fi
 
 if ! $PROMOTE; then
   echo "Validated candidate: $RELEASE_APP"

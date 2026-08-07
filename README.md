@@ -109,6 +109,13 @@ data for optimization or model training.
 
 ## Raspberry Pi deployment
 
+Run the Pi-equivalent automation, strategy/chart, type, and runtime-build checks locally
+before using the slower hardware deployment path:
+
+```powershell
+npm run validate:pi:local
+```
+
 From a clean, fully pushed `main` branch, deploy and verify the Pi with one command:
 
 ```powershell
@@ -116,8 +123,9 @@ npm run deploy:pi
 ```
 
 To build and validate a candidate without switching the active release or restarting
-demo automation, run `npm run deploy:pi:candidate`. The promotion command performs an
-atomic release switch, authenticated health verification, and automatic rollback if
+demo automation, run `npm run deploy:pi:candidate`. Promotion reuses that exact
+commit-matched candidate, avoiding a second Pi install/test/build cycle, then performs
+an atomic release switch, authenticated health verification, and automatic rollback if
 the new runtime does not recover safely.
 
 Use a 64-bit Raspberry Pi OS, Node.js 20+, and production builds. Run the web server
